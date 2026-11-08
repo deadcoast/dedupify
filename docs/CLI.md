@@ -230,8 +230,9 @@ Video groups follow, numbered on:
    near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  d  0 p  0  q   2  tmk    -  mirror
    near  a_small.mp4        320×180   0:20   h264  95.3 KB  d  1 p  2  q   8  tmk 1.00
    near  a_trim4.mp4        640×360   0:16   h264  2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
+   near  a_sd_bars.mp4      480×360   0:20   h264  1.90 MB  d  8 p  8  q  74  tmk 1.00  bars
  ───────────────────────────────────────────────────────────────
- 1 video group   3 similar   6.14 MB reclaimable
+ 1 video group   4 similar   8.04 MB reclaimable
    keep: longest, then most pixels   tmk ≥0.8 groups, ≥0.9 bins, or frames q ≤31
 ```
 
@@ -239,8 +240,13 @@ Video groups follow, numbered on:
 the duration; `tmk` is the TMK level-2 score, `-` when the mean features
 disagree so strongly that the offset search is skipped (a mirror, or
 different content — the frames carry those); `trim` marks a duration more
-than 2 % off the keeper's. A `tmk` between 0.8 and 0.9 is lit in the
-warning colour: grouped, not binned. The two DECODE and
+than 2 % off the keeper's; `bars` marks a file with black bars around the
+picture (pillarbox or letterbox) when the keeper has none, or the
+reverse — the frames were compared inside the bars, which is why the
+dimensions in the two columns need not agree; the keeper's "most pixels"
+counts the picture inside the bars, and at a tie the file without bars
+stays. A `tmk` between 0.8 and
+0.9 is lit in the warning colour: grouped, not binned. The two DECODE and
 MATCH stage lines report images hashed, undecodable, flat-and-skipped,
 similar pairs and images grouped.
 

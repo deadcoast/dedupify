@@ -194,15 +194,40 @@ against pixel-domain transforms of the 64×64 buffer. The documentation's
 recommended threshold is ≤ 31 and its quality cutoff ≤ 49
 ([README](https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md)).
 
-Two departures from the reference, both measured:
+**Conformance (Phase 7).** The port is bit-identical to the reference.
+`examples/pdq_ref.rs` hashes the eight regression images Meta ships
+(`pdq/data/reg-test-input/dih`) and compares with the hashes the
+reference `pdq-photo-hasher` recorded in `cpp/reg_test/expected/out`.
+Two things had to be matched first: the text layout — the reference
+prints sixteen 16-bit words, last DCT row first, column j at bit j — and
+the reference *tool's* input, which is not the full image: before luma
+it squashes any picture with a side over 512 to 512×512 by nearest
+neighbour (CImg `resize(512, 512, 1, 3, 1)`, source index ⌊x·W/512⌋).
+Given that input, all eight hashes agree in all 256 bits, with both JPEG
+decoders tried (`zune-jpeg` and libjpeg via PIL), and our seven DCT-domain
+orientation variants land on the reference's eight dihedral hashes at
+0 bits. (The reference C++ could not be built in the environment — its
+`make` was refused — so the comparison is against the recorded outputs,
+which is what the reference's own regression test compares against.)
 
-- The Jarosz filter runs on the integer-box-prefiltered luma that the grid
-  path already produces (short side 576–1151 px), not the full image. A
-  24-megapixel file would otherwise need two 96 MB float buffers per
-  concurrent decode. Hashes are therefore not bit-identical to the
-  reference tool's; `dedupe` only ever compares its own hashes. (The
-  Python wrapper of the reference could not be installed in the build
-  environment, so bit-level agreement was not measured either way.)
+Two departures from the reference *tool* in what the algorithm is fed,
+both measured:
+
+- The hash runs on the integer-box-prefiltered luma that the grid path
+  already produces (short side 576–1151 px), not on the tool's 512
+  nearest-neighbour squash and not on the full image (a 24-megapixel file
+  would need two 96 MB float buffers per concurrent decode). Nearest-
+  neighbour decimation aliases, and it shows: on real photographs the
+  tool's input keeps 91.7 % of half-size copies, 88.3 % of quarter-size,
+  95 % of 90° rotations and 93.3 % of mirrors within 31 bits, where the
+  prefiltered input keeps 98.3 %, 98.3 %, 100 % and 100 % (the one miss
+  is a synthetic ramp); the procedural corpus agrees in direction
+  (VERIFICATION.md, Phase 7). The prefiltered hashes land 2–8 bits from
+  the tool's on the regression images — inside the threshold, so a hash
+  published by the reference tool still matches ours. `perceptual::
+  PDQ_PREP` selects the preparation; `PdqPrep::Tool` reproduces the tool
+  exactly and is what the conformance check and the measurement harness
+  use.
 - Inputs with a short side under 384 px are Lanczos-upscaled by an integer
   factor first. Below 128 px the reference window is 1 — no filtering —
   and centre sampling lands up to half a cell off. On the corpus this took
@@ -536,6 +561,72 @@ docs/VERIFICATION.md):
 Cost: 2.2 ms per 15-fps frame end to end, of which ffmpeg's decode and
 scale are ~88 %; the per-frame hashing is ~0.3 ms. A two-hour file is about
 four minutes of one ffmpeg process.
+
+### 3.3 Conformance with the reference — Phase 7
+
+`examples/tmk_ref.rs` parses the `.tmk` files Meta ships for its fifteen
+sample videos (`tmk/sample-hashes`, produced by the reference
+`tmk-hash-video`; layout from `io/tmkiotypes.h`: three 4-byte magics,
+five `int`s, the periods, the coefficients, the pure average, then
+cos[period][coefficient] and sin[period][coefficient], all little-endian
+`float`) and scores them against our descriptor of the same files.
+
+- Fed the reference tool's frames (ffmpeg `-s 64:64 -pix_fmt rgb24 -r 15`,
+  Rec. 601 luma, the 64×64 straight to the DCT as `pdqFloat256FromFloatLuma`
+  does when the input is already 64×64), our descriptor matches every
+  reference file element for element to within 6.1·10⁻⁵ (the files store
+  `float`), frame counts equal, level 1 and level 2 = 1.0000.
+- Fed our shipped frames (288-px area-scaled grey → Jarosz → 64), the same
+  video scores level 2 0.982–0.9999 against its reference file, and the
+  level-2 pair scores between videos sit within 0.013 of the scores the
+  reference files give each other across the fifteen related and
+  unrelated pairs tried. The frame paths differ (ours filters before decimating; the
+  tool's `-s 64:64` is bicubic), and the frame counts by one or two
+  (`fps=15` against `-r 15`); the descriptor is the same.
+
+### 3.4 Black bars — Phase 7 **[CLAUDE]**
+
+Meta's sample set has the same clip exported with and without pillarbox
+bars (`chair-orig-22-sd-bar`, 480×720 with 32 px black pillars, against
+`chair-orig-22-hd-no-bar`, 720×1280). The reference's own hashes score
+that pair at level 2 0.738 — over the README's 0.7 by a little, under
+our 0.8 (set where the synthetic negatives stopped, §3.2) — and the
+positional tier is worse off, since a bar shifts every frame's content. TMK does not see past bars (§3.1: letterboxing
+is one of its weak cases — the frame feature is the DCT of the whole
+frame, bars included); the field answer is to find the bars first
+(czkawka's video matcher has a crop-detect option; ffmpeg ships
+`cropdetect`).
+
+Before the frame pass, one ffmpeg pass over the keyframes alone
+(`-skip_frame nokey`, so no inter-frame decoding) runs
+`cropdetect=limit=24:round=2:reset=0:skip=0` and the last `crop=W:H:X:Y`
+it prints — with `reset=0` the box only grows, so it is the union over
+every keyframe — becomes the picture. Two guards: bars thinner than 2 %
+of a side are ignored (an encoder's edge, not a bar), and a box smaller
+than a quarter of a side is a dark video, not a picture in bars, and
+nothing is cropped. The frame pass then inserts `crop=W:H:X:Y` before the
+scale, so the hashes see the picture at full resolution; the file's own
+dimensions stay in the listing and a `bars` mark on the line says the
+frames were compared inside them. Limit 24/255 is ffmpeg's default:
+limited-range black is 16 and compression noise on a bar stays well
+under 24. Non-black bars (white, blurred-copy "ambient" bars) are not
+detected; the same file's dims are what the listing shows regardless.
+
+The video keeper order counts the picture's pixels, not the file's —
+inside the bars when there are any — and at equal pictures keeps the
+file without bars: a padded export is a packaging of the picture it was
+padded from, and under "most pixels" of the file it would have taken the
+keeper seat (the fixture's 800×360 pillarboxed copy outranked its
+640×360 source until this was changed). The footer still reads
+`keep: longest, then most pixels`; the pixels are the picture's.
+
+Measured on the sample set (VERIFICATION.md, Phase 7): the bar pair
+scores level 2 1.00 and joins the group; the `pattern` family with bars
+moves from 0.74–0.80 to 0.86–0.94 against its keeper; the two groups
+that were one clip become one group. On the real AVI set, which has no
+bars, nothing changes. The pass costs 15 % of the frame stage on h264
+clips with keyframes every few seconds, and 32 % on all-intra AVI, where
+every frame is a keyframe.
 
 Audio fingerprinting (Chromaprint) is out of scope.
 

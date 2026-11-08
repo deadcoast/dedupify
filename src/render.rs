@@ -777,71 +777,80 @@ impl Renderer {
                 painted: format!("{painted}  {}", t.paint(Role::Dupe, &date)),
             }
         };
-        let member_tail = |m: &crate::video::VideoMember, keeper_dur: f64| -> Tail {
-            let (mut plain, mut painted) = meta_cols(m);
-            let r = m.relation.unwrap();
-            match r.pos {
-                Some((d, p, q)) => {
-                    let over = d > DHASH_MAX || p > PHASH_MAX;
-                    let dp = format!("d {d:>2} p {p:>2}");
-                    let qq = format!("q {q:>3}");
-                    plain.push_str(&format!("  {dp}  {qq}"));
-                    painted.push_str(&format!(
-                        "  {}  {}",
-                        t.paint(if over { Role::Warn } else { Role::Dupe }, &dp),
-                        t.paint(if q > PDQ_MAX { Role::Warn } else { Role::Dupe }, &qq)
-                    ));
+        let member_tail =
+            |m: &crate::video::VideoMember, keeper: &crate::video::VideoMember| -> Tail {
+                let keeper_dur = keeper.hashed.sig.meta.duration;
+                let keeper_bars = keeper.hashed.sig.bars.is_some();
+                let (mut plain, mut painted) = meta_cols(m);
+                let r = m.relation.unwrap();
+                match r.pos {
+                    Some((d, p, q)) => {
+                        let over = d > DHASH_MAX || p > PHASH_MAX;
+                        let dp = format!("d {d:>2} p {p:>2}");
+                        let qq = format!("q {q:>3}");
+                        plain.push_str(&format!("  {dp}  {qq}"));
+                        painted.push_str(&format!(
+                            "  {}  {}",
+                            t.paint(if over { Role::Warn } else { Role::Dupe }, &dp),
+                            t.paint(if q > PDQ_MAX { Role::Warn } else { Role::Dupe }, &qq)
+                        ));
+                    }
+                    None => {
+                        let txt = "frames     -";
+                        plain.push_str(&format!("  {txt}"));
+                        painted.push_str(&format!("  {}", t.paint(Role::Dupe, txt)));
+                    }
                 }
-                None => {
-                    let txt = "frames     -";
+                // level 2 is only computed when the mean features agree (level 1);
+                // a mirror or different content shows "-" and the frames carry it
+                let tmk = if r.level1 >= crate::video::LEVEL1_MIN {
+                    format!("tmk {:.2}", r.level2)
+                } else {
+                    "tmk    -".to_string()
+                };
+                let tmk_role = if r.level2 >= LEVEL2_MIN && r.level2 < LEVEL2_CONFIRM {
+                    Role::Warn
+                } else {
+                    Role::Dupe
+                };
+                plain.push_str(&format!("  {tmk}"));
+                painted.push_str(&format!("  {}", t.paint(tmk_role, &tmk)));
+                let label = r.variant.label();
+                if !label.is_empty() && r.positional_ok() {
+                    plain.push_str(&format!("  {label}"));
+                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, label)));
+                }
+                let dur = m.hashed.sig.meta.duration;
+                if keeper_dur > 0.0 && (dur - keeper_dur).abs() / keeper_dur > 0.02 {
+                    plain.push_str("  trim");
+                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, "trim")));
+                }
+                // one side carries black bars the other does not: the frames
+                // were compared inside them, which is why the sizes differ
+                if m.hashed.sig.bars.is_some() != keeper_bars {
+                    plain.push_str("  bars");
+                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, "bars")));
+                }
+                if let Some(eg) = m.hashed.rep.exact_group {
+                    let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
                     plain.push_str(&format!("  {txt}"));
-                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, txt)));
+                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, &txt)));
                 }
-            }
-            // level 2 is only computed when the mean features agree (level 1);
-            // a mirror or different content shows "-" and the frames carry it
-            let tmk = if r.level1 >= crate::video::LEVEL1_MIN {
-                format!("tmk {:.2}", r.level2)
-            } else {
-                "tmk    -".to_string()
+                Tail { plain, painted }
             };
-            let tmk_role = if r.level2 >= LEVEL2_MIN && r.level2 < LEVEL2_CONFIRM {
-                Role::Warn
-            } else {
-                Role::Dupe
-            };
-            plain.push_str(&format!("  {tmk}"));
-            painted.push_str(&format!("  {}", t.paint(tmk_role, &tmk)));
-            let label = r.variant.label();
-            if !label.is_empty() && r.positional_ok() {
-                plain.push_str(&format!("  {label}"));
-                painted.push_str(&format!("  {}", t.paint(Role::Dupe, label)));
-            }
-            let dur = m.hashed.sig.meta.duration;
-            if keeper_dur > 0.0 && (dur - keeper_dur).abs() / keeper_dur > 0.02 {
-                plain.push_str("  trim");
-                painted.push_str(&format!("  {}", t.paint(Role::Dupe, "trim")));
-            }
-            if let Some(eg) = m.hashed.rep.exact_group {
-                let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
-                plain.push_str(&format!("  {txt}"));
-                painted.push_str(&format!("  {}", t.paint(Role::Dupe, &txt)));
-            }
-            Tail { plain, painted }
-        };
 
         let widest = || {
             groups
                 .iter()
                 .flat_map(|g| {
-                    let kd = g.members[0].hashed.sig.meta.duration;
-                    g.members.iter().enumerate().map(move |(j, m)| (j, m, kd))
+                    let k = &g.members[0];
+                    g.members.iter().enumerate().map(move |(j, m)| (j, m, k))
                 })
-                .map(|(j, m, kd)| {
+                .map(|(j, m, k)| {
                     if j == 0 {
                         width(&keeper_tail(m).plain)
                     } else {
-                        width(&member_tail(m, kd).plain)
+                        width(&member_tail(m, k).plain)
                     }
                 })
                 .max()
@@ -876,7 +885,7 @@ impl Renderer {
             }
             self.line(&format!(" {}", parts.join("   ")));
 
-            let keeper_dur = g.members[0].hashed.sig.meta.duration;
+            let keeper = &g.members[0];
             for (j, m) in g.members.iter().enumerate() {
                 let c = &m.hashed.rep.cand;
                 let rel = rel_display(&c.path, root);
@@ -896,7 +905,7 @@ impl Renderer {
                         "   {}  {}  {}",
                         t.paint(Role::Dupe, "near"),
                         t.paint(Role::Dupe, &shown),
-                        member_tail(m, keeper_dur).painted
+                        member_tail(m, keeper).painted
                     ));
                 }
             }

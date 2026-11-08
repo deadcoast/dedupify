@@ -886,3 +886,314 @@ Binary: 25,903,792 bytes with the deep tier, 3,225,576 without
 - The fit on crops under half a side, rotations past 6°, and on real
   letterboxes with non-black bars (procedural letterbox measured only).
 - Windows execution (type-checked, with and without the deep feature).
+
+---
+
+# VERIFICATION — Phase 7 (conformance, and the second real set), run on 2026-11-08
+
+Same environment. Reference material: a sparse checkout of
+`facebook/ThreatExchange` at main — `pdq/cpp` (source, read; the
+regression inputs `pdq/data/reg-test-input/dih/*.jpg` and the recorded
+outputs `pdq/cpp/reg_test/expected/out`) and `tmk/cpp` (source, read;
+`tmk/sample-videos/*.mp4`, fifteen clips, and `tmk/sample-hashes/*.tmk`,
+the descriptors the reference `tmk-hash-video` wrote for them). The
+reference C++ was not built: `make` in the checkout was refused by the
+environment's policy, as `pip install pdqhash` had been in Phase 2b. The
+comparisons below are against the outputs the reference recorded, which
+is what the reference's own `reg_test` compares against.
+
+## 1. PDQ against the reference hashes
+
+`cargo run --release --example pdq_ref -- …/ThreatExchange/pdq`
+
+Two readings of the reference had to be settled before a bit compared:
+
+- Its hex is sixteen 16-bit words printed last DCT row first, column j
+  at bit j (`pdqBuffer16x16ToBits`); our `Hash256` keeps bit i·16+j of
+  the row-major band at position 63 − (b mod 64) of word b/64. With the
+  words read the other way round the distances were 118–138 bits.
+- The reference *tool* does not hash the picture it is given. Before
+  luma, `pdq-photo-hasher` resizes any image with a side over 512 to
+  512×512 by nearest neighbour (CImg `resize(512, 512, 1, 3, 1)`, source
+  index ⌊x·W/512⌋). The regression images are 1600×1004 JPEGs (and their
+  rotations), so every one of them goes through it.
+
+| file | ref quality | ours | prefiltered input | full-resolution input | the tool's 512 input |
+|---|---|---|---|---|---|
+| bridge-1-original | 100 | 100 | 6 | 6 | **0** |
+| bridge-2-rotate-90 | 100 | 100 | 8 | 8 | **0** |
+| bridge-3-rotate-180 | 100 | 100 | 6 | 6 | **0** |
+| bridge-4-rotate-270 | 100 | 100 | 2 | 2 | **0** |
+| bridge-5-flipx | 100 | 100 | 2 | 2 | **0** |
+| bridge-6-flipy | 100 | 100 | 8 | 8 | **0** |
+| bridge-7-flip-plus-1 | 100 | 100 | 6 | 6 | **0** |
+| bridge-8-flip-minus-1 | 100 | 100 | 6 | 6 | **0** |
+
+Distances in bits of 256. The same eight images decoded by libjpeg (PIL,
+saved losslessly; `DEDUPE_PDQ_PNG_DIR`) give the same three columns, so
+the 2–8 bits of the first two are not the JPEG decoder's. The eight
+dihedral hashes the reference derives from `bridge-1-original` (lines
+42–49 of the expected output) match our seven DCT-domain variants plus
+the identity at 0 bits each (the two sides name the rotation direction
+and the flip axis the other way round — our `Rotate90` is the
+reference's `rotate270`, our `FlipH` its `flipy` — and otherwise agree).
+
+The port is therefore the reference algorithm bit for bit; what differs
+in the shipped hashes is the input, and that is measured next.
+
+## 2. Which input to ship
+
+`cargo test --release --test corpus -- --ignored measure_pdq_prep --nocapture`
+and `DEDUPE_REAL_DIR=… cargo test --release --test real_corpus -- --ignored measure_pdq_prep_real --nocapture`
+
+PDQ alone, each perturbation against its source on the matcher's
+orientation: worst distance, 95th percentile, share at or under 31.
+`Prefiltered` is the shipped input (box-prefiltered luma, short side
+576–1151, Lanczos floor at 384); `Tool` is the reference tool's.
+
+Procedural corpus, 150 sources, positives from the first 60:
+
+| perturbation | Prefiltered max / p95 / ≤31 | Tool max / p95 / ≤31 |
+|---|---|---|
+| scale 50 % | 8 / 8 / 100 % | 16 / 14 / 100 % |
+| scale 25 % | 14 / 10 / 100 % | 22 / 20 / 100 % |
+| upscale 150 % | 12 / 8 / 100 % | 6 / 6 / 100 % |
+| JPEG q90 / q60 / q30 | 6 / 6 / 16 max, all 100 % | 6 / 10 / 12 max, all 100 % |
+| rotate 90°, mirror | 18, 14 max, 100 % | 18, 24 max, 100 % |
+| gamma 1.5 | 30 / 24 / 100 % | 32 / 24 / 98.3 % |
+| blur, noise ±10 | 4, 6 max, 100 % | 8, 8 max, 100 % |
+| squeeze 75 % | 6 / 4 / 100 % | 8 / 4 / 100 % |
+| crops, rotations 2–5°, watermark, letterbox | 0–20 % either way (PDQ's known blind spots; unchanged) | |
+| negatives, 11,175 pairs | closest 78, none ≤ 31 | closest 82, none ≤ 31 |
+
+Real photographs, 98 sources, positives from the first 60:
+
+| perturbation | Prefiltered max / p95 / ≤31 | Tool max / p95 / ≤31 |
+|---|---|---|
+| scale 50 % | 92 / 16 / **98.3 %** | 98 / 40 / **91.7 %** |
+| scale 25 % | 108 / 24 / **98.3 %** | 102 / 50 / **88.3 %** |
+| upscale 150 % | 80 / 12 / 98.3 % | 68 / 24 / 98.3 % |
+| JPEG q90 / q60 / q30 | p95 2 / 4 / 8, 98.3 % | p95 4 / 8 / 14, 98.3 % |
+| rotate 90° | 30 / 24 / **100 %** | 90 / 38 / **95.0 %** |
+| mirror | 26 / 18 / **100 %** | 48 / 44 / **93.3 %** |
+| bright ±20 %, gamma 1.5 | p95 24 / 2 / 18, 98.3 % | p95 20 / 2 / 20, 98.3 % |
+| blur | 54 / 18 / 98.3 % | 62 / 38 / 95.0 % |
+| noise ±10 | 128 / 4 / 98.3 % | 132 / 6 / 98.3 % |
+| squeeze 75 % | 64 / 14 / 98.3 % | 80 / 34 / 95.0 % |
+| negatives, 4,753 pairs | closest 8, 3 ≤ 31 | closest 10, 3 ≤ 31 |
+
+The 98.3 % rows miss the same one source as in Phase 6 (`gradient.png`,
+a synthetic ramp). The three negatives under 31 are the three
+same-picture pairs of Phase 6 (Suzanne, basketball frames, rubberwhale
+frames) under either input. Nearest-neighbour decimation aliases — the
+p95 doubles on rescales, rotations and mirrors — and on real pictures
+that costs recall at the threshold. **Shipped: `Prefiltered`**, as it
+was; `PdqPrep::Tool` stays in the crate for the conformance check.
+Hashes made here sit 2–8 bits from the reference tool's for the same
+file (table above), inside the 31-bit rule, so a PDQ hash published by
+the reference tool still matches one made here.
+
+## 3. TMK against the reference descriptors
+
+`cargo run --release --example tmk_ref -- …/ThreatExchange/tmk`
+
+The `.tmk` layout (`io/tmkiotypes.h`, `algo/tmkfv.cpp`): `TMK1`,
+`FVEC`, `PDQF`; `int` frames-per-second 15, P = 4, m = 32, d = 256,
+frame count; the four periods; the 32 coefficients (equal to ours to
+10⁻⁹); the pure average; cos[period][coefficient] then
+sin[period][coefficient], 256 `float`s each — 263,344 bytes, which the
+files are. Our descriptor of each sample video was computed two ways and
+scored against the file:
+
+| video | ref frames | ours (shipped / tool path) | level 1, level 2 — shipped frames | level 1, level 2 — tool's frames | max element Δ, tool's frames |
+|---|---|---|---|---|---|
+| chair-19-sd-bar | 284 | 282 / 284 | 0.9998, 0.9998 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| chair-20-sd-bar | 309 | 307 / 309 | 0.9998, 0.9997 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| chair-22-sd-grey-bar | 338 | 337 / 338 | 0.9998, 0.9998 | 1.0000, 1.0000 | 6.1·10⁻⁵ |
+| chair-22-sd-sepia-bar | 338 | 337 / 338 | 0.9997, 0.9997 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| chair-22-with-large-logo-bar | 338 | 337 / 338 | 0.9977, 0.9982 | 1.0000, 1.0000 | 4.6·10⁻⁵ |
+| chair-22-with-small-logo-bar | 338 | 337 / 338 | 0.9990, 0.9991 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| chair-orig-22-fhd-no-bar | 339 | 337 / 339 | 0.9999, 0.9999 | 1.0000, 1.0000 | 1.5·10⁻⁵ |
+| chair-orig-22-hd-no-bar | 338 | 337 / 338 | 0.9999, 0.9999 | 1.0000, 1.0000 | 1.5·10⁻⁵ |
+| chair-orig-22-sd-bar | 338 | 337 / 338 | 0.9998, 0.9998 | 1.0000, 1.0000 | 2.3·10⁻⁵ |
+| doorknob-hd-no-bar | 62 | 60 / 62 | 0.9955, 0.9955 | 1.0000, 1.0000 | 1.5·10⁻⁵ |
+| pattern-hd-no-bar | 105 | 103 / 105 | 0.9892, 0.9824 | 1.0000, 1.0000 | 1.5·10⁻⁵ |
+| pattern-longer-no-bar | 119 | 118 / 119 | 0.9906, 0.9839 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| pattern-sd-grey-bar | 105 | 103 / 105 | 0.9905, 0.9855 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| pattern-sd-with-large-logo-bar | 105 | 103 / 105 | 0.9965, 0.9955 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+| pattern-sd-with-small-logo-bar | 105 | 103 / 105 | 0.9916, 0.9883 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
+
+"Tool's frames": ffmpeg `-s 64:64 -an -f rawvideo -pix_fmt rgb24 -r 15`
+as `tmk-hash-video` runs it, Rec. 601 luma, the 64×64 straight to the
+DCT (what `pdqFloat256FromFloatLuma` does for a 64×64 input). On those
+frames our accumulator reproduces every reference file to float
+rounding — the descriptor, its normalisation and its scoring are the
+reference's. "Shipped frames" are our `fps=15,scale=288:288:flags=area,
+format=gray` with the Jarosz pass to 64: a different frame path, which
+moves level 2 by 0.0001–0.018 on these clips. Frame counts differ by one
+or two between `fps=15` and `-r 15`.
+
+Pair scores, the reference files against each other and ours (shipped
+frames) against each other, before this phase's bar handling:
+
+| pair | ref l1 | ref l2 | ours l1 | ours l2 |
+|---|---|---|---|---|
+| chair-orig-22-sd-bar ~ chair-22-sd-grey-bar | 1.000 | 1.000 | 1.000 | 1.000 |
+| chair-orig-22-sd-bar ~ chair-22-sd-sepia-bar | 1.000 | 1.000 | 1.000 | 1.000 |
+| chair-orig-22-sd-bar ~ chair-22-with-large-logo-bar | 0.463 | 0.654 | 0.460 | 0.651 |
+| chair-orig-22-sd-bar ~ chair-22-with-small-logo-bar | 0.926 | 0.953 | 0.933 | 0.957 |
+| chair-orig-22-sd-bar ~ chair-orig-22-hd-no-bar | 0.720 | **0.738** | 0.724 | **0.741** |
+| chair-orig-22-sd-bar ~ chair-orig-22-fhd-no-bar | 0.720 | 0.738 | 0.724 | 0.741 |
+| chair-19-sd-bar ~ chair-20-sd-bar | 0.989 | 0.991 | 0.990 | 0.992 |
+| chair-19-sd-bar ~ chair-orig-22-sd-bar | 0.952 | 0.962 | 0.954 | 0.964 |
+| pattern-hd-no-bar ~ pattern-sd-with-small-logo-bar | 0.786 | 0.772 | 0.780 | 0.769 |
+| pattern-hd-no-bar ~ pattern-sd-with-large-logo-bar | 0.454 | 0.449 | 0.440 | 0.441 |
+| pattern-hd-no-bar ~ pattern-sd-grey-bar | 0.856 | 0.855 | 0.852 | 0.853 |
+| pattern-hd-no-bar ~ pattern-longer-no-bar | 0.981 | 0.955 | 0.977 | 0.943 |
+| doorknob-hd-no-bar ~ chair-orig-22-sd-bar | 0.178 | 0.270 | 0.172 | 0.271 |
+| doorknob-hd-no-bar ~ pattern-hd-no-bar | −0.006 | 0.022 | −0.028 | 0.020 |
+| chair-orig-22-sd-bar ~ pattern-hd-no-bar | −0.020 | 0.024 | 0.023 | 0.033 |
+
+Level 2 within 0.013 everywhere; level 1 within 0.011 on the related
+pairs and 0.043 on the unrelated ones near zero. The bold row is the
+pair the set is built
+around: the same clip with and without 32-px black pillars. The
+reference scores it 0.738; our 0.8 grouping bar leaves it out — the
+listing below had the chair in two groups.
+
+## 4. Black bars — the sample set as a folder
+
+`dedupe find <sample-videos> vid`, 16 files (the fifteen plus a 1080×1080
+padded test pattern), before this phase:
+
+```
+ VIDEO 001   6 similar   14.1 MB reclaimable
+   keep  chair-orig-22-sd-bar.mp4                  480x720      0:22    h264   2.47 MB  2026-11-08
+   near  chair-22-sd-sepia-bar.mp4                 480x720      0:22    h264   2.67 MB  d  0 p  0  q   4  tmk 1.00
+   near  chair-22-with-large-logo-bar.mp4          480x720      0:22    h264   2.50 MB  d  3 p 12  q  58  tmk    -
+   near  chair-22-with-small-logo-bar.mp4          480x720      0:22    h264   2.39 MB  d  1 p  4  q  16  tmk 0.96
+   near  chair-22-sd-grey-bar.mp4                  480x720      0:22    h264   2.26 MB  d  0 p  0  q   2  tmk 1.00
+   near  chair-20-sd-bar.mp4                       480x720      0:20    h264   2.24 MB  d 16 p 16  q 116  tmk 0.99  trim
+   near  chair-19-sd-bar.mp4                       480x720      0:19    h264   2.02 MB  d 22 p 26  q 114  tmk 0.96  trim
+ VIDEO 002   4 similar   5.23 MB reclaimable
+   keep  pattern-longer-no-bar.mp4                 720x1280     0:08    h264   2.42 MB  2026-11-08
+   near  pattern-hd-no-bar.mp4                     720x1280     0:07    h264   2.09 MB  d 27 p 24  q 126  tmk 0.94  trim
+   near  pattern-sd-with-large-logo-bar.mp4        480x720      0:07    h264   1.11 MB  d 28 p 28  q 126  tmk    -  trim
+   near  pattern-sd-with-small-logo-bar.mp4        480x720      0:07    h264   1.05 MB  d 28 p 26  q 120  tmk 0.74  trim
+   near  pattern-sd-grey-bar.mp4                   480x720      0:07    h264   992 KB   d 28 p 26  q 118  tmk 0.80  trim
+ VIDEO 003   1 similar   5.15 MB reclaimable
+   keep  chair-orig-22-fhd-no-bar.mp4              720x1280     0:23    h264   5.36 MB  2026-11-08
+   near  chair-orig-22-hd-no-bar.mp4               720x1280     0:22    h264   5.15 MB  d  9 p  8  q  72  tmk 1.00
+```
+
+Three groups: the bars family, the pattern family, and the two no-bar
+exports of the chair on their own; the pillarbox pair scores 0.741
+(the reference's own files: 0.738) and is not grouped. With the bar pass (`-skip_frame nokey`,
+`cropdetect=limit=24:round=2:reset=0:skip=0`; the sd clips report
+`crop=416:720:32:0`, the no-bar clips the full frame, the padded test
+pattern `crop=608:1080:236:0`):
+
+```
+ VIDEO 001   8 similar   21.7 MB reclaimable
+   keep  chair-orig-22-fhd-no-bar.mp4        720x1280     0:23    h264   5.36 MB  2026-11-08
+   near  chair-orig-22-sd-bar.mp4            480x720      0:22    h264   2.47 MB  d  8 p  8  q  74  tmk 1.00  bars
+   near  chair-orig-22-hd-no-bar.mp4         720x1280     0:22    h264   5.15 MB  d  9 p  8  q  72  tmk 1.00
+   near  chair-22-sd-sepia-bar.mp4           480x720      0:22    h264   2.67 MB  d 10 p  8  q  72  tmk 1.00  bars
+   near  chair-22-with-large-logo-bar.mp4    480x720      0:22    h264   2.50 MB  d 12 p 16  q  82  tmk    -  bars
+   near  chair-22-with-small-logo-bar.mp4    480x720      0:22    h264   2.39 MB  d 10 p  8  q  76  tmk 0.95  bars
+   near  chair-22-sd-grey-bar.mp4            480x720      0:22    h264   2.26 MB  d 10 p  8  q  72  tmk 1.00  bars
+   near  chair-20-sd-bar.mp4                 480x720      0:20    h264   2.24 MB  d 24 p 24  q 124  tmk 0.99  trim  bars
+   near  chair-19-sd-bar.mp4                 480x720      0:19    h264   2.02 MB  d 30 p 28  q 120  tmk 0.96  trim  bars
+ VIDEO 002   4 similar   5.23 MB reclaimable
+   keep  pattern-longer-no-bar.mp4           720x1280     0:08    h264   2.42 MB  2026-11-08
+   near  pattern-hd-no-bar.mp4               720x1280     0:07    h264   2.09 MB  d 27 p 24  q 126  tmk 0.94  trim
+   near  pattern-sd-with-large-logo-bar.mp4  480x720      0:07    h264   1.11 MB  d 27 p 28  q 124  tmk    -  trim  bars
+   near  pattern-sd-with-small-logo-bar.mp4  480x720      0:07    h264   1.05 MB  d 27 p 24  q 124  tmk 0.86  trim  bars
+   near  pattern-sd-grey-bar.mp4             480x720      0:07    h264   992 KB   d 27 p 24  q 122  tmk 0.94  trim  bars
+```
+
+Two groups, as the set is labelled: the chair's nine exports with the
+FHD original kept (longest, then most pixels), the pattern's five with
+the longer export kept; `doorknob` and the padded test pattern alone.
+The pillarbox pair scores `tmk 1.00`; the pattern family's small-logo
+and grey exports move from 0.74 and 0.80 against the keeper to 0.86 and
+0.94. Every bars-against-no-bars line carries `bars`. `q 72` between the
+two no-bar chair exports is a property of the data, not the hashes: the
+FHD export is time-shifted against the HD one (a frame grabbed at 11.2 s
+from each shows the hand-held pan at visibly different points — the
+glass on the floor a fifth of the frame apart), which the positional
+tier cannot know and TMK's offset search absorbs. FRAMES
+13 s → 15 s.
+
+The real AVI set of Phase 6 (seven clips, no bars anywhere; cropdetect
+reports the full frame for each) groups exactly as before; FRAMES 4.7 s
+→ 6.2 s, because every frame of an all-intra AVI is a keyframe and the
+bar pass decodes them all.
+
+Synthetic corpus (`measure_video_thresholds` on the Phase 3 clips, kept
+under `DEDUPE_VIDEO_CORPUS_DIR`; 208 clips, 60,304 frames), hashed once
+with the bar pass switched off in the harness (`hash_video_inside(…,
+None)`, which reproduces the Phase 3 table to the digit) and once as
+shipped. Three rows move; the other nine are identical in every column,
+and so are the negatives (3,000 pairs: max level 1 0.817, max level 2
+0.769, 0 false groups, 0 false confirms):
+
+| edit | d / p / q med | l1 min | l2 min | positional | TMK | grouped | binnable |
+|---|---|---|---|---|---|---|---|
+| letterbox, before | 9 / 18 / 106 | −0.196 | 0.046 | 0 % | 25 % | 25 % | 0 % |
+| letterbox, after | 1 / 2 / 4 | 0.930 | 0.930 | **100 %** | **100 %** | **100 %** | **100 %** |
+| crop 90 %, before → after | 9 / 14 / 88 | 0.501 | 0.493 | 50 % → 56 % | 50 % | 56 % | 31 % |
+| bright +0.1, before → after | 1 / 2 / 8 | 0.990 | 0.986 | 100 % → 94 % | 100 % | 100 % | 100 % |
+
+The letterbox edit (`pad=iw:ih*1.25`, 45-px black bars) is detected on
+every clip as `crop=640:360:0:44` and becomes an ordinary re-encode. The
+two moved percentages are one source each, `rgbtestsrc`, whose picture
+has a 78-px black margin on its left by construction: its 90 % crop now
+lines up with it (gain), and its brightened copy no longer does — +0.1
+lifts the margin to luma ≈ 41, over the 24 limit, so the source is
+cropped and the copy is not. Run as a folder of four (`rgbtest`, its
+bright, letterbox and crop edits): the bright copy reads `d 0 p 16 q 72
+tmk 1.00 bars` against the source — the positional tier misaligned by
+78 px and over its pHash bar, TMK unmoved on a static pattern — and it is
+the keeper, since its uncropped 640×360 counts as more picture than the
+source's 562×360. That is the mechanism to know about: a bar the two
+files do not share the same way costs the positional tier its alignment,
+and a copy whose bars were brightened out of black counts them as
+picture. Both files still group and bin. Hashing 130.9 s → 158.9 s
+(+21 %; these clips have a keyframe every 250 frames, so the bar pass
+decodes 1 frame in 250 — the cost is the second process and its demux
+of 20-second files, not decoding).
+
+## 5. The fixture
+
+`zoom_pillars.mp4` — the 640×360 zoom padded to 800×360 with 80-px black
+pillars — joins the video group as `near … 800x360 … tmk 1.00 … bars`
+with the unpadded zoom kept; `milk . vid` moves six (the two byte
+copies, the phone copy, the mirror, the cut, the pillars) and `--undo`
+restores the tree.
+
+## Suite
+
+`cargo test --release`: 79 unit tests (1 new: `cropdetect` lines
+become `Bars` or nothing — the last line wins, the whole frame is
+nothing, a 2-px edge is nothing, a quarter-side box is nothing, a
+letterbox parses) and 24 end-to-end tests (1 changed: the video group
+gains the pillarboxed copy and `milk . vid` moves six). All pass without
+the model and with `DEDUPE_MODEL` set; with `--no-default-features`
+77 + 24 pass. `cargo clippy --all-targets --release` clean, `cargo fmt`
+clean. Windows type-checks pass with and without the deep feature
+(`cargo check --target x86_64-pc-windows-msvc --all-targets --features
+blake3/pure`, `clang`/`llvm-lib` standing in for `tract-linalg`'s
+kernels as in Phase 4). Two examples added, `pdq_ref` and `tmk_ref`,
+both needing the ThreatExchange checkout as their argument.
+
+Binary: 25,911,008 bytes with the deep tier, 3,232,728 without.
+
+## Not verified here
+
+- Bars that are not black (white, blurred-copy "ambient" bars, bars
+  with a logo in them): `cropdetect` sees luma under 24 only.
+- The bar pass on long all-intra files (ProRes, DV, MJPEG): the cost is a
+  full decode at source resolution; measured here on 80-second AVI only.
+- The capture-moment rule on a camera roll (carried from Phase 6).
+- Windows execution (type-checked, with and without the deep feature).

@@ -523,3 +523,65 @@ pub fn measure_geometry_on(
         t0.elapsed().as_secs_f64()
     );
 }
+
+/// PDQ alone, under a chosen input preparation: per perturbation the
+/// distance on the matcher's orientation (max, p95, recall at PDQ_MAX),
+/// and the negatives' closest pair. Shared by both corpora.
+pub fn measure_pdq_prep_on(
+    label: &str,
+    bases: &[RgbImage],
+    positives_cap: usize,
+    prep: dedupe::perceptual::PdqPrep,
+) {
+    use dedupe::pdq::PDQ_MAX;
+    use dedupe::perceptual::signature_from_image_with;
+    let t0 = std::time::Instant::now();
+    let sig = |im: &RgbImage| signature_from_image_with(&DynamicImage::ImageRgb8(im.clone()), prep);
+    let sigs: Vec<Signature> = bases.iter().map(sig).collect();
+    let m = bases.len().min(positives_cap);
+    eprintln!();
+    eprintln!(
+        "PDQ under {prep:?} on {label}: {} sources, positives from the first {m}",
+        bases.len()
+    );
+    eprintln!(
+        "{:<14} {:>5} {:>5} {:>8}   {:>8}",
+        "perturbation", "q max", "q p95", "q<=max", "quality"
+    );
+    for (k, name) in PERTURBATIONS.iter().enumerate() {
+        let mut qs: Vec<u32> = Vec::new();
+        let mut qual_min = 100u8;
+        for i in 0..m {
+            let v = sig(&perturb(&bases[i], k));
+            let (_, _, q) = best_triple(&sigs[i], &v);
+            qs.push(q);
+            qual_min = qual_min.min(v.pdq_quality);
+        }
+        qs.sort();
+        let rec = qs.iter().filter(|q| **q <= PDQ_MAX).count() as f64 / m as f64;
+        eprintln!(
+            "{name:<14} {:>5} {:>5} {:>7.1}%   {:>8}",
+            qs[qs.len() - 1],
+            qs[(qs.len() as f64 * 0.95) as usize],
+            rec * 100.0,
+            qual_min
+        );
+    }
+    let n = bases.len();
+    let mut min_q = u32::MAX;
+    let mut under = 0usize;
+    for i in 0..n {
+        for j in i + 1..n {
+            let q = best_q(&sigs[i], &sigs[j]);
+            min_q = min_q.min(q);
+            if q <= PDQ_MAX {
+                under += 1;
+            }
+        }
+    }
+    eprintln!(
+        "negatives: {} pairs   closest q {min_q}   at or under {PDQ_MAX}: {under}   {:.0}s",
+        n * (n - 1) / 2,
+        t0.elapsed().as_secs_f64()
+    );
+}

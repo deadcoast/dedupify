@@ -69,25 +69,37 @@ add an audio fingerprint, and can strip letterbox bars before hashing.
 stream is projected onto a small set of periodic kernels, so a trim or a
 re-encode compares as a whole signal rather than window by window, with a
 cheap level-1 gate and an alignment-searching level-2 score (a 1.1× speed
-change measured at tmk 0.975 minimum on the synthetic corpus, Phase 3). Both approaches are published; TMK handles trims without
-a duration prefilter and gives one score per pair. czkawka has audio
-fingerprinting and letterbox cropping, which `dedupe` does not; `dedupe`
+change measured at tmk 0.975 minimum on the synthetic corpus, Phase 3).
+Both approaches are published; TMK handles trims without a duration
+prefilter and gives one score per pair. czkawka has audio fingerprinting,
+which `dedupe` does not; both strip black bars before hashing (`dedupe`
+since Phase 7, with ffmpeg's `cropdetect` over the keyframes); `dedupe`
 has the positional frame tier (three image hashes on twelve sampled
 frames, medians on the modal orientation) as the second family for
 mirrored or re-framed videos, which czkawka's docs do not describe.
 
+The TMK port is the reference's: fed the reference tool's frames, it
+reproduces Meta's published `.tmk` files for its fifteen sample videos
+to within float rounding (Phase 7, `examples/tmk_ref.rs`).
+
 Measured on real clips (Phase 6): the OpenCV `vtest.avi` and its
 re-encode, downscale and 40-second trim grouped at tmk 1.00 / 1.00 /
 0.84; `Megamind.avi`, its x264 re-encode and the shorter `_bugy` variant
-grouped at 1.00; the unrelated `tree.avi` did not.
+grouped at 1.00; the unrelated `tree.avi` did not. On Meta's labelled
+sample set (Phase 7): the chair clip's nine exports — SD in pillarbox
+bars, HD and FHD without, grey, sepia, two logo overlays, two trims —
+form one group, and the pattern clip's five form another; the doorknob
+clip and the padded test pattern stand alone. The reference's own hashes
+put the bars-against-no-bars pair at 0.738 — over the reference README's
+0.7 by a little, under the 0.8 this build groups at; with the bars found
+first it scores 1.00.
 
 ## 4. What the proven projects have that this does not
 
 - Hash caches and incremental re-scans.
 - A GUI, many more tools (broken files, empty folders, music tags, bad
   extensions), years of field use and bug reports.
-- Audio fingerprints for videos; letterbox stripping before video
-  hashing.
+- Audio fingerprints for videos.
 - Field-tested thresholds on real libraries. `dedupe`'s image thresholds
   were set on a procedural corpus and checked on 98 real photographs
   (Phase 6); that is a start, not field use.
@@ -112,8 +124,11 @@ grouped at 1.00; the unrelated `tree.avi` did not.
   photographs it has been run (Phase 4 fixture, Phase 6 real set) but
   not measured against a labelled set of real copies.
 - Windows execution is type-checked only.
-- PDQ bit-identity with the reference tool and TMK agreement with the
-  reference implementation were not checked.
+- Bars that are not black: the bar pass sees luma under 24 only.
 
 Each of these is listed in `docs/VERIFICATION.md` under the phase that
-left it open.
+left it open. Closed in Phase 7: PDQ and TMK are the reference
+algorithms bit for bit and element for element against Meta's recorded
+outputs; the shipped PDQ input is prepared differently from the
+reference tool's, on purpose and measured, so a hash made here is 2–8
+bits from one the reference tool would print for the same file.

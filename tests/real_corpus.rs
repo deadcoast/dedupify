@@ -324,3 +324,20 @@ fn geometry_real_named() {
         );
     }
 }
+
+/// `DEDUPE_REAL_DIR=<folder> cargo test --release --test real_corpus -- --ignored measure_pdq_prep_real --nocapture`
+#[test]
+#[ignore]
+fn measure_pdq_prep_real() {
+    let Some(dir) = real_dir() else {
+        eprintln!("DEDUPE_REAL_DIR not set; skipped");
+        return;
+    };
+    let bases: Vec<RgbImage> = load_all(&dir).into_iter().map(|(_, im)| im).collect();
+    for prep in [
+        dedupe::perceptual::PdqPrep::Prefiltered,
+        dedupe::perceptual::PdqPrep::Tool,
+    ] {
+        measure_pdq_prep_on("real photographs", &bases, 60, prep);
+    }
+}

@@ -3,8 +3,8 @@
 A duplicate finder for the terminal. Exact duplicates everywhere;
 near-duplicate images (rescaled, re-encoded, mirrored, rotated, cropped,
 letterboxed) with the `img` token, near-duplicate videos (re-encoded,
-scaled, trimmed, mirrored, sped up) with the `vid` token — `ffmpeg` and
-`ffprobe` on PATH — and both on every `purge`. Nothing is moved or binned
+scaled, trimmed, mirrored, sped up, boxed in black bars) with the `vid`
+token — `ffmpeg` and `ffprobe` on PATH — and both on every `purge`. Nothing is moved or binned
 on one family of evidence: the two 64-bit hashes must be confirmed by PDQ
 or by the geometric fit, and two photographs with different capture
 moments are shown and left alone. `docs/COMPARISON.md` says what here is

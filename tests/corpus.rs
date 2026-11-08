@@ -393,3 +393,16 @@ fn measure_geometry() {
     let bases: Vec<RgbImage> = (0..150u64).map(photo).collect();
     measure_geometry_on("procedural", &bases, 60, 4000);
 }
+
+/// `cargo test --release --test corpus -- --ignored measure_pdq_prep --nocapture`
+#[test]
+#[ignore]
+fn measure_pdq_prep() {
+    let bases: Vec<RgbImage> = (0..150u64).map(photo).collect();
+    for prep in [
+        dedupe::perceptual::PdqPrep::Prefiltered,
+        dedupe::perceptual::PdqPrep::Tool,
+    ] {
+        measure_pdq_prep_on("procedural", &bases, 60, prep);
+    }
+}

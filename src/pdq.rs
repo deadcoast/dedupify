@@ -293,6 +293,76 @@ pub fn band_variant(a: &[f32; 256], v: Variant) -> [f32; 256] {
     b
 }
 
+/// Side the reference tool (`pdq-photo-hasher`) squashes to before
+/// hashing: any image wider or taller than this is resampled to
+/// `TOOL_SIDE`×`TOOL_SIDE` by nearest neighbour (CImg `resize`,
+/// interpolation 1, source index ⌊x·W/512⌋), aspect discarded. The
+/// published PDQ hashes — Meta's regression vectors among them — are
+/// hashes of that squashed image, so this is the input that makes ours
+/// bit-identical to theirs (VERIFICATION.md, Phase 7).
+pub const TOOL_SIDE: usize = 512;
+
+/// The reference tool's hashing input: Rec. 601 luma of the image, after
+/// the 512 squash when either side exceeds it.
+pub fn tool_luma(img: &image::DynamicImage) -> (Vec<f32>, usize, usize) {
+    let rgb = img.to_rgb8();
+    let (w, h) = (rgb.width() as usize, rgb.height() as usize);
+    let raw = rgb.as_raw();
+    let luma =
+        |i: usize| 0.299 * raw[i] as f32 + 0.587 * raw[i + 1] as f32 + 0.114 * raw[i + 2] as f32;
+    if w <= TOOL_SIDE && h <= TOOL_SIDE {
+        return ((0..w * h).map(|i| luma(i * 3)).collect(), w, h);
+    }
+    let mut data = Vec::with_capacity(TOOL_SIDE * TOOL_SIDE);
+    for y in 0..TOOL_SIDE {
+        let sy = (y as f64 * h as f64 / TOOL_SIDE as f64) as usize;
+        for x in 0..TOOL_SIDE {
+            let sx = (x as f64 * w as f64 / TOOL_SIDE as f64) as usize;
+            data.push(luma((sy * w + sx) * 3));
+        }
+    }
+    (data, TOOL_SIDE, TOOL_SIDE)
+}
+
+/// PDQ exactly as the reference tool computes it (`tool_luma`, then the
+/// published algorithm with no upscale floor).
+pub fn compute_tool(img: &image::DynamicImage) -> Pdq {
+    let (l, w, h) = tool_luma(img);
+    compute_plain(&Luma {
+        data: &l,
+        width: w,
+        height: h,
+    })
+}
+
+/// The reference algorithm exactly as published: Jarosz filter, decimate,
+/// DCT, median — no upscale floor. `compute` adds the floor measured in
+/// Phase 2b for small inputs.
+pub fn compute_plain(l: &Luma) -> Pdq {
+    if l.width < MIN_DIM || l.height < MIN_DIM {
+        return Pdq {
+            hashes: [[0; 4]; VARIANTS],
+            quality: 0,
+        };
+    }
+    finish(downsample(l))
+}
+
+fn finish(buf: Vec<f32>) -> Pdq {
+    let q = quality(&buf);
+    let band = dct16(&buf);
+    let mut hashes = [[0u64; 4]; VARIANTS];
+    for (k, v) in VARIANT_ORDER.iter().enumerate() {
+        let bv = if *v == Variant::Identity {
+            band
+        } else {
+            band_variant(&band, *v)
+        };
+        hashes[k] = bits(&bv);
+    }
+    Pdq { hashes, quality: q }
+}
+
 /// Full PDQ from a luminance plane: all eight orientations and the quality.
 pub fn compute(l: &Luma) -> Pdq {
     if l.width < MIN_DIM || l.height < MIN_DIM {
@@ -320,18 +390,7 @@ pub fn compute(l: &Luma) -> Pdq {
     } else {
         downsample(l)
     };
-    let q = quality(&buf);
-    let band = dct16(&buf);
-    let mut hashes = [[0u64; 4]; VARIANTS];
-    for (k, v) in VARIANT_ORDER.iter().enumerate() {
-        let bv = if *v == Variant::Identity {
-            band
-        } else {
-            band_variant(&band, *v)
-        };
-        hashes[k] = bits(&bv);
-    }
-    Pdq { hashes, quality: q }
+    finish(buf)
 }
 
 #[cfg(test)]

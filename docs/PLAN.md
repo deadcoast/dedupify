@@ -137,6 +137,31 @@ The first measurements on real photographs (98 OpenCV sample pictures,
 - `docs/COMPARISON.md`: what here is the standard pipeline and what is
   not, against the tools one would otherwise fork
 
+## Phase 7 — conformance, and the second real set   ← delivered 2026-11-08
+
+Checking the two ported algorithms against Meta's recorded outputs, and
+what the second labelled real set (Meta's fifteen TMK sample videos)
+changed:
+
+- `examples/pdq_ref.rs`: PDQ against the reference regression hashes —
+  bit-identical (0 of 256 on all eight images, both JPEG decoders) once
+  the reference tool's 512-px nearest-neighbour input is reproduced
+  (`pdq::compute_tool`); the eight dihedral hashes at 0 bits
+- `perceptual::PDQ_PREP`: the tool's input measured against the shipped
+  prefiltered input on both corpora; the prefiltered input kept (half-size
+  copies 98.3 % against 91.7 % on real photographs, rotations and mirrors
+  100 % against 93–95 %); the tool's input kept behind `PdqPrep::Tool`
+  for the check
+- `examples/tmk_ref.rs`: TMK against the reference `.tmk` files — equal
+  element for element to 6.1·10⁻⁵ on the reference's frames; level 2
+  0.982–0.9999 on ours; level-2 pair scores within 0.013 of the reference's own
+- Black bars (`video::detect_bars`): one keyframe-only `cropdetect` pass
+  before the frame pass; frames hashed inside the bars; `bars` on the
+  line. The reference's own hashes score the sample set's pillarbox pair
+  at 0.738; with the bars found it scores 1.00 and the clip's nine
+  exports are one group. The video keeper counts the picture's pixels,
+  not the file's, and at a tie keeps the file without bars
+
 ## Standing rules
 
 - No cache, index or lock file is ever written on a scan.

@@ -921,6 +921,21 @@ fn add_videos(root: &Path) {
         v.join("zoom_cut.mp4").to_str().unwrap(),
     ]);
     fs::copy(a, v.join("zoom (1).mp4")).unwrap(); // byte copy
+                                                  // the same clip boxed in black pillars: 80 px each side of 800
+    ffm(&[
+        "-i",
+        a,
+        "-vf",
+        "pad=800:360:80:0:black",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "22",
+        v.join("zoom_pillars.mp4").to_str().unwrap(),
+    ]);
     ffm(&[
         "-f",
         "lavfi",
@@ -961,19 +976,34 @@ fn video_pass_groups_derivatives_and_labels_them() {
         out.contains("GROUP 001") && out.contains("GROUP 002"),
         "{out}"
     );
-    // video group: zoom (keeper, longest and most pixels), phone copy, mirror, cut
-    assert!(out.contains("VIDEO 003   3 similar"), "{out}");
+    // video group: zoom (keeper, longest and most pixels), phone copy, mirror, cut, pillars
+    assert!(out.contains("VIDEO 003   4 similar"), "{out}");
     assert!(
         out.contains("keep  video/zoom.mp4") || out.contains("keep  video\\zoom.mp4"),
         "{out}"
     );
     assert!(out.contains("mirror"), "{out}");
     assert!(out.contains("trim"), "{out}");
+    // the pillarboxed copy: 800×360 in the listing, frames compared inside
+    // the bars, TMK at 1.00 against the keeper, the `bars` mark on the line
+    let pillars = out
+        .lines()
+        .find(|l| l.contains("zoom_pillars.mp4"))
+        .unwrap_or_else(|| panic!("pillarboxed copy not listed\n{out}"));
+    assert!(
+        pillars.contains("near") && pillars.contains("800x360"),
+        "{pillars}"
+    );
+    assert!(
+        pillars.contains("tmk 1.00") || pillars.contains("tmk 0.9"),
+        "{pillars}"
+    );
+    assert!(pillars.trim_end().ends_with("bars"), "{pillars}");
     assert!(
         !out.contains("pattern.mp4"),
         "unrelated clip must stay out\n{out}"
     );
-    assert!(out.contains("1 video group   3 similar"), "{out}");
+    assert!(out.contains("1 video group   4 similar"), "{out}");
     assert!(out.contains("keep: longest, then most pixels"), "{out}");
 }
 
@@ -1011,8 +1041,8 @@ fn milk_vid_moves_and_undo_restores() {
     let before = files(&fx.root);
     let (code, out, _) = run(&fx, &["milk", ".", "vid"]);
     assert_eq!(code, 0, "{out}");
-    // exact: zoom (1), clips/copy/a.mp4; near: phone, mirror, cut
-    assert!(out.contains("5 moved"), "{out}");
+    // exact: zoom (1), clips/copy/a.mp4; near: phone, mirror, cut, pillars
+    assert!(out.contains("6 moved"), "{out}");
     let after = files(&fx.root);
     assert!(
         after.contains(&"_milked/video/zoom_cut.mp4".to_string()),
