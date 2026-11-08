@@ -333,13 +333,20 @@ fn items(f: &Found) -> Vec<Item<'_>> {
         let k = &g.members[0].hashed;
         for m in &g.members[1..] {
             let rel = m.relation.unwrap();
-            if rel.deep_only() {
-                // found by the learned descriptor alone: listed by `find`,
-                // never moved or binned (docs/RESEARCH.md §2.6)
+            if rel.listed_only() {
+                // the learned descriptor's word alone, or another capture
+                // moment: listed by the report, never moved or binned
+                // (docs/RESEARCH.md §2.6, §2.8)
                 continue;
             }
             let mut txt = format!("d {:>2}  p {:>2}  q {:>3}", rel.d, rel.p, rel.q);
-            if !rel.variant.label().is_empty() {
+            if let Some(fit) = rel.fit {
+                if rel.fit_ok() {
+                    txt.push_str("  ");
+                    txt.push_str(&fit.label());
+                }
+            }
+            if !rel.variant.label().is_empty() && !rel.deep_only() {
                 txt.push_str("  ");
                 txt.push_str(rel.variant.label());
             }
@@ -473,12 +480,19 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         interrupt::install();
         interrupt::changing(true);
     }
+    let mut kept: Vec<(String, String)> = Vec::new();
     for it in items(&f) {
         if !inv.dry_run && interrupt::requested() {
             stopped = true;
             break;
         }
         let rel = rel_display(it.path, &inv.root);
+        // a near duplicate nothing confirmed is shown, not moved — the
+        // same evidence rule as purge, reversible or not (RESEARCH §2.7)
+        if it.near_confirmed == Some(false) {
+            kept.push((rel, it.near_reason.clone()));
+            continue;
+        }
         let rel_path = it
             .path
             .strip_prefix(&inv.root)
@@ -537,6 +551,9 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         }
     }
     interrupt::changing(false);
+    for (path, why) in &kept {
+        r.action("kept~", Role::Warn, path, why);
+    }
 
     let journal_id = if inv.dry_run {
         None
@@ -552,9 +569,19 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         journal_id.as_deref(),
     );
     if !f.near.is_empty() || !f.video.is_empty() {
-        r.note(
+        r.note_fit(
             Role::Dupe,
-            "~ marks a near duplicate (perceptual match), not a byte copy",
+            "~ confirmed near duplicate, not a byte copy",
+            "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
+        );
+    }
+    if !kept.is_empty() {
+        r.note(
+            Role::Warn,
+            &format!(
+                "{} kept~: similar on two hashes, confirmed by nothing else; shown, left in place",
+                fmt_count(kept.len() as u64)
+            ),
         );
     }
     if failed > 0 {
@@ -753,7 +780,7 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         r.note_fit(
             Role::Dupe,
             "~ confirmed near duplicate, not a byte copy",
-            "(images: dHash, pHash and PDQ agree; videos: TMK or sampled frames)",
+            "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
         );
     }
     if kept_mismatch > 0 {
@@ -766,16 +793,11 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         );
     }
     if kept_unconfirmed > 0 {
-        let mut milk_cmd = inv.command_line_as(Command::Milk);
-        if inv.dry_run {
-            milk_cmd = milk_cmd.replace(" --dry-run", "");
-        }
         r.note(
             Role::Warn,
             &format!(
-                "{} kept~: similar, not confirmed for binning; {} moves them instead",
-                fmt_count(kept_unconfirmed),
-                milk_cmd
+                "{} kept~: similar on two hashes, confirmed by nothing else; shown, left in place",
+                fmt_count(kept_unconfirmed)
             ),
         );
     }

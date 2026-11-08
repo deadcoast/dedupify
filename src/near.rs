@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rayon::prelude::*;
 
+use crate::capture::{self, Capture};
 use crate::exact::{Progress, Stage};
+use crate::geometry::{self, Fit, FIT_MIN};
 use crate::hamming::{self, Match, MatchProgress};
 use crate::pdq::{distance as pdq_distance, PDQ_MAX, PDQ_QUALITY_MIN};
 use crate::perceptual::{self, Signature, Variant, DHASH_MAX, PHASH_MAX, QUALITY_MIN};
@@ -29,8 +31,18 @@ pub struct Hashed {
     pub sig: Signature,
     /// SSCD embedding when the deep tier is active.
     pub deep: Option<crate::deep::Embedding>,
+    /// EXIF capture time, when the file states one.
+    pub capture: Option<Capture>,
 }
 
+/// How a member relates to its keeper: the evidence, and what it allows.
+///
+/// Acting (moving or binning) needs two independent families to agree:
+/// the two 64-bit hashes **and** either PDQ (frequency domain, 256 bits)
+/// or the geometric fit (spatial correlation); or, without the hashes,
+/// the learned descriptor **and** the fit. A member whose capture time
+/// differs from the keeper's is a different photograph whatever the
+/// pictures say: `kin`, listed, never acted on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Relation {
     pub variant: Variant,
@@ -43,40 +55,86 @@ pub struct Relation {
     pub q_quality: u8,
     /// SSCD cosine to the keeper when the deep tier is active.
     pub deep: Option<f32>,
+    /// Geometric fit to the keeper, computed when PDQ did not confirm or
+    /// the member came in through the deep tier.
+    pub fit: Option<Fit>,
+    /// Both files state a capture time and they differ.
+    pub kin: bool,
 }
 
 impl Relation {
-    /// The confirmation `purge` requires before binning a near duplicate:
-    /// both 64-bit hashes within threshold **and** PDQ within threshold on
-    /// a hash PDQ itself rates reliable.
-    pub fn confirmed(&self) -> bool {
-        self.d <= DHASH_MAX
-            && self.p <= PHASH_MAX
-            && self.q <= PDQ_MAX
-            && self.q_quality >= PDQ_QUALITY_MIN
+    /// The two 64-bit hashes agree.
+    pub fn hash_pair(&self) -> bool {
+        self.d <= DHASH_MAX && self.p <= PHASH_MAX
+    }
+
+    /// PDQ within threshold on a hash PDQ itself rates reliable.
+    pub fn pdq_ok(&self) -> bool {
+        self.q <= PDQ_MAX && self.q_quality >= PDQ_QUALITY_MIN
+    }
+
+    pub fn fit_ok(&self) -> bool {
+        self.fit.is_some_and(|f| f.ncc >= FIT_MIN)
+    }
+
+    /// Admitted by the learned descriptor.
+    pub fn deep_in(&self) -> bool {
+        self.deep.is_some_and(|c| c >= crate::deep::DEEP_MIN)
     }
 
     /// Grouped by the deep tier alone: the two 64-bit hashes disagree.
     pub fn deep_only(&self) -> bool {
-        (self.d > DHASH_MAX || self.p > PHASH_MAX)
-            && self.deep.is_some_and(|c| c >= crate::deep::DEEP_MIN)
+        !self.hash_pair() && self.deep_in()
     }
 
-    /// Why `confirmed()` is false, for the `kept` line.
+    /// What `milk` and `purge` require before touching the file.
+    pub fn confirmed(&self) -> bool {
+        if self.kin {
+            return false;
+        }
+        if self.hash_pair() {
+            self.pdq_ok() || self.fit_ok()
+        } else {
+            self.deep_in() && self.fit_ok()
+        }
+    }
+
+    /// Shown but never acted on, whatever else is measured: a different
+    /// photograph (`kin`), or the learned descriptor's word alone.
+    pub fn listed_only(&self) -> bool {
+        self.kin || (self.deep_only() && !self.fit_ok())
+    }
+
+    /// The verb on the member's line.
+    pub fn verb(&self) -> &'static str {
+        if self.kin {
+            "kin"
+        } else if self.deep_only() && !self.fit_ok() {
+            "deep"
+        } else {
+            "near"
+        }
+    }
+
+    /// Why `confirmed()` is false, for the `kept~` line.
     pub fn unconfirmed_reason(&self) -> String {
+        if self.kin {
+            return "taken at a different moment".to_string();
+        }
+        let fit_txt = match self.fit {
+            Some(f) => format!("fit {:.2} under {FIT_MIN:.2}", f.ncc.max(0.0)),
+            None => "no fit".to_string(),
+        };
         if self.deep_only() {
-            return format!(
-                "deep {:.2} only; frames d {} p {} q {}",
-                self.deep.unwrap_or(0.0),
-                self.d,
-                self.p,
-                self.q
-            );
+            return format!("deep {:.2} only; {fit_txt}", self.deep.unwrap_or(0.0));
         }
         if self.q_quality < PDQ_QUALITY_MIN {
-            format!("PDQ quality {} below {}", self.q_quality, PDQ_QUALITY_MIN)
+            format!(
+                "PDQ quality {} below {}; {fit_txt}",
+                self.q_quality, PDQ_QUALITY_MIN
+            )
         } else if self.q > PDQ_MAX {
-            format!("PDQ q {} over {}", self.q, PDQ_MAX)
+            format!("PDQ q {} over {}; {fit_txt}", self.q, PDQ_MAX)
         } else {
             format!("d {} p {} over threshold to keeper", self.d, self.p)
         }
@@ -97,20 +155,41 @@ pub struct NearGroup {
 }
 
 impl NearGroup {
-    /// Bytes `milk`/`purge` act on: deep-only members are listed, not acted on.
+    /// Bytes `milk`/`purge` act on: confirmed members only.
     pub fn reclaimable(&self) -> u64 {
         self.members
             .iter()
             .skip(1)
-            .filter(|m| !m.relation.is_some_and(|r| r.deep_only()))
+            .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
             .map(|m| m.hashed.rep.cand.size)
             .sum()
     }
 
+    /// Members shown with the `deep` verb (learned descriptor alone).
     pub fn deep_only_count(&self) -> usize {
         self.members
             .iter()
-            .filter(|m| m.relation.is_some_and(|r| r.deep_only()))
+            .filter(|m| m.relation.is_some_and(|r| r.deep_only() && !r.fit_ok()))
+            .count()
+    }
+
+    /// Members shown with the `kin` verb (different capture moment).
+    pub fn kin_count(&self) -> usize {
+        self.members
+            .iter()
+            .filter(|m| m.relation.is_some_and(|r| r.kin))
+            .count()
+    }
+
+    /// Members the hashes grouped that nothing confirmed: `kept~`.
+    pub fn unconfirmed_count(&self) -> usize {
+        self.members
+            .iter()
+            .skip(1)
+            .filter(|m| {
+                m.relation
+                    .is_some_and(|r| !r.confirmed() && !r.listed_only())
+            })
             .count()
     }
 }
@@ -127,6 +206,12 @@ pub struct NearStats {
     pub deep_failed: u64,
     /// Pairs the deep tier added that the 64-bit hashes had not.
     pub deep_pairs: u64,
+    /// Geometric fits computed (members PDQ did not confirm, deep members).
+    pub fits: u64,
+    /// Of those, fits at or above `FIT_MIN`.
+    pub fit_confirmed: u64,
+    /// Members set aside as `kin` by their capture time.
+    pub kin: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +276,15 @@ pub fn hash_all(
     let done = AtomicU64::new(0);
     let deep_failed = AtomicU64::new(0);
     progress.tick(Stage::Decode, 0, total);
-    type Decoded = Result<(Signature, Option<crate::deep::Embedding>), perceptual::DecodeError>;
+    type Decoded = Result<
+        (Signature, Option<crate::deep::Embedding>, Option<Capture>),
+        perceptual::DecodeError,
+    >;
     let results: Vec<(Rep, Decoded)> = reps
         .into_par_iter()
         .map(|rep| {
-            // one decode feeds every hash and, when active, the embedding
+            // one decode feeds every hash and, when active, the embedding;
+            // the capture time is a header read
             let r = perceptual::load_image(&rep.cand.path).map(|img| {
                 let sig = perceptual::signature_from_image(&img);
                 let emb = deep.and_then(|m| match m.embed(&img) {
@@ -205,7 +294,7 @@ pub fn hash_all(
                         None
                     }
                 });
-                (sig, emb)
+                (sig, emb, capture::read(&rep.cand.path))
             });
             let d = done.fetch_add(1, Ordering::Relaxed) + 1;
             progress.tick(Stage::Decode, d, total);
@@ -220,7 +309,7 @@ pub fn hash_all(
     let mut out = Vec::with_capacity(results.len());
     for (rep, r) in results {
         match r {
-            Ok((sig, emb)) => {
+            Ok((sig, emb, capture)) => {
                 stats.decoded += 1;
                 if sig.quality < QUALITY_MIN {
                     stats.low_quality += 1;
@@ -229,6 +318,7 @@ pub fn hash_all(
                         rep,
                         sig,
                         deep: emb,
+                        capture,
                     });
                 }
             }
@@ -263,14 +353,25 @@ pub fn keeper_order(a: &Hashed, b: &Hashed) -> std::cmp::Ordering {
         .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))
 }
 
-pub const NEAR_POLICY_LABEL: &str = "keep: most matched, then most pixels";
+pub const NEAR_POLICY_LABEL: &str = "keep: shared moment, most matched, then most pixels";
 
 /// Best relation of `m` to the keeper `k`, searching both directions.
 pub fn relation(k: &Signature, m: &Signature) -> Relation {
-    relation_deep(k, m, None)
+    relation_deep(k, m, None, false)
 }
 
-pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>) -> Relation {
+/// The relation of two hashed files: distances, deep cosine, and the
+/// capture-time verdict. The fit is added later, only where it is needed.
+pub fn relation_of(k: &Hashed, m: &Hashed) -> Relation {
+    let cos = match (k.deep.as_ref(), m.deep.as_ref()) {
+        (Some(a), Some(b)) => Some(crate::deep::cosine(a, b)),
+        _ => None,
+    };
+    let kin = capture::different_moments(k.capture.as_ref(), m.capture.as_ref()) == Some(true);
+    relation_deep(&k.sig, &m.sig, cos, kin)
+}
+
+pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool) -> Relation {
     let mut best: Option<(Variant, u32, u32, u32)> = None;
     for (i, v) in perceptual::VARIANT_ORDER.iter().enumerate() {
         let d1 = perceptual::hamming(k.dhash[0], m.dhash[i]);
@@ -293,6 +394,8 @@ pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>) -> Relatio
         q,
         q_quality: k.pdq_quality.min(m.pdq_quality),
         deep,
+        fit: None,
+        kin,
     }
 }
 
@@ -345,7 +448,30 @@ pub fn group(
         }
     }
     for c in comps.iter_mut() {
-        c.sort_by(|&a, &b| keeper_order_with_degree(&hashed[a], degree[a], &hashed[b], degree[b]));
+        // the keeper is the exposure most of the component shares: the
+        // member with the most known-same capture moments first, so a
+        // burst frame that strayed in is the kin, not the family
+        let same: std::collections::HashMap<usize, usize> = c
+            .iter()
+            .map(|&i| {
+                let n = c
+                    .iter()
+                    .filter(|&&j| {
+                        j != i
+                            && capture::different_moments(
+                                hashed[i].capture.as_ref(),
+                                hashed[j].capture.as_ref(),
+                            ) == Some(false)
+                    })
+                    .count();
+                (i, n)
+            })
+            .collect();
+        c.sort_by(|&a, &b| {
+            same[&b].cmp(&same[&a]).then_with(|| {
+                keeper_order_with_degree(&hashed[a], degree[a], &hashed[b], degree[b])
+            })
+        });
     }
 
     // deep attachments: singletons join the keeper they are closest to
@@ -418,28 +544,22 @@ pub fn group(
     let mut groups: Vec<NearGroup> = Vec::new();
     for (ci, idxs) in comps.iter().enumerate() {
         let keeper = slots[idxs[0]].take().unwrap();
-        let keeper_sig = keeper.sig.clone();
-        let keeper_deep = keeper.deep;
         let mut members: Vec<NearMember> = vec![NearMember {
             hashed: keeper,
             relation: None,
         }];
         for &i in &idxs[1..] {
             let h = slots[i].take().unwrap();
-            let cs = match (keeper_deep.as_ref(), h.deep.as_ref()) {
-                (Some(a), Some(b)) => Some(crate::deep::cosine(a, b)),
-                _ => None,
-            };
-            let relation = Some(relation_deep(&keeper_sig, &h.sig, cs));
+            let relation = Some(relation_of(&members[0].hashed, &h));
             members.push(NearMember {
                 hashed: h,
                 relation,
             });
         }
-        for &(aci, m, cs) in &deep_attached {
+        for &(aci, m, _) in &deep_attached {
             if aci == ci {
                 let h = slots[m].take().unwrap();
-                let relation = Some(relation_deep(&keeper_sig, &h.sig, Some(cs)));
+                let relation = Some(relation_of(&members[0].hashed, &h));
                 members.push(NearMember {
                     hashed: h,
                     relation,
@@ -452,6 +572,44 @@ pub fn group(
         stats.grouped += members.len() as u64;
         groups.push(NearGroup { members });
     }
+
+    // the geometric fit, only where the cheaper evidence left a question:
+    // hash-grouped members PDQ did not confirm, and deep-admitted members.
+    // Kin members are decided already. Two decodes and a search per pair,
+    // in parallel across pairs.
+    let wanted: Vec<(usize, usize)> = groups
+        .iter()
+        .enumerate()
+        .flat_map(|(gi, g)| {
+            g.members
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter_map(move |(mi, m)| {
+                    let r = m.relation?;
+                    let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only());
+                    needs.then_some((gi, mi))
+                })
+        })
+        .collect();
+    stats.fits = wanted.len() as u64;
+    let fits: Vec<((usize, usize), Option<Fit>)> = wanted
+        .into_par_iter()
+        .map(|(gi, mi)| {
+            let k = &groups[gi].members[0].hashed.rep.cand.path;
+            let m = &groups[gi].members[mi].hashed.rep.cand.path;
+            ((gi, mi), geometry::fit_files(k, m))
+        })
+        .collect();
+    for ((gi, mi), f) in fits {
+        if let Some(r) = groups[gi].members[mi].relation.as_mut() {
+            r.fit = f;
+            if r.fit_ok() {
+                stats.fit_confirmed += 1;
+            }
+        }
+    }
+    stats.kin = groups.iter().map(|g| g.kin_count() as u64).sum();
     groups.sort_by(|a, b| {
         b.reclaimable().cmp(&a.reclaimable()).then_with(|| {
             a.members[0]

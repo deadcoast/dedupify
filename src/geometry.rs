@@ -1,0 +1,549 @@
+//! The geometric fit (docs/RESEARCH.md §2.7): where the hashes stop,
+//! correlation continues.
+//!
+//! Two pictures are compared as small aspect-preserving luma thumbnails.
+//! One is searched for inside the other — over a range of scales
+//! (crops), every offset (where the crop sits), and small rotations — and
+//! the best normalised cross-correlation (NCC) is the fit. NCC is
+//! invariant to brightness and contrast, so a crop that was also
+//! brightened or re-encoded still fits; it is a spatial-domain measure,
+//! independent of the frequency-domain hashes, which is why it counts as
+//! a second family of evidence.
+//!
+//! The thumbnails are band-passed before correlating (a narrow blur minus
+//! a wide one): the wide blur removes slow gradients, which otherwise let
+//! a smooth sky correlate with a smooth ramp; the narrow blur makes thin
+//! strokes tolerant of the half-pixel shifts a rescale introduces. What
+//! correlates is edges and texture, which is what makes two pictures the
+//! same picture.
+//!
+//! The search is coarse-to-fine: every scale and offset at 64 pixels
+//! (a few million multiply-adds per direction), then the best position
+//! refined at 128. Both directions are tried (B inside A, A inside B),
+//! so a letterbox — the original inside a larger frame — is found too; a
+//! stretch of one onto the other's whole frame covers aspect changes.
+
+use image::DynamicImage;
+
+/// Longest side of the thumbnails the fit works on.
+pub const MAX_SIDE: usize = 128;
+/// Smallest window (as a fraction of the containing side) searched: a
+/// crop keeping less than half a side (a quarter of the area) is not
+/// claimed.
+pub const SCALE_MIN: f32 = 0.5;
+/// Small rotations searched at full scale, in degrees.
+pub const ANGLES: [f32; 7] = [-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0];
+/// Band-pass radii (box blurs) applied to every thumbnail at `MAX_SIDE`;
+/// scaled down with the thumbnail for the coarse pass.
+pub const BLUR_NARROW: usize = 1;
+pub const BLUR_WIDE: usize = 8;
+/// Fit at or above this confirms a pair (measured, docs/VERIFICATION.md
+/// Phase 6).
+pub const FIT_MIN: f32 = 0.92;
+
+/// An aspect-preserving luma thumbnail, values in [0, 255].
+#[derive(Debug, Clone)]
+pub struct Thumb {
+    pub w: usize,
+    pub h: usize,
+    pub px: Vec<f32>,
+}
+
+impl Thumb {
+    /// Decode to luma and shrink so the longer side is `max_side`.
+    pub fn from_image(img: &DynamicImage, max_side: usize) -> Thumb {
+        let (w0, h0) = (img.width() as usize, img.height() as usize);
+        let scale = max_side as f32 / w0.max(h0).max(1) as f32;
+        let w = ((w0 as f32 * scale).round() as usize).clamp(1, max_side);
+        let h = ((h0 as f32 * scale).round() as usize).clamp(1, max_side);
+        let small = img.resize_exact(w as u32, h as u32, image::imageops::FilterType::Triangle);
+        let gray = small.to_luma8();
+        Thumb {
+            w,
+            h,
+            px: gray.as_raw().iter().map(|&v| v as f32).collect(),
+        }
+    }
+
+    /// Box blur with radius `r` (window 2r+1), edges clamped; separable.
+    fn box_blur(&self, r: usize) -> Thumb {
+        if r == 0 {
+            return self.clone();
+        }
+        let mut tmp = vec![0.0f32; self.w * self.h];
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let lo = x.saturating_sub(r);
+                let hi = (x + r).min(self.w - 1);
+                let mut acc = 0.0;
+                for xx in lo..=hi {
+                    acc += self.at(xx, y);
+                }
+                tmp[y * self.w + x] = acc / (hi - lo + 1) as f32;
+            }
+        }
+        let mut out = vec![0.0f32; self.w * self.h];
+        for x in 0..self.w {
+            for y in 0..self.h {
+                let lo = y.saturating_sub(r);
+                let hi = (y + r).min(self.h - 1);
+                let mut acc = 0.0;
+                for yy in lo..=hi {
+                    acc += tmp[yy * self.w + x];
+                }
+                out[y * self.w + x] = acc / (hi - lo + 1) as f32;
+            }
+        }
+        Thumb {
+            w: self.w,
+            h: self.h,
+            px: out,
+        }
+    }
+
+    /// Narrow blur minus wide blur: the band the fit correlates on.
+    fn band_pass(&self, narrow: usize, wide: usize) -> Thumb {
+        let a = self.box_blur(narrow);
+        let b = self.box_blur(wide);
+        Thumb {
+            w: self.w,
+            h: self.h,
+            px: a.px.iter().zip(&b.px).map(|(x, y)| x - y).collect(),
+        }
+    }
+
+    /// Band radii for a containing picture of this size: the shipped radii
+    /// are for `MAX_SIDE`, halved for the coarse pass.
+    fn radii(&self) -> (usize, usize) {
+        let f = self.w.max(self.h) as f32 / MAX_SIDE as f32;
+        let narrow = (BLUR_NARROW as f32 * f).round() as usize;
+        let wide = ((BLUR_WIDE as f32 * f).round() as usize).max(2);
+        (narrow, wide)
+    }
+
+    fn at(&self, x: usize, y: usize) -> f32 {
+        self.px[y * self.w + x]
+    }
+
+    /// Bilinear resize.
+    pub fn resized(&self, w: usize, h: usize) -> Thumb {
+        let w = w.max(1);
+        let h = h.max(1);
+        let mut px = Vec::with_capacity(w * h);
+        let sx = self.w as f32 / w as f32;
+        let sy = self.h as f32 / h as f32;
+        for y in 0..h {
+            let fy = ((y as f32 + 0.5) * sy - 0.5).clamp(0.0, (self.h - 1) as f32);
+            let y0 = fy.floor() as usize;
+            let y1 = (y0 + 1).min(self.h - 1);
+            let ty = fy - y0 as f32;
+            for x in 0..w {
+                let fx = ((x as f32 + 0.5) * sx - 0.5).clamp(0.0, (self.w - 1) as f32);
+                let x0 = fx.floor() as usize;
+                let x1 = (x0 + 1).min(self.w - 1);
+                let tx = fx - x0 as f32;
+                let v = self.at(x0, y0) * (1.0 - tx) * (1.0 - ty)
+                    + self.at(x1, y0) * tx * (1.0 - ty)
+                    + self.at(x0, y1) * (1.0 - tx) * ty
+                    + self.at(x1, y1) * tx * ty;
+                px.push(v);
+            }
+        }
+        Thumb { w, h, px }
+    }
+
+    /// Half size (2×2 box), for the coarse pass.
+    fn half(&self) -> Thumb {
+        self.resized((self.w / 2).max(1), (self.h / 2).max(1))
+    }
+
+    /// Rotate about the centre by `deg`; pixels that leave the frame are
+    /// `None` (NaN) and excluded from the correlation.
+    fn rotated(&self, deg: f32) -> Thumb {
+        let (cx, cy) = (self.w as f32 / 2.0, self.h as f32 / 2.0);
+        let (s, c) = deg.to_radians().sin_cos();
+        let mut px = Vec::with_capacity(self.w * self.h);
+        for y in 0..self.h {
+            for x in 0..self.w {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                let sx = cx + dx * c + dy * s - 0.5;
+                let sy = cy - dx * s + dy * c - 0.5;
+                if sx < 0.0 || sy < 0.0 || sx > (self.w - 1) as f32 || sy > (self.h - 1) as f32 {
+                    px.push(f32::NAN);
+                    continue;
+                }
+                let x0 = sx.floor() as usize;
+                let y0 = sy.floor() as usize;
+                let x1 = (x0 + 1).min(self.w - 1);
+                let y1 = (y0 + 1).min(self.h - 1);
+                let tx = sx - x0 as f32;
+                let ty = sy - y0 as f32;
+                px.push(
+                    self.at(x0, y0) * (1.0 - tx) * (1.0 - ty)
+                        + self.at(x1, y0) * tx * (1.0 - ty)
+                        + self.at(x0, y1) * (1.0 - tx) * ty
+                        + self.at(x1, y1) * tx * ty,
+                );
+            }
+        }
+        Thumb {
+            w: self.w,
+            h: self.h,
+            px,
+        }
+    }
+}
+
+/// Where and how well one picture fits inside the other.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Fit {
+    /// Normalised cross-correlation in [-1, 1]; 1 is a perfect affine match.
+    pub ncc: f32,
+    /// Window width as a fraction of the containing picture's width.
+    pub scale: f32,
+    /// Window offset in thumbnail pixels (at `MAX_SIDE`).
+    pub dx: i32,
+    pub dy: i32,
+    /// Rotation applied to the inner picture, degrees.
+    pub angle: f32,
+    /// True when the second argument was the inner picture.
+    pub inner_is_second: bool,
+}
+
+impl Fit {
+    pub fn none() -> Fit {
+        Fit {
+            ncc: -1.0,
+            scale: 0.0,
+            dx: 0,
+            dy: 0,
+            angle: 0.0,
+            inner_is_second: true,
+        }
+    }
+
+    pub fn confirmed(&self) -> bool {
+        self.ncc >= FIT_MIN
+    }
+
+    /// `fit 0.97  crop 80%`, `fit 0.95  rot +4°`, `fit 0.99` — the words a
+    /// result line carries. Below `FIT_MIN` only the number is shown: a
+    /// placement that did not fit is not a crop.
+    pub fn label(&self) -> String {
+        let mut s = format!("fit {:.2}", self.ncc.max(0.0));
+        if !self.confirmed() {
+            return s;
+        }
+        if self.angle != 0.0 {
+            s.push_str(&format!("  rot {:+.0}\u{b0}", self.angle));
+        } else if self.scale < 0.995 {
+            s.push_str(&format!("  crop {:.0}%", self.scale * 100.0));
+        }
+        s
+    }
+}
+
+/// NCC between `inner` placed at (dx, dy) inside `outer`, over the window
+/// minus a border of `margin` pixels (where the inner picture's blur saw
+/// its own edge and the outer's saw more picture). NaN pixels in `inner`
+/// are skipped. Returns -1 for a degenerate (flat) window.
+fn ncc_at(outer: &Thumb, inner: &Thumb, dx: usize, dy: usize, margin: usize) -> f32 {
+    let margin = if inner.w > 2 * margin + 4 && inner.h > 2 * margin + 4 {
+        margin
+    } else {
+        0
+    };
+    let mut n = 0.0f64;
+    let (mut sa, mut sb, mut saa, mut sbb, mut sab) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    for y in margin..inner.h - margin {
+        let orow = (dy + y) * outer.w + dx;
+        let irow = y * inner.w;
+        for x in margin..inner.w - margin {
+            let b = inner.px[irow + x];
+            if b.is_nan() {
+                continue;
+            }
+            let a = outer.px[orow + x];
+            let (a, b) = (a as f64, b as f64);
+            n += 1.0;
+            sa += a;
+            sb += b;
+            saa += a * a;
+            sbb += b * b;
+            sab += a * b;
+        }
+    }
+    if n < 16.0 {
+        return -1.0;
+    }
+    let va = saa - sa * sa / n;
+    let vb = sbb - sb * sb / n;
+    if va <= 1e-6 * n || vb <= 1e-6 * n {
+        return -1.0;
+    }
+    ((sab - sa * sb / n) / (va * vb).sqrt()) as f32
+}
+
+/// Scales searched: from 1.0 down to `SCALE_MIN` in 5 % steps.
+fn scales() -> Vec<f32> {
+    let mut v = Vec::new();
+    let mut s = 1.0f32;
+    while s >= SCALE_MIN - 1e-6 {
+        v.push(s);
+        s -= 0.05;
+    }
+    v
+}
+
+/// Best placement of `inner` inside `outer` over scales and offsets,
+/// coarse at half size then refined at full size around the best.
+fn best_containment(outer: &Thumb, inner: &Thumb) -> Fit {
+    let (o2, i2) = (outer.half(), inner.half());
+    let (n2, w2r) = o2.radii();
+    let o2b = o2.band_pass(n2, w2r);
+    let mut best = Fit::none();
+    let aspect = inner.h as f32 / inner.w as f32;
+    for s in scales() {
+        // window at coarse size
+        let w2 = ((o2.w as f32 * s).round() as usize).max(4);
+        let h2 = ((w2 as f32 * aspect).round() as usize).max(4);
+        if w2 > o2.w || h2 > o2.h {
+            continue;
+        }
+        let win = i2.resized(w2, h2).band_pass(n2, w2r);
+        for dy in 0..=(o2.h - h2) {
+            for dx in 0..=(o2.w - w2) {
+                let c = ncc_at(&o2b, &win, dx, dy, w2r);
+                if c > best.ncc {
+                    best = Fit {
+                        ncc: c,
+                        scale: s,
+                        dx: dx as i32,
+                        dy: dy as i32,
+                        angle: 0.0,
+                        inner_is_second: true,
+                    };
+                }
+            }
+        }
+    }
+    if best.ncc < 0.0 {
+        return best;
+    }
+    // refine at full size: ±1 scale step, ±2 px around the coarse best
+    let (n1, w1r) = outer.radii();
+    let ob = outer.band_pass(n1, w1r);
+    let mut refined = Fit::none();
+    for ds in [-0.05f32, 0.0, 0.05] {
+        let s = (best.scale + ds).clamp(SCALE_MIN, 1.0);
+        let w = ((outer.w as f32 * s).round() as usize).max(8);
+        let h = ((w as f32 * aspect).round() as usize).max(8);
+        if w > outer.w || h > outer.h {
+            continue;
+        }
+        let win = inner.resized(w, h).band_pass(n1, w1r);
+        let cx = best.dx * 2;
+        let cy = best.dy * 2;
+        for dy in (cy - 2)..=(cy + 2) {
+            for dx in (cx - 2)..=(cx + 2) {
+                if dx < 0 || dy < 0 || dx as usize + w > outer.w || dy as usize + h > outer.h {
+                    continue;
+                }
+                let c = ncc_at(&ob, &win, dx as usize, dy as usize, w1r);
+                if c > refined.ncc {
+                    refined = Fit {
+                        ncc: c,
+                        scale: s,
+                        dx,
+                        dy,
+                        angle: 0.0,
+                        inner_is_second: true,
+                    };
+                }
+            }
+        }
+    }
+    if refined.ncc > best.ncc {
+        refined
+    } else {
+        best
+    }
+}
+
+/// Small rotations of `inner` against `outer` at full frame (both
+/// resized to the outer's size), offsets ±2 px.
+fn best_rotation(outer: &Thumb, inner: &Thumb) -> Fit {
+    let (n1, w1r) = outer.radii();
+    let ob = outer.band_pass(n1, w1r);
+    let same = inner.resized(outer.w, outer.h).band_pass(n1, w1r);
+    let mut best = Fit::none();
+    for &deg in ANGLES.iter() {
+        if deg == 0.0 {
+            continue; // the containment search covers it
+        }
+        let rot = same.rotated(deg);
+        let c = ncc_at(&ob, &rot, 0, 0, w1r);
+        if c > best.ncc {
+            best = Fit {
+                ncc: c,
+                scale: 1.0,
+                dx: 0,
+                dy: 0,
+                angle: deg,
+                inner_is_second: true,
+            };
+        }
+    }
+    best
+}
+
+/// `inner` stretched onto `outer`'s whole frame, aspect ignored (a
+/// squeezed or stretched copy).
+fn stretched(outer: &Thumb, inner: &Thumb) -> Fit {
+    let (n1, w1r) = outer.radii();
+    let c = ncc_at(
+        &outer.band_pass(n1, w1r),
+        &inner.resized(outer.w, outer.h).band_pass(n1, w1r),
+        0,
+        0,
+        w1r,
+    );
+    Fit {
+        ncc: c,
+        scale: 1.0,
+        dx: 0,
+        dy: 0,
+        angle: 0.0,
+        inner_is_second: true,
+    }
+}
+
+/// The fit between two pictures: the best of `b` inside `a`, `a` inside
+/// `b`, a stretch either way, and small rotations either way. Every
+/// comparison band-passes both sides at the containing picture's scale.
+pub fn fit(a: &Thumb, b: &Thumb) -> Fit {
+    let mut best = best_containment(a, b);
+    for (f, second) in [
+        (best_containment(b, a), false),
+        (stretched(a, b), true),
+        (stretched(b, a), false),
+        (best_rotation(a, b), true),
+        (best_rotation(b, a), false),
+    ] {
+        if f.ncc > best.ncc {
+            best = Fit {
+                inner_is_second: second,
+                ..f
+            };
+        }
+    }
+    best
+}
+
+/// Decode both files and fit them. `None` when either does not decode.
+pub fn fit_files(a: &std::path::Path, b: &std::path::Path) -> Option<Fit> {
+    let ia = crate::perceptual::load_image(a).ok()?;
+    let ib = crate::perceptual::load_image(b).ok()?;
+    Some(fit(
+        &Thumb::from_image(&ia, MAX_SIDE),
+        &Thumb::from_image(&ib, MAX_SIDE),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, Rgb, RgbImage};
+
+    /// A picture with structure at several scales (so a crop is locatable).
+    fn picture(seed: u32) -> RgbImage {
+        let (w, h) = (400u32, 300u32);
+        ImageBuffer::from_fn(w, h, |x, y| {
+            let s = seed as f32;
+            let v = 128.0
+                + 60.0 * ((x as f32 / 37.0 + s).sin() * (y as f32 / 23.0 - s).cos())
+                + 40.0 * (((x / 50 + y / 50 + seed) % 2) as f32 - 0.5)
+                + 20.0 * ((x as f32 * 0.21 + y as f32 * 0.13 + s * 3.0).sin());
+            let v = v.clamp(0.0, 255.0) as u8;
+            Rgb([v, (v as u16 * 7 / 8) as u8, (v as u16 * 3 / 4) as u8])
+        })
+    }
+
+    fn thumb(img: &RgbImage) -> Thumb {
+        Thumb::from_image(&DynamicImage::ImageRgb8(img.clone()), MAX_SIDE)
+    }
+
+    #[test]
+    fn identical_fits_perfectly() {
+        let a = picture(1);
+        let f = fit(&thumb(&a), &thumb(&a));
+        assert!(f.ncc > 0.999, "{f:?}");
+        assert_eq!(f.angle, 0.0);
+    }
+
+    #[test]
+    fn crop_is_located_at_its_scale() {
+        let a = picture(2);
+        let crop = image::imageops::crop_imm(&a, 60, 45, 280, 210).to_image(); // 70 %
+        let f = fit(&thumb(&a), &thumb(&crop));
+        assert!(f.ncc > 0.95, "{f:?}");
+        assert!((f.scale - 0.70).abs() < 0.06, "{f:?}");
+        assert!(f.inner_is_second, "{f:?}");
+    }
+
+    #[test]
+    fn letterbox_is_found_the_other_way_round() {
+        let a = picture(3);
+        let mut lb: RgbImage = ImageBuffer::from_pixel(400, 380, Rgb([0, 0, 0]));
+        image::imageops::overlay(&mut lb, &a, 0, 40);
+        let f = fit(&thumb(&a), &thumb(&lb));
+        assert!(f.ncc > 0.95, "{f:?}");
+        assert!(
+            !f.inner_is_second,
+            "the original sits inside the letterbox\n{f:?}"
+        );
+    }
+
+    #[test]
+    fn small_rotation_is_recovered() {
+        let a = picture(4);
+        // rotate by 4° with the same bilinear scheme the corpus uses
+        let (w, h) = (a.width(), a.height());
+        let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+        let (s, c) = 4.0f32.to_radians().sin_cos();
+        let rot: RgbImage = ImageBuffer::from_fn(w, h, |x, y| {
+            let dx = x as f32 - cx;
+            let dy = y as f32 - cy;
+            let sx = (cx + dx * c + dy * s).round();
+            let sy = (cy - dx * s + dy * c).round();
+            if sx < 0.0 || sy < 0.0 || sx >= w as f32 || sy >= h as f32 {
+                Rgb([128, 112, 96])
+            } else {
+                *a.get_pixel(sx as u32, sy as u32)
+            }
+        });
+        let f = fit(&thumb(&a), &thumb(&rot));
+        assert!(f.ncc > 0.9, "{f:?}");
+        assert!(f.angle.abs() >= 2.0, "{f:?}");
+    }
+
+    #[test]
+    fn different_pictures_do_not_fit() {
+        let f = fit(&thumb(&picture(5)), &thumb(&picture(9)));
+        assert!(f.ncc < FIT_MIN, "{f:?}");
+    }
+
+    #[test]
+    fn brightness_does_not_matter() {
+        let a = picture(6);
+        let mut bright = a.clone();
+        for p in bright.pixels_mut() {
+            for k in 0..3 {
+                p.0[k] = (p.0[k] as f32 * 1.3 + 10.0).min(255.0) as u8;
+            }
+        }
+        let f = fit(&thumb(&a), &thumb(&bright));
+        assert!(f.ncc > 0.98, "{f:?}");
+    }
+}

@@ -298,6 +298,116 @@ builds without it). ONNX Runtime was not used because its prebuilt
 binaries are not on crates.io and would have to be installed beside the
 executable; whether it would be faster here was not measured.
 
+### 2.7 The geometric fit — Phase 6 **[CLAUDE]**
+
+Where the hashes stop, correlation continues. Every hash above works in
+the frequency domain on the whole frame, which is why crops, letterboxes
+and small rotations defeat all three at once: the frame is a different
+frame. The fit answers the question the hashes cannot — *does one picture
+sit inside the other?* — directly, in the spatial domain, and that makes
+it an independent family of evidence.
+
+**Measure.** For a window `A_w` of picture A and a picture B resized to
+the window's size, the normalised cross-correlation
+
+```
+ρ(A_w, B) = Σ (a − ā)(b − b̄) / √( Σ (a − ā)² · Σ (b − b̄)² )
+```
+
+over the window's pixels. ρ is invariant to any `b → αb + β` with α > 0,
+so a crop that was also brightened, gamma-shifted or re-encoded still
+scores as the same picture; ρ = 1 is an affine match, ρ ≈ 0 is unrelated.
+
+**Band.** Both sides are band-passed first — a narrow box blur (radius 1
+at 128 px) minus a wide one (radius 8). The wide term removes the mean and
+every slow gradient (a box filter maps a linear ramp onto itself, so the
+difference of two is zero on ramps), which stops a smooth sky from
+correlating with a smooth ramp; the narrow term makes thin strokes
+tolerant of the half-pixel shifts a rescale introduces. What is left to
+correlate is edges and texture — the content. A border of the wide radius
+is excluded from each window, because the crop's own edge and the
+original's continuing picture blur differently there.
+
+**Search.** Thumbnails keep their aspect, longest side 128. For B inside
+A: window widths `s·W_A` for `s ∈ {1.00, 0.95, …, 0.50}` (a crop keeping
+less than half a side — a quarter of the area — is not claimed), window
+height from B's aspect, every integer offset. Coarse at 64 px (about five
+million multiply-adds per direction), then the best placement refined at
+128 px over ±1 scale step and ±2 px. Then A inside B (a letterbox is the
+original inside a larger frame), B stretched onto A's whole frame and the
+reverse (aspect changes), and rotations of ±2°, ±4°, ±6° at full frame
+either way. The best ρ of all of these is the fit. Measured cost: 18 ms a
+pair on the build machine with thumbnails in hand; about 40 ms including
+the two decodes. It runs only where the cheaper evidence left a question.
+
+**Where it is consulted.** Never over all pairs — as a confirmation:
+
+1. a member the two 64-bit hashes grouped that PDQ did not confirm
+   (crops, small rotations, letterboxes, watermarks — and, on real
+   photographs, the same scene from another position);
+2. a member the learned descriptor admitted (crops the hashes cannot
+   reach).
+
+**Measured** (`measure_geometry` in `tests/corpus.rs` and
+`tests/real_corpus.rs`; full tables in VERIFICATION.md, Phase 6):
+
+- Procedural positives at the shipped `FIT_MIN = 0.92`: crops 90/80/60 %,
+  rotations 2°/5°, letterbox all ≥ 0.918 (minimum), 100 % recall; the
+  real-photograph set at the 5th percentile: crop 90 % 0.963, crop 80 %
+  0.929, crop 60 % 0.861, letterbox 0.950, rotate 5° 0.921.
+- Negatives over every pair of distinct files: procedural max 0.929 (two
+  value-noise textures, above the threshold); real photographs: the only
+  pairs above 0.92 are two consecutive video frames (0.931) and two
+  optical-flow frames (0.995) — the same picture both times; the highest
+  unrelated pair is two text images at 0.918. Pairs the fit is actually
+  asked about did better still: the chessboard photographed from other
+  positions, which the hashes grouped and PDQ refused, fit at 0.31–0.45;
+  the procedural `forest.png` the deep tier listed at 0.76 fit at 0.51.
+- What it does not catch, by construction: mirror and 90° rotation
+  (ρ ≈ 0.3–0.5; the hashes own those), rotations past 6°, crops under
+  half a side, and text or line art, where band-passed strokes correlate
+  across unrelated documents at 0.91 (never a candidate unless a hash or
+  the descriptor admitted the pair first).
+
+**What changes.** `milk` and `purge` act on a member only when two
+families agree: the hash pair **and** (PDQ **or** the fit); or the deep
+descriptor **and** the fit. A hash-pair member with neither prints as
+`kept~` in both commands. On the real set this is the difference between
+moving two distinct chessboard photographs and leaving them; on the
+fixture it is the difference between leaving a 5 % crop (PDQ 32, one bit
+over) and moving it (fit 1.00). The deep tier gains an acting path: a
+letterboxed copy the hashes miss (p 20) is admitted by the descriptor
+(0.78) and confirmed by the fit (1.00); `forest.png` (0.76, fit 0.51)
+stays listed.
+
+### 2.8 Capture moment — Phase 6 **[CLAUDE]**
+
+Two photographs taken at different moments are two photographs, however
+alike they look. A camera writes EXIF `DateTimeOriginal` at exposure
+(with `SubSecTimeOriginal` where it keeps fractions); every editor and
+exporter that preserves EXIF preserves it, so a copy, a re-encode, a
+resize or a crop carries its source's moment. A burst, a stereo pair, the
+same board from another angle each carry their own.
+
+Rule: when both files state a moment and the two differ, the member is
+`kin` — shown in its group with `taken <moment>`, never moved or binned,
+whatever the hashes, PDQ or the fit say. When either file states none
+(screenshots, renders, stripped exports) the rule says nothing and the
+pictures decide. Fractions separate frames within one second only when
+both sides recorded them.
+
+The keeper of a near group is now the member whose moment the most
+members share, before degree and pixels: a burst frame that strayed into
+an exposure's family is the kin, not the family's keeper.
+
+Known limits, all on the conservative side (a `kin` is never acted on):
+two scans of one print carry two scan times and are shown as kin; a tool
+that rewrites `DateTimeOriginal` on export turns derivatives into kin.
+The real-photograph set used here carries no EXIF, so the rule is
+verified on synthesised capture times (`capture.rs` builds a JPEG with an
+EXIF segment in its tests; `tests/e2e.rs` stamps the fixture) and not yet
+on a camera roll.
+
 ### 2.3 Searching Hamming space — Multi-Index Hashing
 
 With n hashes, checking all pairs costs n(n−1)/2 XOR+popcount operations.
@@ -486,5 +596,7 @@ itself uses the full timestamp.
 - PDQ reference implementation — https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md
 - SSCD ONNX export used — https://huggingface.co/nutszebra/sscd_onnx (sscd_disc_mixup.onnx, sha256 e65e2a5b…); Meta's checkpoint — https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt (sha256 9f26bd4c…); SSCD repository — https://github.com/facebookresearch/sscd-copy-detection
 - `tract` — https://github.com/sonos/tract
+- Normalised cross-correlation for template matching — J. P. Lewis, "Fast Normalized Cross-Correlation", Vision Interface 1995, http://scribblethink.org/Work/nvisionInterface/nip.html
+- EXIF 2.32 (CIPA DC-008-2019), tags 0x9003 DateTimeOriginal and 0x9291 SubSecTimeOriginal — https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf; reader: `kamadak-exif` — https://github.com/kamadak/exif-rs
 - `trash` crate — https://docs.rs/trash
 - `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher

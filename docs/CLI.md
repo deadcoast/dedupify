@@ -77,7 +77,13 @@ the same command **[CLAUDE]**: the default stays fast, the comprehensive
 form is one line away.
 
 ### milk **[SPEC]**
-`find`, then moves every duplicate into `<root>/_milked/`, created if absent.
+`find`, then moves every confirmed duplicate into `<root>/_milked/`, created
+if absent. Confirmed means what it means for `purge` (two families of
+evidence agree, RESEARCH §2.7); a near duplicate the two hashes grouped
+and nothing confirmed prints as `kept~` with the reason and stays — on
+real photographs that was two pictures of one chessboard from different
+positions, which `milk` would otherwise have moved. A `kin` member
+(another capture moment) is never moved.
 The relative path under the root is preserved inside `_milked`
 (`a/b/x.jpg` → `_milked/a/b/x.jpg`) so a milked tree can be inspected or
 restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
@@ -88,11 +94,13 @@ scanned, so running `milk` twice is idempotent.
 The full suite: exact pipeline with byte-for-byte verification of each
 duplicate against its keeper, **and** the near-duplicate image and video
 passes on every run, whatever the kind token. Near duplicates
-cannot be byte-verified; `purge` bins one only when a third hash, PDQ
-(256-bit), also agrees with the keeper (Phase 2b). Such lines carry `~` and
-the three distances. A member the two 64-bit hashes grouped but PDQ did not
-confirm prints as `kept~` with the reason, and the footer names the `milk`
-command that moves it instead. `purge` reports the OS bin it used and how
+cannot be byte-verified; `purge` bins one only when a second family of
+evidence agrees with the two 64-bit hashes — PDQ (256-bit, Phase 2b) or
+the geometric fit (Phase 6) — or, for a member the deep descriptor
+admitted, when the fit confirms it. Such lines carry `~` and the
+distances, plus `fit 1.00  crop 95%` when the fit was the deciding
+evidence. A member nothing confirmed prints as `kept~` with the reason
+and stays. `purge` reports the OS bin it used and how
 to undo. `--quick-search` skips the full hash and the near passes, never
 the byte verification: a sample-level match whose bytes differ prints as
 `kept   bytes differ from keeper` and stays **[CLAUDE]**. With a kind
@@ -118,8 +126,9 @@ Rules the renderer enforces:
 - Width-aware: every line is measured in display cells (`unicode-width`) and
   fitted to the terminal; long paths are shortened in the middle with `…`,
   never wrapped. The path column of a NEAR or VIDEO block is sized from
-  the widest tail in that block; below ~95 columns a VIDEO block drops its
-  codec column, then its dimensions, before the path falls under 18 cells.
+  the widest tail in that block; when the path would fall under 14 cells
+  a NEAR block drops its dimensions column, and a VIDEO block drops its
+  codec column, then its dimensions, before the path falls under 18.
   A stage line drops its rightmost segments rather than wrap (the in-place
   redraw cannot clear a wrapped line). A totals line whose policy part does
   not fit moves that part to an indented second line.
@@ -185,15 +194,17 @@ Near groups follow the exact groups and continue the numbering:
    keep  photos\beach.png                        1000×750   436 KB   2019-06-12
    near  photos\export\beach_mirror.png          1000×750   444 KB   d  0  p  0  q   8  mirror
    near  photos\export\beach.jpg                 1000×750   45.9 KB  d  0  p  0  q   2  +GROUP 002
-   near  photos\export\beach_crop.jpg            950×712    41.7 KB  d 10  p  6  q  32
+   near  photos\export\beach_crop.jpg            950×712    41.7 KB  d 10  p  6  q  32  fit 1.00  crop 95%
    near  photos\beach_small.jpg                   500×375    10.6 KB  d  0  p  0  q   4
  ───────────────────────────────────────────────────────────────
  2 groups   3 duplicates   646 KB reclaimable   keep: oldest copy
- 1 near group   4 similar   542 KB reclaimable   keep: most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 to bin
+ 1 near group   4 similar   542 KB reclaimable
+   keep: shared moment, most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
 ```
 
 The header counts the members beside the keeper, as the totals line does
-(`+2 deep` when the deep tier added members). `d` and `p` are the dHash
+(`+2 deep` when the deep tier added members, `+1 kin` for members taken
+at another moment). `d` and `p` are the dHash
 and pHash distances to the keeper (of 64 bits), `q` the PDQ distance (of
 256); `deep 0.83` appears when the optional model is installed
 (`docs/DEEP.md`) and is the SSCD cosine to the keeper; `mirror`, `rot 90`,
@@ -201,9 +212,15 @@ and pHash distances to the keeper (of 64 bits), `q` the PDQ distance (of
 keeper of an exact group, whose copies are listed there. A distance over
 its threshold is lit in the warning colour: `d`/`p` when the member is
 linked only through another member, `q` when `purge` will keep it (`q 32`
-on the crop above). A member the deep tier alone brought in prints with
-the verb `deep`; `milk` and `purge` leave it in place and the totals line
-says how many such members there are.
+on the crop above). `fit 0.97  crop 80%` / `fit 0.95  rot +4°` / `fit 1.00`
+is the geometric fit (RESEARCH §2.7), shown where it was consulted: lit
+when it is what confirmed the member, in the warning colour when it fell
+short (`fit 0.45`). A member the deep tier alone brought in prints with
+the verb `deep`; one the fit then confirmed prints as `near` and acts. A
+member whose EXIF capture moment differs from the keeper's prints with the
+verb `kin` and `taken 2021-03-04 05:06:08`; `milk` and `purge` leave
+`deep` and `kin` members in place and the totals lines say how many of
+each there are.
 
 Video groups follow, numbered on:
 
@@ -285,11 +302,13 @@ five choices on one screen **[SPEC: no bloat]**.
   is deleted. A file that cannot be renamed is reported as `failed` and
   left where it is; the exit code becomes 2.
 - `purge` verifies bytes before the bin call and never hard-deletes. Near
-  duplicates go to the bin only when confirmed against the keeper — images:
-  dHash, pHash and PDQ all agree; videos: TMK level 2 ≥ 0.9, or the three
-  image hashes agree on the sampled frames — marked `~` on their line; the
-  rest print as `kept~`. `--undo` restores binned files like any other
-  entry.
+  duplicates are moved or binned only when two families of evidence agree
+  — images: dHash and pHash with PDQ or the geometric fit, or the deep
+  descriptor with the fit; videos: TMK level 2 ≥ 0.9, or the three image
+  hashes agree on the sampled frames — marked `~` on their line; the rest
+  print as `kept~` in `milk` as well as `purge`. Two files with different
+  EXIF capture moments are `kin` and never acted on. `--undo` restores
+  binned files like any other entry.
 - Every change writes one journal; `--undo` reverses it. No cache, no index,
   no lock file, nothing persisted on a scan. `--undo` with nothing pending
   under its root names up to three other roots that have a pending
@@ -300,5 +319,6 @@ five choices on one screen **[SPEC: no bloat]**.
   `canonicalize` produces; `_milked` is recognised whatever its letter
   case there.
 - `_milked` and the journal directory are the only things `dedupe` creates.
-- The optional model (`docs/DEEP.md`) can only add lines to `find`; it
-  never moves or bins a file.
+- The optional model (`docs/DEEP.md`) admits members; on its own it only
+  adds lines. A member it admitted moves or bins only when the geometric
+  fit confirms it.

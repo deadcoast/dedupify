@@ -621,3 +621,268 @@ Binary: 25,697,216 bytes with the deep tier (was 25,618,368; `ctrlc` and
   the repository on the linked Windows machine for a real run was blocked
   by the session's folder-access policy.
 - The deep tier's cost on Windows (tract's `ml64`-assembled kernels).
+
+---
+
+# VERIFICATION — Phase 6 (real photographs, the fit, the moment), run on 2026-11-08
+
+Same environment. Real pictures: the 98 JPEG/PNG files and 4 AVI clips
+in OpenCV's `samples/data` (sparse checkout of `opencv/opencv` at
+master), 9.94 MB of images — photographs, renders, scans, diagrams and
+line art, with known relations inside the set: two stereo pairs
+(`aloeL/R`, `left/right`), a chessboard photographed from 26 positions
+(`left01–14`, `right01–14`), consecutive frames (`basketball1/2`,
+`rubberwhale1/2`), a viewpoint pair (`graf1/3`), an aerial pair
+(`aero1/3`), an exposure pair (`leuvenA/B`), a mirrored render
+(`Blender_Suzanne1/2`) and `lena.jpg` beside `lena_tmpl.jpg`. Real
+videos: `vtest.avi` (80 s), `Megamind.avi` and its shorter `_bugy`
+variant, `tree.avi`, plus three re-encodes made here with ffmpeg.
+
+## 1. The shipped rule on the real pictures (before this phase's changes)
+
+`DEDUPE_REAL_DIR=… cargo test --release --test real_corpus -- --ignored measure_real --nocapture`
+
+All 4,753 pairs of distinct files, the closest by d+p:
+
+| d | p | q | pair | shipped rule |
+|---|---|---|---|---|
+| 1 | 0 | 24 | Blender_Suzanne1 ~ Blender_Suzanne2 | group, PDQ confirms |
+| 1 | 0 | 8 | rubberwhale1 ~ rubberwhale2 | group, PDQ confirms |
+| 4 | 2 | 22 | basketball1 ~ basketball2 | group, PDQ confirms |
+| 3 | 12 | 44 | lena ~ lena_tmpl | group, q over |
+| 7 | 8 | 80 | opencv-logo-white ~ opencv-logo | group, q over |
+| 13 | 6 | 64 | left11 ~ left14 | — |
+| 10 | 12 | 76 | **right01 ~ right06** | **group, q over** |
+| 10 | 12 | 102 | **right01 ~ right09** | **group, q over** |
+| 14 | 8 | 110 | right05 ~ right12 | — |
+
+7 pairs grouped; PDQ confirms 3 — the three that are the same picture.
+The two bold rows are the same chessboard photographed from three
+positions: distinct photographs the two hashes grouped at exactly their
+thresholds. Before this phase `milk` would have moved `right06.jpg` and
+`right09.jpg` into `_milked`. The d+p histogram shows where the real
+world sits: 11 pairs at ≤ 24, 8 at 25–28, 23 at 29–32, 28 at 33–36 —
+the calibration series fills the band just outside the rule.
+
+Derivatives of the first 60 real sources (21 perturbations each) against
+the shipped rule, and negatives (each variant against every other
+source, 122,220 pairs):
+
+| perturbation | d max | p max | q max | d∧p | d∧p∧q |
+|---|---|---|---|---|---|
+| scale 50 % | 2 | 18 | 92 | 98.3 % | 98.3 % |
+| scale 25 % | 5 | 14 | 108 | 100 % | 98.3 % |
+| upscale 150 % | 2 | 14 | 80 | 100 % | 98.3 % |
+| JPEG q90 / q60 / q30 | 2 / 4 / 5 | 22 / 24 / 28 | 92 / 138 / 150 | 98.3 % | 98.3 % |
+| crop 90 % | 34 | 22 | 138 | 35.0 % | 0 % |
+| crop 80 % / 60 % | 32 / 35 | 29 / 34 | 150 / 140 | 0 % | 0 % |
+| rotate 2° | 20 | 24 | 118 | 91.7 % | 30.0 % |
+| rotate 5° | 22 | 24 | 120 | 43.3 % | 0 % |
+| rotate 90°, mirror | 0 | 0 | 30 / 26 | 100 % | 100 % |
+| bright ±20 %, gamma 1.5 | 5 / 1 / 5 | 20 / 10 / 14 | 118 / 50 / 64 | 98.3–100 % | 98.3 % |
+| watermark | 2 | 32 | 128 | 95.0 % | 53.3 % |
+| blur, noise ±10 | 2 / 20 | 14 / 24 | 54 / 128 | 100 / 96.7 % | 98.3 / 96.7 % |
+| letterbox | 18 | 24 | 122 | 40.0 % | 0 % |
+| squeeze 75 % | 1 | 10 | 64 | 100 % | 98.3 % |
+
+The one source behind every 98.3 % is `gradient.png`, a synthetic ramp:
+its hashes and PDQ change under any resampling. Real photographs behave
+as the procedural corpus predicted for rescale, re-encode, mirror and
+rotation, and worse for crops (35 % against 70 % at 10 %) and letterbox
+(40 % against 62 %). Negatives: of 122,220 variant-vs-other-source
+pairs the rule grouped 107, PDQ confirmed 58, and every one of them
+belongs to five source pairs — three that are the same picture
+(Suzanne pair, basketball frames, lena pair) and two chessboard poses
+(`left11~left14`, `left12~left14`), which PDQ refused.
+
+## 2. The geometric fit
+
+`measure_geometry` (procedural, 60 × 21 positives, 5,588 negative source
+pairs) and `measure_geometry_real` (60 × 21 positives from the real
+sources, all 4,753 negative pairs). Fit = best band-passed NCC over the
+search in RESEARCH §2.7.
+
+Positives (fit minimum / 5th percentile / median, recall at 0.92):
+
+| perturbation | procedural min / p5 / median | recall | real min / p5 / median | recall |
+|---|---|---|---|---|
+| rescale 50 %, 25 %, 150 % | 1.000 / 1.000 / 1.000 | 100 % | 0.575 / 0.999 / 1.000 | 98.3 % |
+| JPEG q90 / q60 / q30 | 0.998 / 0.999 / 1.000 and below | 100 % | 0.445 / 1.000 / 1.000; 0.119 / 0.999 / 1.000; 0.170 / 0.999 / 1.000 | 98.3 % |
+| crop 90 % | 0.956 / 0.986 / 0.993 | 100 % | 0.207 / 0.963 / 0.988 | 96.7 % |
+| crop 80 % | 0.927 / 0.976 / 0.985 | 100 % | 0.158 / 0.929 / 0.979 | 95.0 % |
+| crop 60 % | 0.935 / 0.975 / 0.991 | 100 % | 0.385 / 0.861 / 0.980 | 93.3 % |
+| rotate 2° | 0.999 / 0.999 / 0.999 | 100 % | 0.672 / 0.993 / 0.999 | 98.3 % |
+| rotate 5° | 0.945 / 0.959 / 0.975 | 100 % | 0.792 / 0.921 / 0.969 | 95.0 % |
+| rotate 90°, mirror | 0.40 / 0.48 / 0.61; 0.31 / 0.33 / 0.48 | 0 % | 0.12 / 0.30 / 0.50; 0.08 / 0.27 / 0.40 | 0 / 1.7 % |
+| brightness ±20 %, gamma 1.5 | ≥ 0.941 | 100 % | 0.220 / 0.986 / 0.998 and better | 98.3 % |
+| watermark | 0.661 / 0.721 / 0.888 | 28.3 % | 0.506 / 0.927 / 0.984 | 95.0 % |
+| blur, noise ±10 | ≥ 0.999 | 100 % | ≥ 0.820 / 0.997 / 1.000; 0.231 / 1.000 / 1.000 | 98.3 % |
+| letterbox | 0.918 / 0.935 / 0.983 | 98.3 % | 0.218 / 0.950 / 0.979 | 95.0 % |
+| squeeze 75 % | 0.999 / 1.000 / 1.000 | 100 % | 0.216 / 0.995 / 1.000 | 98.3 % |
+
+Every real-set minimum under 0.6 and every "98.3 %" is `gradient.png`,
+whose band-passed thumbnail is nothing (a box filter maps a ramp onto
+itself, so the narrow-minus-wide difference is zero); the fit cannot
+confirm it and the hashes miss it too. Mirror and 90° rotation are not
+searched by the fit; the hashes own them and PDQ confirms them. The
+procedural watermark (a bright 18 % × 8 % box with strokes) costs 0.3 of
+correlation on value-noise textures, 0.07 on photographs.
+
+Negatives over every pair of distinct files — procedural 5,588 pairs:
+max 0.929, p99.9 0.881, p99 0.800, median 0.552; real 4,753 pairs: max
+0.995, p99.9 0.913, p99 0.779, median 0.410. Sweep (false positives |
+recall over all perturbations | over crops, rotations and letterbox):
+
+| T | procedural | real |
+|---|---|---|
+| 0.85 | 18 \| 88.7 % \| 100 % | 14 \| 88.7 % \| 96.7 % |
+| 0.88 | 6 \| 88.3 % \| 100 % | 9 \| 88.4 % \| 96.1 % |
+| 0.90 | 3 \| 87.7 % \| 100 % | 7 \| 88.3 % \| 96.1 % |
+| **0.92** | **2 \| 87.0 % \| 99.7 %** | **2 \| 88.1 % \| 95.6 %** |
+| 0.95 | 0 \| 85.3 % \| 97.5 % | 1 \| 86.6 % \| 91.9 % |
+
+The two real pairs at or above 0.92 are the same picture both times
+(`rubberwhale1~2` 0.995, `basketball1~2` 0.931, consecutive frames); the
+highest unrelated real pair is `digits.png~notes.png` at 0.918. The two
+procedural pairs are value-noise textures the hashes never grouped. The
+fit is consulted only for pairs a hash or the descriptor admitted, and
+among those no non-derivative reached 0.62 in either corpus.
+
+Shipped `FIT_MIN = 0.92`.
+
+Named pairs in the real set (`geometry_real_named`): among the pairs
+the hashes grouped, `rubberwhale1~2` fit 1.00, `basketball1~2` 0.93,
+`lena~lena_tmpl` 0.80, logo pair 0.68, `right01~right06` 0.45,
+`right01~right09` 0.31, the mirrored Suzanne pair 0.32 (the fit does not
+search mirrors; PDQ confirms that pair). The best-fitting pairs of
+distinct files that are not the same picture are text and line-art
+images (`digits.png~notes.png` 0.918, `imageTextN.png~pic2.png` 0.914):
+band-passed strokes correlate across unrelated documents. None of these
+is a hash or deep candidate, so the fit is never asked about them.
+
+## 3. The binary on the real set
+
+`find img`, 98 files, DECODE 1.0 s, MATCH 0.1 s with 4 fits:
+
+```
+ --------------------------------------------------------------------------------------------------------------------------------
+ SCAN   ==============================  98 files   9.94 MB   0.0 s
+ SIZE   ==============================  0 share a size
+ DECODE ==============================  98 images hashed   1.0 s
+ MATCH  ==============================  7 similar pairs   13 images grouped   4 fits, 0 confirmed   0.1 s
+
+ NEAR 001   1 similar   353 KB reclaimable
+   keep  rubberwhale1.png                                                        584x388      352 KB   2026-11-07
+   near  rubberwhale2.png                                                        584x388      353 KB   d  1  p  0  q   8
+ NEAR 002   1 similar   130 KB reclaimable
+   keep  basketball1.png                                                         640x480      130 KB   2026-11-07
+   near  basketball2.png                                                         640x480      130 KB   d  4  p  2  q  22
+ NEAR 003   1 similar   24.8 KB reclaimable
+   keep  Blender_Suzanne1.jpg                                                    640x480      24.8 KB  2026-11-07
+   near  Blender_Suzanne2.jpg                                                    640x480      24.8 KB  d  1  p  0  q  24  mirror
+ NEAR 004   1 similar   0 B reclaimable
+   keep  lena.jpg                                                                512x512      89.7 KB  2026-11-07
+   near  lena_tmpl.jpg                                                           512x512      77.6 KB  d  3  p 12  q  44  fit 0.80
+ NEAR 005   1 similar   0 B reclaimable
+   keep  opencv-logo.png                                                         600x794      39.2 KB  2026-11-07
+   near  opencv-logo-white.png                                                   180x238      9.53 KB  d  7  p  8  q  80  fit 0.68
+ NEAR 006   2 similar   0 B reclaimable
+   keep  right01.jpg                                                             640x480      26.4 KB  2026-11-07
+   near  right06.jpg                                                             640x480      27.2 KB  d 10  p 12  q  76  fit 0.45
+   near  right09.jpg                                                             640x480      25.3 KB  d 10  p 12  q 102  fit 0.31
+ --------------------------------------------------------------------------------------------------------------------------------
+ no exact duplicates   98 files   9.94 MB checked
+ 6 near groups   7 similar   507 KB reclaimable
+   keep: shared moment, most matched, then most pixels   dHash <=10  pHash <=14  PDQ <=31 or fit >=0.92 to act
+ next   dedupe milk img   move duplicates into ./_milked
+        dedupe purge img  send duplicates to the Recycle Bin
+```
+
+`milk img -n`:
+
+```
+ would~    rubberwhale2.png                                                                                     d  1  p  0  q   8
+ would~    basketball2.png                                                                                      d  4  p  2  q  22
+ would~    Blender_Suzanne2.jpg                                                                         d  1  p  0  q  24  mirror
+ kept~     lena_tmpl.jpg                                                                    PDQ q 44 over 31; fit 0.80 under 0.92
+ kept~     opencv-logo-white.png                                                            PDQ q 80 over 31; fit 0.68 under 0.92
+ kept~     right06.jpg                                                                      PDQ q 76 over 31; fit 0.45 under 0.92
+ kept~     right09.jpg                                                                     PDQ q 102 over 31; fit 0.31 under 0.92
+ 3 would move   507 KB into ./_milked
+ 4 kept~: similar on two hashes, confirmed by nothing else; shown, left in place
+```
+
+With the model (`DEDUPE_MODEL`), the descriptor admitted 11 more pairs
+on the real set, every one a sibling capture: the stereo pair
+`aloeL~aloeR` (deep 0.91), chessboard poses at 0.72–0.88, and the ELA
+forensic pair `ela_original~ela_modified` (0.78), which is a real edit
+and crop of the same photograph. The fit refused all 15 pairs it was
+asked about (stereo 0.74, ELA 0.77, poses 0.28–0.62), so nothing was
+acted on. Two readings: the deep threshold of 0.70, set on procedural
+pictures, admits same-scene photographs freely on real ones — the
+list-never-act rule of Phase 4 is what keeps that harmless; and the ELA
+pair is a true derivative that neither PDQ (q 122) nor the fit (0.77:
+the edit, plus a crop — 902×770 against 897×708) confirms — a miss,
+recorded.
+
+Real video, `find vid` on the seven clips (FRAMES 4.7 s):
+
+```
+ VIDEO 001   2 similar   2.72 MB reclaimable
+   keep  vtest.avi                                           768x576      1:20    msmpe  7.75 MB  2026-11-07
+   near  vtest_small.mp4                                     384x288      1:20    h264   621 KB   d  0 p  2  q   2  tmk 1.00
+   near  vtest_trim.mp4                                      768x576      0:40    h264   2.12 MB  d  6 p 12  q  58  tmk 0.84  trim
+ VIDEO 002   2 similar   1.22 MB reclaimable
+   keep  Megamind.avi                                        720x528      0:11    mpeg4  1.13 MB  2026-11-07
+   near  megamind_x264.mp4                                   720x528      0:11    h264   408 KB   d  0 p  2  q   4  tmk 1.00
+   near  Megamind_bugy.avi                                   720x528      0:09    mpeg4  841 KB   d  2 p  2  q  12  tmk 1.00  trim
+ 2 video groups   4 similar   3.94 MB reclaimable
+   keep: longest, then most pixels   tmk >=0.8 groups, >=0.9 bins, or frames q <=31
+```
+
+## 4. The fixture
+
+`find . img` without the model: the 5 % crop, PDQ 32 (one bit over the
+confirmation threshold through Phase 5), now reads
+`d 10  p  6  q  32  fit 1.00  crop 95%` and both commands act on it. With
+the model: the letterboxed copy (`d 11  p 20  q  92  deep 0.78  fit 1.00`)
+is `near` and acts; `forest.png` (`deep 0.76  fit 0.51`) stays `deep`,
+listed. A copy with a caption bar over its lower 15 % (d 5, p 14, q 36,
+fit 0.78 — chosen with `examples/fit_diag.rs`) is grouped by the hashes
+and printed `kept~` by `milk`, which moves the confirmed members and
+leaves it. Capture moments: three JPEGs of one exposure stamped
+`2021:03:04 05:06:07` (original, re-export, one with EXIF stripped) and
+the next frame stamped `05:06:08` — the frame prints as
+`kin … taken 2021-03-04 05:06:08`, the keeper is the original, the
+stripped copy is an ordinary `near`, `milk` moves the re-export and the
+stripped copy and leaves the frame.
+
+## Suite
+
+`cargo test --release`: 78 unit tests (10 new: six for the fit —
+identity, crop located at its scale, letterbox found the other way
+round, small rotation recovered, different pictures do not fit,
+brightness invariance — and four for capture moments, one of which
+builds a JPEG with an EXIF segment and reads it back) and 24 end-to-end
+tests (3 changed for the acting rule and the fit, 2 new: an edit the
+hashes group but nothing confirms stays `kept~` under `milk`; four
+JPEGs with synthesised capture moments give one `kin` that neither
+command touches while the same-moment re-export and the EXIF-stripped
+copy move). All pass without the model and with `DEDUPE_MODEL` set; with
+`--no-default-features` 76 + 24 pass. `cargo clippy --all-targets
+--release` clean, `cargo fmt` clean. Windows type-checks pass with and
+without the deep feature (`kamadak-exif` compiles for the target). The
+Phase 5 audit re-run on this build: 56 terminal captures, no line over
+the width at 80, 100 or 120 columns (NEAR blocks drop their dimensions
+column at 80 when a `fit` tail is present).
+
+Binary: 25,903,792 bytes with the deep tier, 3,225,576 without
+(`kamadak-exif` and the fit add about 200 KB).
+
+## Not verified here
+
+- The capture-moment rule on a camera roll: the real set carries no
+  EXIF; verified on synthesised EXIF only.
+- The fit on crops under half a side, rotations past 6°, and on real
+  letterboxes with non-black bars (procedural letterbox measured only).
+- Windows execution (type-checked, with and without the deep feature).

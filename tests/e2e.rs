@@ -154,6 +154,37 @@ fn jpeg_bytes(img: &image::RgbImage, q: u8) -> Vec<u8> {
     buf.into_inner()
 }
 
+/// The same JPEG with an EXIF APP1 segment carrying `DateTimeOriginal`
+/// (the camera's exposure time) inserted after the SOI marker.
+fn with_capture_time(jpeg: &[u8], datetime: &str) -> Vec<u8> {
+    assert_eq!(&jpeg[..2], &[0xFF, 0xD8]);
+    let mut tiff: Vec<u8> = Vec::new();
+    tiff.extend_from_slice(b"MM\x00\x2A\x00\x00\x00\x08");
+    let exif_ifd_off: u32 = 8 + 2 + 12 + 4;
+    tiff.extend_from_slice(&1u16.to_be_bytes());
+    tiff.extend_from_slice(&0x8769u16.to_be_bytes());
+    tiff.extend_from_slice(&4u16.to_be_bytes());
+    tiff.extend_from_slice(&1u32.to_be_bytes());
+    tiff.extend_from_slice(&exif_ifd_off.to_be_bytes());
+    tiff.extend_from_slice(&0u32.to_be_bytes());
+    let dt = format!("{datetime}\0");
+    let data_off = exif_ifd_off + 2 + 12 + 4;
+    tiff.extend_from_slice(&1u16.to_be_bytes());
+    tiff.extend_from_slice(&0x9003u16.to_be_bytes());
+    tiff.extend_from_slice(&2u16.to_be_bytes());
+    tiff.extend_from_slice(&(dt.len() as u32).to_be_bytes());
+    tiff.extend_from_slice(&data_off.to_be_bytes());
+    tiff.extend_from_slice(&0u32.to_be_bytes());
+    tiff.extend_from_slice(dt.as_bytes());
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend_from_slice(&tiff);
+    let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&app1);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
 /// Adds the photo set to a fixture root. Returns the exact copy's bytes so a
 /// test can check what moved.
 fn add_photos(root: &Path) {
@@ -247,6 +278,9 @@ fn run(fx: &Fx, args: &[&str]) -> (i32, String, String) {
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
         .env("NO_COLOR", "1")
+        // wide enough that no path is shortened; layout at narrow widths is
+        // the audit's business (VERIFICATION.md, Phase 5), not these tests'
+        .env("COLUMNS", "200")
         .output()
         .expect("spawn dedupe");
     (
@@ -610,6 +644,10 @@ fn near_pass_runs_for_img_and_groups_variants() {
         "the 5 % crop groups on the two 64-bit hashes\n{out}"
     );
     assert!(
+        out.contains("q  32  fit 1.00  crop 95%") || out.contains("q  32  deep"),
+        "PDQ missed the crop by one bit; the geometric fit confirms it\n{out}"
+    );
+    assert!(
         out.contains("keep  photos/beach.png") || out.contains("keep  photos\\beach.png"),
         "{out}"
     );
@@ -657,8 +695,14 @@ fn milk_img_moves_near_duplicates_and_undo_restores() {
     let before = files(&fx.root);
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);
     assert_eq!(code, 0, "{out}");
-    // 2 + 1 exact, 3 confirmed near, plus the crop: milk takes the two-hash grouping
+    // 2 + 1 exact, 3 PDQ-confirmed near, plus the crop the geometric fit confirms
     assert!(out.contains("7 moved"), "{out}");
+    assert!(
+        out.contains("moved~    photos/export/beach_crop.jpg")
+            || out.contains("moved~    photos\\export\\beach_crop.jpg"),
+        "{out}"
+    );
+    assert!(out.contains("fit 1.00  crop 95%"), "{out}");
     let after = files(&fx.root);
     assert!(after.contains(&"photos/beach.png".to_string()));
     assert!(
@@ -681,6 +725,116 @@ fn milk_img_moves_near_duplicates_and_undo_restores() {
     let (code, out, _) = run(&fx, &["--undo"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(files(&fx.root), before);
+}
+
+/// A near duplicate the two hashes group but nothing confirms stays where
+/// it is for `milk` as well as `purge`: a photograph of the same scene
+/// from another position is the measured case (VERIFICATION.md, Phase 6).
+#[test]
+fn milk_leaves_unconfirmed_near_duplicates_in_place() {
+    let fx = fixture_with_photos();
+    // the beach with a caption bar over its lower 15 %: the two hashes
+    // still land inside their thresholds (d 5, p 14), PDQ (q 36) and the
+    // fit (0.78) do not — measured with examples/fit_diag.rs
+    let beach = image::open(fx.root.join("photos/beach.png"))
+        .unwrap()
+        .to_rgb8();
+    let mut edited = beach.clone();
+    let (w, h) = (edited.width(), edited.height());
+    for y in (h as f32 * 0.85) as u32..h {
+        for x in 0..w {
+            edited.put_pixel(x, y, image::Rgb([40, 40, 48]));
+        }
+    }
+    put(&fx.root, "photos/beach_bar.png", &png_bytes(&edited));
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("near  photos/beach_bar.png") || out.contains("near  photos\\beach_bar.png"),
+        "the hashes group it\n{out}"
+    );
+    assert!(
+        out.contains("q  36") && out.contains("fit 0.7"),
+        "PDQ over, fit under\n{out}"
+    );
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("kept~     photos/beach_bar.png")
+            || out.contains("kept~     photos\\beach_bar.png"),
+        "{out}"
+    );
+    assert!(
+        out.contains("1 kept~: similar on two hashes, confirmed by nothing else"),
+        "{out}"
+    );
+    assert!(fx.root.join("photos/beach_bar.png").exists());
+    assert!(
+        !fx.root.join("photos/beach_small.jpg").exists(),
+        "confirmed members still move\n{out}"
+    );
+}
+
+/// Two files that state different capture moments are two photographs:
+/// `kin`, shown in the group, never moved or binned. The same moment, or
+/// no moment on either side, leaves the pictures to decide.
+#[test]
+fn different_capture_moments_are_kin() {
+    let fx = fixture();
+    let beach = photo(31, 1000, 750);
+    let original = jpeg_bytes(&beach, 92);
+    put(
+        &fx.root,
+        "shots/a.jpg",
+        &with_capture_time(&original, "2021:03:04 05:06:07"),
+    );
+    // a re-export of the same exposure keeps its capture time
+    put(
+        &fx.root,
+        "shots/a_export.jpg",
+        &with_capture_time(&jpeg_bytes(&beach, 70), "2021:03:04 05:06:07"),
+    );
+    // the next frame of a burst: nearly the same picture, one second later
+    let mut next = beach.clone();
+    for p in next.pixels_mut() {
+        p.0[0] = p.0[0].saturating_add(6);
+    }
+    put(
+        &fx.root,
+        "shots/a_next.jpg",
+        &with_capture_time(&jpeg_bytes(&next, 92), "2021:03:04 05:06:08"),
+    );
+    // a copy that lost its EXIF: the hashes decide
+    put(&fx.root, "shots/a_stripped.jpg", &jpeg_bytes(&beach, 80));
+
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("kin   shots/a_next.jpg") || out.contains("kin   shots\\a_next.jpg"),
+        "{out}"
+    );
+    assert!(out.contains("taken 2021-03-04 05:06:08"), "{out}");
+    assert!(out.contains("+1 kin"), "{out}");
+    assert!(out.contains("1 kin"), "{out}");
+    assert!(
+        out.contains("near  shots/a_export.jpg") || out.contains("near  shots\\a_export.jpg"),
+        "same moment: a derivative\n{out}"
+    );
+    assert!(
+        out.contains("near  shots/a_stripped.jpg") || out.contains("near  shots\\a_stripped.jpg"),
+        "no moment on one side: the hashes decide\n{out}"
+    );
+
+    let (code, out, _) = run(&fx, &["purge", ".", "img", "-n"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("would~    shots/a_next.jpg"), "{out}");
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        fx.root.join("shots/a_next.jpg").exists(),
+        "kin must not move\n{out}"
+    );
+    assert!(!fx.root.join("shots/a_export.jpg").exists(), "{out}");
 }
 
 // ---------------------------------------------------------------------------
@@ -876,7 +1030,7 @@ fn milk_vid_moves_and_undo_restores() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn deep_tier_lists_heavy_edits_and_never_acts_on_them() {
+fn deep_tier_acts_only_with_the_fit() {
     if dedupe::deep::installed().is_none() {
         eprintln!("no model installed; skipped");
         return;
@@ -894,9 +1048,20 @@ fn deep_tier_lists_heavy_edits_and_never_acts_on_them() {
     let (code, out, _) = run(&fx, &["find", ".", "img"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("hashed   +deep"), "{out}");
+    // the descriptor admits the letterbox (the hashes missed it at p 20);
+    // the geometric fit confirms it, so it is an ordinary near duplicate
     assert!(
-        out.contains("deep  photos/beach_letterbox.png")
-            || out.contains("deep  photos\\beach_letterbox.png"),
+        out.contains("near  photos/beach_letterbox.png")
+            || out.contains("near  photos\\beach_letterbox.png"),
+        "{out}"
+    );
+    assert!(
+        out.contains("deep 0.7") && out.contains("fit 1.00"),
+        "{out}"
+    );
+    // the procedural forest (deep 0.76) fits nothing: listed, never acted on
+    assert!(
+        out.contains("deep  photos/forest.png") || out.contains("deep  photos\\forest.png"),
         "{out}"
     );
     assert!(out.contains("by deep only   listed for review"), "{out}");
@@ -909,8 +1074,12 @@ fn deep_tier_lists_heavy_edits_and_never_acts_on_them() {
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        fx.root.join("photos/beach_letterbox.png").exists(),
-        "deep-only member must not move\n{out}"
+        !fx.root.join("photos/beach_letterbox.png").exists(),
+        "descriptor + fit: two families agree, the letterbox moves\n{out}"
+    );
+    assert!(
+        fx.root.join("photos/forest.png").exists(),
+        "the descriptor alone never moves a file\n{out}"
     );
     let (code, _, _) = run(&fx, &["--undo"]);
     assert_eq!(code, 0);
