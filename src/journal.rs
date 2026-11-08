@@ -1,6 +1,8 @@
 //! The journal (docs/RESEARCH.md §4): one JSON file per change, written
 //! only by `milk` and `purge`, stored under the OS local-data directory,
-//! never inside the scanned tree.
+//! never inside the scanned tree. While a change runs, `Writer` keeps the
+//! file current (atomic replace, at most every 250 ms) so an interrupted
+//! or killed run still leaves `--undo` everything it did.
 //!
 //! `%LOCALAPPDATA%\dedupe\journal\<root-key>\<stamp>.json` on Windows,
 //! `~/.local/share/dedupe/journal/<root-key>/<stamp>.json` elsewhere.
@@ -10,7 +12,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 
@@ -61,16 +63,22 @@ impl Journal {
 /// Override for tests and for users who want journals elsewhere.
 pub const ENV_JOURNAL_DIR: &str = "DEDUPE_JOURNAL_DIR";
 
+/// `%LOCALAPPDATA%\dedupe` on Windows, `~/.local/share/dedupe` elsewhere:
+/// the one folder `dedupe` owns outside the scanned tree (journals, and
+/// the optional model under `models/`).
+pub fn app_dir() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("dedupe")
+}
+
 pub fn base_dir() -> PathBuf {
     if let Ok(p) = std::env::var(ENV_JOURNAL_DIR) {
         if !p.is_empty() {
             return PathBuf::from(p);
         }
     }
-    dirs::data_local_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("dedupe")
-        .join("journal")
+    app_dir().join("journal")
 }
 
 pub fn root_key(root: &Path) -> String {
@@ -94,9 +102,85 @@ pub fn write(j: &mut Journal) -> io::Result<PathBuf> {
         j.id = format!("{}-{n}", j.created_utc);
         path = dir.join(format!("{}.json", j.id));
     }
-    let text = serde_json::to_string_pretty(j).map_err(|e| io::Error::other(e.to_string()))?;
-    fs::write(&path, text)?;
+    rewrite(&path, j)?;
     Ok(path)
+}
+
+/// How often the journal on disk is brought up to date while a change
+/// runs, so a hard kill (power, task manager) loses at most this much.
+pub const FLUSH_EVERY: Duration = Duration::from_millis(250);
+
+/// A journal being written as a change runs. Nothing touches the disk
+/// until the first entry; after that the file is rewritten at most every
+/// `FLUSH_EVERY`, and once more by `finish`. One run, one file.
+pub struct Writer {
+    pub journal: Journal,
+    path: Option<PathBuf>,
+    last_flush: Instant,
+    /// First error from a flush; reported once by `finish`.
+    error: Option<io::Error>,
+}
+
+impl Writer {
+    pub fn new(root: &Path, command: &str) -> Writer {
+        Writer {
+            journal: Journal::new(root, command),
+            path: None,
+            last_flush: Instant::now(),
+            error: None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.journal.entries.is_empty()
+    }
+
+    pub fn record(&mut self, e: Entry) {
+        self.journal.entries.push(e);
+        if self.path.is_none() || self.last_flush.elapsed() >= FLUSH_EVERY {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        if self.journal.entries.is_empty() {
+            return;
+        }
+        let res = match &self.path {
+            Some(p) => rewrite(p, &self.journal),
+            None => write(&mut self.journal).map(|p| {
+                self.path = Some(p);
+            }),
+        };
+        if let Err(e) = res {
+            if self.error.is_none() {
+                self.error = Some(e);
+            }
+        }
+        self.last_flush = Instant::now();
+    }
+
+    /// Final write. `Ok(None)` when nothing was recorded; `Ok(Some(id))`
+    /// when the journal is on disk; `Err` when it could not be written.
+    pub fn finish(mut self) -> io::Result<Option<String>> {
+        if self.journal.entries.is_empty() {
+            return Ok(None);
+        }
+        self.flush();
+        match self.error {
+            Some(e) => Err(e),
+            None => Ok(Some(self.journal.id.clone())),
+        }
+    }
+}
+
+/// Replace `path` atomically: the new text goes to a sibling `.tmp`, then
+/// one rename, so a kill mid-write leaves the previous journal intact.
+fn rewrite(path: &Path, j: &Journal) -> io::Result<()> {
+    let text = serde_json::to_string_pretty(j).map_err(|e| io::Error::other(e.to_string()))?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, text)?;
+    fs::rename(&tmp, path)
 }
 
 pub fn read(path: &Path) -> io::Result<Journal> {
@@ -106,24 +190,78 @@ pub fn read(path: &Path) -> io::Result<Journal> {
 
 /// All journals for `root`, newest first (by file name, which is the stamp).
 pub fn list(root: &Path) -> io::Result<Vec<(PathBuf, Journal)>> {
+    Ok(list_with_unreadable(root)?.0)
+}
+
+/// `list`, plus how many `.json` files in the folder could not be parsed —
+/// a truncated or hand-edited journal is reported by `doctor`, never
+/// silently passed over.
+pub fn list_with_unreadable(root: &Path) -> io::Result<(Vec<(PathBuf, Journal)>, u64)> {
     let dir = dir_for(root);
     let mut out = Vec::new();
+    let mut unreadable = 0;
     let rd = match fs::read_dir(&dir) {
         Ok(rd) => rd,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(out),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok((out, 0)),
         Err(e) => return Err(e),
     };
     for e in rd {
         let e = e?;
         let p = e.path();
         if p.extension().and_then(|x| x.to_str()) == Some("json") {
-            if let Ok(j) = read(&p) {
-                out.push((p, j));
+            match read(&p) {
+                Ok(j) => out.push((p, j)),
+                Err(_) => unreadable += 1,
             }
         }
     }
     out.sort_by_key(|(_, j)| std::cmp::Reverse(id_key(&j.id)));
-    Ok(out)
+    Ok((out, unreadable))
+}
+
+/// Every root with a pending journal, newest first: (root, command, entries).
+/// For the `--undo` that finds nothing under its own root.
+pub fn pending_elsewhere(except: &Path) -> Vec<(PathBuf, String, usize)> {
+    let mut out: Vec<(String, PathBuf, String, usize)> = Vec::new();
+    let Ok(rd) = fs::read_dir(base_dir()) else {
+        return Vec::new();
+    };
+    for sub in rd.flatten() {
+        let Ok(files) = fs::read_dir(sub.path()) else {
+            continue;
+        };
+        let mut newest: Option<(String, Journal)> = None;
+        for f in files.flatten() {
+            let p = f.path();
+            if p.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            if let Ok(j) = read(&p) {
+                if !j.consumed && j.root != except {
+                    let newer = newest
+                        .as_ref()
+                        .is_none_or(|(id, _)| id_key(&j.id) > id_key(id));
+                    if newer {
+                        newest = Some((j.id.clone(), j));
+                    }
+                }
+            }
+        }
+        if let Some((id, j)) = newest {
+            out.push((id, j.root, j.command, j.entries.len()));
+        }
+    }
+    out.sort_by_key(|(id, _, _, _)| std::cmp::Reverse(id_key(id)));
+    out.into_iter().map(|(_, r, c, n)| (r, c, n)).collect()
+}
+
+/// Rewrite `path` with only the entries not yet undone, leaving the
+/// journal pending so the next `--undo` picks up where this one stopped.
+pub fn keep_remaining(path: &Path, j: &Journal, remaining: Vec<Entry>) -> io::Result<()> {
+    let mut rest = j.clone();
+    rest.entries = remaining;
+    rest.consumed = false;
+    rewrite(path, &rest)
 }
 
 /// `YYYYMMDD-HHMMSS[-N]` → (stamp, N); N defaults to 1 so a same-second
@@ -148,8 +286,7 @@ pub fn latest_pending(root: &Path) -> io::Result<Option<(PathBuf, Journal)>> {
 
 pub fn mark_consumed(path: &Path, j: &mut Journal) -> io::Result<()> {
     j.consumed = true;
-    let text = serde_json::to_string_pretty(j).map_err(|e| io::Error::other(e.to_string()))?;
-    fs::write(path, text)
+    rewrite(path, j)
 }
 
 #[cfg(test)]
@@ -195,6 +332,44 @@ mod tests {
         let back = read(&p2).unwrap();
         assert!(back.consumed);
         assert_eq!(back.entries, j2.entries);
+
+        // the writer: nothing on disk before the first entry, one file after
+        let before = list(&root).unwrap().len();
+        let w = Writer::new(&root, "milk");
+        assert!(w.is_empty());
+        assert_eq!(w.finish().unwrap(), None);
+        assert_eq!(list(&root).unwrap().len(), before);
+        let mut w = Writer::new(&root, "milk");
+        for i in 0..5 {
+            w.record(Entry {
+                op: Op::Move {
+                    from: root.join(format!("f{i}")),
+                    to: root.join(format!("_milked/f{i}")),
+                },
+                size: 1,
+                hash: String::new(),
+            });
+        }
+        let id = w.finish().unwrap().unwrap();
+        let all = list(&root).unwrap();
+        assert_eq!(all.len(), before + 1);
+        let (lp, lj) = latest_pending(&root).unwrap().unwrap();
+        assert_eq!(lj.id, id);
+        assert_eq!(lj.entries.len(), 5);
+        assert!(
+            !lp.with_extension("json.tmp").exists(),
+            "no temp file left behind"
+        );
+
+        // keep_remaining leaves a shorter, still pending journal
+        keep_remaining(&lp, &lj, lj.entries[3..].to_vec()).unwrap();
+        let (_, again) = latest_pending(&root).unwrap().unwrap();
+        assert_eq!(again.entries.len(), 2);
+
+        // an unreadable file is counted, not hidden
+        fs::write(dir_for(&root).join("broken.json"), b"{").unwrap();
+        let (_, unreadable) = list_with_unreadable(&root).unwrap();
+        assert_eq!(unreadable, 1);
         std::env::remove_var(ENV_JOURNAL_DIR);
     }
 }

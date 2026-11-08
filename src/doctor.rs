@@ -8,7 +8,7 @@ use crate::cli::Invocation;
 use crate::journal;
 use crate::render::Renderer;
 use crate::theme::Role;
-use crate::util::{fit, fmt_bytes, fmt_count};
+use crate::util::{counted, fit, fmt_bytes, fmt_count, shorten_middle};
 use crate::MILKED_DIR;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +66,7 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         warn(
             "colour",
             "terminal reports no ANSI support",
-            "use Windows Terminal or PowerShell 7; conhost before Windows 10 1511 has no colour",
+            "use Windows Terminal; the console host before Windows 10 1511 has no colour",
         )
     });
     v.push(if t.unicode {
@@ -109,7 +109,7 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         let (n, b) = dir_size(&milked);
         v.push(pass(
             MILKED_DIR,
-            format!("{} files   {}", fmt_count(n), fmt_bytes(b)),
+            format!("{}   {}", counted(n, "file", "files"), fmt_bytes(b)),
         ));
     } else {
         v.push(pass(MILKED_DIR, "absent (created by the first milk)"));
@@ -140,22 +140,53 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
             "set DEDUPE_JOURNAL_DIR to a writable folder; undo needs it",
         ),
     });
-    v.push(match journal::latest_pending(root) {
-        Ok(Some((_, j))) => pass(
-            "undo",
-            format!(
-                "pending: {}   {}   {} entries",
-                j.id,
-                j.command,
-                j.entries.len()
-            ),
-        ),
-        Ok(None) => pass("undo", "nothing pending"),
+    v.push(match journal::list_with_unreadable(root) {
+        Ok((list, unreadable)) => {
+            let pending = list.iter().find(|(_, j)| !j.consumed);
+            let detail = match pending {
+                Some((_, j)) => format!(
+                    "pending: {}   {}   {}",
+                    j.id,
+                    j.command,
+                    counted(j.entries.len() as u64, "entry", "entries")
+                ),
+                None => "nothing pending".to_string(),
+            };
+            if unreadable > 0 {
+                warn(
+                    "undo",
+                    format!(
+                        "{detail}   {} unreadable",
+                        counted(unreadable, "journal", "journals")
+                    ),
+                    "a journal file is damaged; undo skips it — open the folder above to inspect",
+                )
+            } else {
+                pass("undo", detail)
+            }
+        }
         Err(e) => warn("undo", e.to_string(), "journal folder unreadable"),
     });
 
     // recycle bin
     v.push(bin_check());
+
+    // deep tier model (optional)
+    let mp = crate::deep::model_path();
+    v.push(if mp.is_file() {
+        let size = fs::metadata(&mp).map(|m| m.len()).unwrap_or(0);
+        pass(
+            "deep",
+            format!("{}   {}", mp.to_string_lossy(), fmt_bytes(size)),
+        )
+    } else {
+        Check {
+            name: "deep",
+            status: Status::Pass,
+            detail: "no model (optional)   docs/DEEP.md".to_string(),
+            fix: format!("expected at {}", mp.to_string_lossy()),
+        }
+    });
 
     // ffmpeg (video phase)
     v.push(match (which("ffmpeg"), which("ffprobe")) {
@@ -264,14 +295,27 @@ pub fn page(inv: &Invocation, r: &Renderer) -> i32 {
         if c.status == Status::Fail || (c.status == Status::Warn && worst == Status::Pass) {
             worst = c.status;
         }
+        // margin, tag, name column, then the detail shortened in the middle
+        // (a path keeps its head and its tail) rather than wrapped
+        let room = t.width.saturating_sub(1 + 4 + 2 + 8 + 2 + 1).max(12);
         println!(
             " {}  {}  {}",
             t.paint_bold(role, tag),
             t.paint(Role::Plate, &fit(c.name, 8)),
-            t.paint(Role::Dupe, &c.detail)
+            t.paint(
+                Role::Dupe,
+                &shorten_middle(&c.detail, room, t.glyphs.ellipsis)
+            )
         );
         if !c.fix.is_empty() {
-            println!("                 {}", t.paint(Role::Plate, &c.fix));
+            let room = t.width.saturating_sub(17 + 1).max(12);
+            println!(
+                "                 {}",
+                t.paint(
+                    Role::Plate,
+                    &shorten_middle(&c.fix, room, t.glyphs.ellipsis)
+                )
+            );
         }
     }
     println!("{}", t.rule());

@@ -1,0 +1,19 @@
+ dedupe doctor  /tmp/claude-0/-home-claud…9e-c4f931c0b548/scratchpad/audit_root
+ ──────────────────────────────────────────────────────────────────────────────
+ PASS  colour    24-bit ANSI colour
+ PASS  glyphs    box drawing and block characters
+ PASS  width     80 cells
+ PASS  folder    /tmp/claude-0/-home-claud…e-c4f931c0b548/scratchpad/audit_root
+ PASS  write     milk and purge can change this folder
+ PASS  _milked   1 file   5 B
+ PASS  paths     longest path seen: 158 chars
+ PASS  journal   /tmp/claude-0/-home-claud…audit_state/journal/6f030324663592cc
+ PASS  undo      nothing pending
+ PASS  bin       Recycle Bin reachable   0 items
+ PASS  deep      no model (optional)   docs/DEEP.md
+                 expected at /root/.local/…e/dedupe/models/sscd_disc_mixup.onnx
+ PASS  ffmpeg    /usr/local/bin/ffmpeg
+ ──────────────────────────────────────────────────────────────────────────────
+ everything in place
+
+--- exit 0 ---

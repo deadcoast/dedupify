@@ -128,10 +128,8 @@ pub fn find_groups(
     progress.done(Stage::Size, &stats);
 
     if pool.is_empty() {
-        progress.done(Stage::Sample, &stats);
-        if !quick {
-            progress.done(Stage::Hash, &stats);
-        }
+        // nothing shares a size: the SIZE line already says so, and the
+        // sample and hash stages have nothing to report
         return (Vec::new(), stats);
     }
 

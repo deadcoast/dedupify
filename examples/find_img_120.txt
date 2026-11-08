@@ -1,0 +1,36 @@
+ dedupe find  /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/audit_root  recursive  images
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ SCAN   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  18 files   3.34 MB   0.0 s
+ SIZE   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  8 share a size
+ SAMPLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  8 share a sample   838 KB
+ HASH   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  8 confirmed   1.17 MB   0.0 s
+ DECODE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  10 images hashed   3 undecodable   1 flat, skipped   0.1 s
+ MATCH  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  15 similar pairs   6 images grouped   0.0 s
+
+ GROUP 001   4 copies   300 KB each   900 KB reclaimable
+   keep  2019/trip/IMG_0041.jpg                                                                              2019-06-11
+   dupe  backup/IMG_0041.jpg
+   dupe  backup/old/IMG_0041 (1).jpg
+   dupe  archive/2020/photos/phone/camera roll/exported/subset/final/IMG_0041.jpg
+ GROUP 002   2 copies   117 KB each   117 KB reclaimable
+   keep  wallpapers/sunset.png                                                                               2019-06-11
+   dupe  wallpapers/dl/sunset (1).png
+ GROUP 003   2 copies   45.9 KB each   45.9 KB reclaimable
+   keep  photos/export/beach.jpg                                                                             2021-05-31
+   dupe  photos/export/beach (copy).jpg
+
+ NEAR 004   5 similar   680 KB reclaimable
+   keep  photos/beach.png                                            1000×750     436 KB   2019-06-11
+   near  photos/export/beach_mirror.png                              1000×750     444 KB   d  0  p  0  q   8  mirror
+   near  photos/export/beach.jpg                                     1000×750     45.9 KB  d  0  p  0  q   2  +GROUP 003
+   near  photos/export/beach_crop.jpg                                950×712      41.7 KB  d 10  p  6  q  32
+   near  photos/beach_small.jpg                                      500×375      10.6 KB  d  0  p  0  q   4
+   near  photos/beach_rot90_small.png                                375×500      137 KB   d  0  p  0  q   6  rot 90
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 3 groups   5 duplicates   1.04 MB reclaimable   keep: oldest copy
+ 1 near group   5 similar   680 KB reclaimable
+   keep: most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 to bin
+ next   dedupe milk . img   move duplicates into ./_milked
+        dedupe purge . img  send duplicates to the Recycle Bin
+
+--- exit 0 ---

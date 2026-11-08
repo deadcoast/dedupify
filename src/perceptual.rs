@@ -125,6 +125,14 @@ impl std::fmt::Display for DecodeError {
 /// Decode `path`, apply its EXIF orientation, and compute both planes:
 /// the 288×288 grid (dHash, pHash) and the PDQ result.
 pub fn load_planes(path: &Path) -> Result<(Vec<f32>, Pdq, u32, u32), DecodeError> {
+    let img = load_image(path)?;
+    let (w, h) = (img.width(), img.height());
+    let (grid, p) = planes_from_image(&img);
+    Ok((grid, p, w, h))
+}
+
+/// Decode `path` with its EXIF orientation applied.
+pub fn load_image(path: &Path) -> Result<DynamicImage, DecodeError> {
     let reader = ImageReader::open(path)
         .map_err(DecodeError::Io)?
         .with_guessed_format()
@@ -135,9 +143,7 @@ pub fn load_planes(path: &Path) -> Result<(Vec<f32>, Pdq, u32, u32), DecodeError
         .unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut img = DynamicImage::from_decoder(decoder).map_err(DecodeError::Image)?;
     img.apply_orientation(orientation);
-    let (w, h) = (img.width(), img.height());
-    let (grid, p) = planes_from_image(&img);
-    Ok((grid, p, w, h))
+    Ok(img)
 }
 
 /// Decode `path` for the grid only (tests and tools that need no PDQ).
@@ -420,12 +426,12 @@ pub fn decodable(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use image::{ImageBuffer, ImageEncoder, Rgb, RgbImage};
 
     /// A deterministic textured picture: gradient + disc + stripes.
-    pub fn synth(seed: u32, w: u32, h: u32) -> RgbImage {
+    pub(crate) fn synth(seed: u32, w: u32, h: u32) -> RgbImage {
         let s = seed as f32;
         ImageBuffer::from_fn(w, h, |x, y| {
             let fx = x as f32 / w as f32;

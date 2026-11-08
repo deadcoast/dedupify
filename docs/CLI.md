@@ -24,7 +24,7 @@ Positional tokens are order-independent after the command **[CLAUDE]**:
 | `PATH` | root directory; default is the current directory |
 | `.` | **all** — recurse into subdirectories **[SPEC]**. Absent ⇒ the root's own files only |
 | `img` / `image` | images only **[SPEC]** |
-| `vid` / `video` | videos only **[SPEC]** |
+| `vid` / `video` | videos only **[SPEC]** — one kind per run; both at once is an error, since leaving both out already means everything **[CLAUDE]** |
 
 Conflict resolved **[CLAUDE]**: `.` is both "the current directory" and the
 spec's "all" token. Rule: a lone `.` is always the **all** switch; the root is
@@ -47,9 +47,19 @@ Flags:
 anything. `--undo` may follow any command (`dedupe milk --undo` **[SPEC]**)
 and ignores the command: the journal, not the command, says what to reverse.
 
+Ctrl-C **[CLAUDE]**: before a change starts it ends the run as in any
+program (exit 130). Once `milk`, `purge` or `--undo` is moving files, the
+first Ctrl-C lets the file in hand finish, stops, writes the journal for
+what was done and prints the undo line; a second Ctrl-C ends the process
+at once. While a change runs, the journal on disk is brought up to date
+every 250 ms by an atomic replace, so a hard kill loses at most that
+window. An interrupted `--undo` leaves the journal pending with the
+entries still to restore, and the next `--undo` continues it.
+
 Exit codes **[CLAUDE]**: 0 success, 1 user error (bad token, unreadable
 root), 2 operational failure (a move or trash call failed; the journal holds
-what did complete).
+what did complete), 130 interrupted by Ctrl-C (the journal holds what did
+complete).
 
 ---
 
@@ -83,16 +93,21 @@ cannot be byte-verified; `purge` bins one only when a third hash, PDQ
 the three distances. A member the two 64-bit hashes grouped but PDQ did not
 confirm prints as `kept~` with the reason, and the footer names the `milk`
 command that moves it instead. `purge` reports the OS bin it used and how
-to undo. `--quick-search` skips the near pass: quick is the obvious-
-duplicates tier.
+to undo. `--quick-search` skips the full hash and the near passes, never
+the byte verification: a sample-level match whose bytes differ prints as
+`kept   bytes differ from keeper` and stays **[CLAUDE]**. With a kind
+token, `purge` runs only the pass that kind can feed (`img` → images,
+`vid` → videos; no token → both).
 
 ### doctor **[SPEC]**
 Checks and prints PASS / WARN / FAIL with a one-line fix for each:
 terminal colour and Unicode support, terminal width, journal directory
 writable, root readable and writable, `_milked` present and its size,
-Recycle Bin reachable, `ffmpeg`/`ffprobe` on PATH (the video pass), Windows
-long-path support when any path exceeds 260 characters, and the state of
-the last journal (consumed or pending).
+Recycle Bin reachable, `ffmpeg`/`ffprobe` on PATH (the video pass), the
+optional model (`docs/DEEP.md`), Windows long-path support when any path
+exceeds 260 characters, and the state of the journals (pending, and any
+file that could not be read). The write check creates and removes one
+probe file in the root.
 
 ---
 
@@ -102,12 +117,20 @@ Rules the renderer enforces:
 
 - Width-aware: every line is measured in display cells (`unicode-width`) and
   fitted to the terminal; long paths are shortened in the middle with `…`,
-  never wrapped.
+  never wrapped. The path column of a NEAR or VIDEO block is sized from
+  the widest tail in that block; below ~95 columns a VIDEO block drops its
+  codec column, then its dimensions, before the path falls under 18 cells.
+  A stage line drops its rightmost segments rather than wrap (the in-place
+  redraw cannot clear a wrapped line). A totals line whose policy part does
+  not fit moves that part to an indented second line.
 - Colour: truecolour when the terminal is a TTY and `NO_COLOR` is unset;
   plain text otherwise. Windows virtual-terminal mode is enabled through
   crossterm at start.
-- Glyphs: box-drawing and block characters only; an ASCII glyph set
-  substitutes when the output encoding is not UTF-8. No emoji.
+- Glyphs: box-drawing and block characters only; the ASCII glyph set
+  substitutes when stdout is not a terminal, when `TERM=dumb`, or when
+  `DEDUPE_ASCII=1`. `NO_COLOR` alone keeps the glyphs. No emoji.
+- Dates on `keep` lines are local calendar dates (what Explorer shows); the
+  journal id is UTC.
 - Progress is redrawn in place on one line per stage; a finished stage
   leaves its final line behind, so the scrollback reads as a record.
 - No background fills. Frames are single-weight `━`/`─` rules; a frame rule
@@ -149,11 +172,16 @@ Result layout (`find`):
 Groups are ordered by reclaimable bytes, largest first, and numbered. Paths
 are shown relative to the root. The keeper line carries its modification
 date; duplicate lines do not repeat the size (it is in the group header).
+The `next` lines carry the root as the user typed it (`.\_milked` when no
+PATH was given) and never the `--quick-search` flag: a quick search is for
+looking, the follow-up runs on full evidence. The `near` / `video` hint
+lines share the verb column. An empty scan prints SCAN and the totals
+only; a scan where nothing shares a size stops its stage lines at SIZE.
 
 Near groups follow the exact groups and continue the numbering:
 
 ```
- NEAR 003   5 similar   542 KB reclaimable
+ NEAR 003   4 similar   542 KB reclaimable
    keep  photos\beach.png                        1000×750   436 KB   2019-06-12
    near  photos\export\beach_mirror.png          1000×750   444 KB   d  0  p  0  q   8  mirror
    near  photos\export\beach.jpg                 1000×750   45.9 KB  d  0  p  0  q   2  +GROUP 002
@@ -164,24 +192,30 @@ Near groups follow the exact groups and continue the numbering:
  1 near group   4 similar   542 KB reclaimable   keep: most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 to bin
 ```
 
-`d` and `p` are the dHash and pHash distances to the keeper (of 64 bits),
-`q` the PDQ distance (of 256); `mirror`, `rot 90`, `flip`, `transpose` name
-the orientation that matched; `+GROUP 002` says the member is itself the
+The header counts the members beside the keeper, as the totals line does
+(`+2 deep` when the deep tier added members). `d` and `p` are the dHash
+and pHash distances to the keeper (of 64 bits), `q` the PDQ distance (of
+256); `deep 0.83` appears when the optional model is installed
+(`docs/DEEP.md`) and is the SSCD cosine to the keeper; `mirror`, `rot 90`,
+`flip`, `transpose` name the orientation that matched; `+GROUP 002` says the member is itself the
 keeper of an exact group, whose copies are listed there. A distance over
 its threshold is lit in the warning colour: `d`/`p` when the member is
 linked only through another member, `q` when `purge` will keep it (`q 32`
-on the crop above).
+on the crop above). A member the deep tier alone brought in prints with
+the verb `deep`; `milk` and `purge` leave it in place and the totals line
+says how many such members there are.
 
 Video groups follow, numbered on:
 
 ```
- VIDEO 004   4 similar   6.14 MB reclaimable
+ VIDEO 004   3 similar   6.14 MB reclaimable
    keep  a.mp4              640×360   0:20   h264  4.63 MB  2026-11-08
-   near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  d  0 p  0  q   2  tmk   -    mirror
+   near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  d  0 p  0  q   2  tmk    -  mirror
    near  a_small.mp4        320×180   0:20   h264  95.3 KB  d  1 p  2  q   8  tmk 1.00
    near  a_trim4.mp4        640×360   0:16   h264  2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
  ───────────────────────────────────────────────────────────────
- 1 video group   3 similar   6.14 MB reclaimable   keep: longest, then most pixels   tmk ≥0.8 groups, ≥0.9 or frames q ≤31 to bin
+ 1 video group   3 similar   6.14 MB reclaimable
+   keep: longest, then most pixels   tmk ≥0.8 groups, ≥0.9 bins, or frames q ≤31
 ```
 
 `d p q` are the medians over twelve sampled frames at fixed fractions of
@@ -197,8 +231,11 @@ similar pairs and images grouped.
 binned file in condensed form, then a footer with the journal id and the
 undo command. A `moved` line carries only the source path: the destination
 is always `_milked/<same relative path>`, so it is printed once in the
-footer; a renamed collision is the one case that gets a word on the line
-(`as IMG_0041 (2).jpg`). `--dry-run` prints the same lines prefixed
+footer (as `.\_milked` or `<PATH>\_milked`); a renamed collision is the one
+case that gets a word on the line (`as IMG_0041 (2).jpg`). The detail at
+the right of an action line uses the same fixed-width distance layout as
+the NEAR and VIDEO blocks, so the details line up as a column; the path is
+shortened before the detail ever is. `--dry-run` prints the same lines prefixed
 `would` and writes no journal. A `LIKELY` header (quick search) says
 `files`, not `copies`, because the match is sample-level. A near duplicate
 being moved or binned gets `moved~` / `binned~` / `would~` with its
@@ -219,9 +256,9 @@ native command being run, so every menu session teaches the native form.
  ┃    milk    move duplicates into _milked          ┃
  ┃    purge   send duplicates to the Recycle Bin    ┃
  ┃    undo    reverse the last change               ┃
- ┃    doctor  check this terminal and folder        ┃
+ ┃    doctor  check this terminal, folder and tools ┃
  ┃                                                  ┃
- ┃  ↑↓ move   enter select   esc back / quit        ┃
+ ┃  ↑↓ move   enter select   q quit                 ┃
  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
 
@@ -232,8 +269,12 @@ Steps after a workflow is chosen (undo and doctor skip to confirm):
 3. **KIND** — `everything` / `images` / `videos`.
 4. **CONFIRM** — shows `dedupe milk D:\pics . img` and runs it on enter.
 
-`esc` steps back; at the first step it quits. The menu never offers more
-than five choices on one screen **[SPEC: no bloat]**.
+`esc` steps back; at the first step it quits; `q` quits from any choice
+step (in FOLDER it is a typed character). When the folder is left as the
+current directory it is omitted from the composed command, so the menu
+runs `dedupe find . img`, not `dedupe find C:\Users\…\Pictures . img`, and
+the `next` lines it prints stay short. The menu never offers more than
+five choices on one screen **[SPEC: no bloat]**.
 
 ---
 
@@ -250,5 +291,14 @@ than five choices on one screen **[SPEC: no bloat]**.
   rest print as `kept~`. `--undo` restores binned files like any other
   entry.
 - Every change writes one journal; `--undo` reverses it. No cache, no index,
-  no lock file, nothing persisted on a scan.
+  no lock file, nothing persisted on a scan. `--undo` with nothing pending
+  under its root names up to three other roots that have a pending
+  journal, with the command that undoes each.
+- Ctrl-C during a change stops it cleanly (§1); the journal covers every
+  move made.
+- Windows paths are shown and journaled without the `\\?\` prefix
+  `canonicalize` produces; `_milked` is recognised whatever its letter
+  case there.
 - `_milked` and the journal directory are the only things `dedupe` creates.
+- The optional model (`docs/DEEP.md`) can only add lines to `find`; it
+  never moves or bins a file.

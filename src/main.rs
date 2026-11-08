@@ -9,11 +9,17 @@ use dedupe::render::Renderer;
 use dedupe::theme::Theme;
 
 fn main() -> ExitCode {
+    // before any worker thread exists: the local-date offset for keep lines
+    dedupe::util::init_local_offset();
     let theme = Theme::detect();
     let r = Renderer::new(theme);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let args: Vec<String> = std::env::args().skip(1).collect();
 
+    // Ctrl-C ends a scan at once (with a clean newline after the in-place
+    // progress line) and, once a change has started, stops it after the
+    // file in hand with the journal written — see interrupt.rs
+    dedupe::interrupt::install();
     let code = run(&args, &cwd, &r, theme);
     ExitCode::from(code as u8)
 }

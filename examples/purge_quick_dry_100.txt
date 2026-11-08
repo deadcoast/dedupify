@@ -1,0 +1,49 @@
+ dedupe purge  /tmp/claud…hpad/audit_root  recursive  all kinds  quick: size + sample only  dry run
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ SCAN   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  34 files   43.5 MB   0.0 s
+ SIZE   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  17 share a size
+ SAMPLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  16 share a sample   1.69 MB
+ VERIFY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  8 verified byte for byte
+
+ LIKELY 001   2 files   4.63 MB each   4.63 MB reclaimable   size + sample match
+   keep  clips/near/a.mp4                                                                2026-11-07
+   dupe  clips/near/a_copy.mp4
+ LIKELY 002   2 files   2.00 MB each   2.00 MB reclaimable   size + sample match
+   keep  clips/a.mp4                                                                     2021-05-31
+   dupe  clips/copy/a.mp4
+ LIKELY 003   4 files   300 KB each   900 KB reclaimable   size + sample match
+   keep  2019/trip/IMG_0041.jpg                                                          2019-06-11
+   dupe  backup/IMG_0041.jpg
+   dupe  backup/old/IMG_0041 (1).jpg
+   dupe  archive/2020/photos/phone/camera roll/exported/subset/final/IMG_0041.jpg
+ LIKELY 004   2 files   300 KB each   300 KB reclaimable   size + sample match
+   keep  decoys/base.bin                                                                 2021-05-31
+   dupe  decoys/mid_differs.bin
+ LIKELY 005   2 files   117 KB each   117 KB reclaimable   size + sample match
+   keep  wallpapers/sunset.png                                                           2019-06-11
+   dupe  wallpapers/dl/sunset (1).png
+ LIKELY 006   2 files   45.9 KB each   45.9 KB reclaimable   size + sample match
+   keep  photos/export/beach.jpg                                                         2021-05-31
+   dupe  photos/export/beach (copy).jpg
+ LIKELY 007   2 files   560 B each   560 B reclaimable   size + sample match
+   keep  notes.txt                                                                       2019-06-11
+   dupe  notes (copy).txt
+ skipped  2 empty
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ 7 groups   9 duplicates   7.96 MB reclaimable   keep: oldest copy
+ quick search: matches are size + sample, not full content
+
+ would     clips/near/a_copy.mp4
+ would     clips/copy/a.mp4
+ would     backup/IMG_0041.jpg
+ would     backup/old/IMG_0041 (1).jpg
+ would     archive/2020/photos/phone/camera roll/exported/subset/final/IMG_0041.jpg
+ would     wallpapers/dl/sunset (1).png
+ would     photos/export/beach (copy).jpg
+ would     notes (copy).txt
+ kept      decoys/mid_differs.bin                                          bytes differ from keeper
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ 8 would bin   7.67 MB to the Recycle Bin
+ 1 kept: bytes differed from the keeper at verify time
+
+--- exit 0 ---

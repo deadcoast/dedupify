@@ -677,3 +677,115 @@ fn measure_thresholds() {
     assert_eq!(lk, mk, "both engines must agree on real signatures");
     eprintln!();
 }
+
+/// Deep tier: SSCD cosine on the same generator, fewer sources (each
+/// embedding is ~0.3 s here). Runs only with the model installed:
+/// `DEDUPE_MODEL=/path/sscd_disc_mixup.onnx cargo test --release --test corpus -- --ignored measure_deep --nocapture`
+#[test]
+#[ignore]
+fn measure_deep() {
+    use dedupe::deep::{cosine, installed, Deep, DEEP_MIN};
+    let Some(path) = installed() else {
+        eprintln!("no model installed; skipped");
+        return;
+    };
+    let model = Deep::load(&path).expect("load model");
+    const N: u64 = 40;
+    let t0 = Instant::now();
+    let bases: Vec<RgbImage> = (0..N).map(photo).collect();
+    let embed = |img: &RgbImage| {
+        model
+            .embed(&DynamicImage::ImageRgb8(img.clone()))
+            .expect("embed")
+    };
+    let base_e: Vec<_> = bases.iter().map(embed).collect();
+    let mut var_e: Vec<Vec<[f32; 512]>> = Vec::new();
+    for b in &bases {
+        var_e.push(
+            (0..PERTURBATIONS.len())
+                .map(|k| embed(&perturb(b, k)))
+                .collect(),
+        );
+    }
+    let n_emb = N as usize * (PERTURBATIONS.len() + 1);
+    eprintln!();
+    eprintln!(
+        "deep corpus: {N} sources × {} perturbations, {n_emb} embeddings in {:.0}s ({:.0} ms each incl. transform)",
+        PERTURBATIONS.len(),
+        t0.elapsed().as_secs_f64(),
+        t0.elapsed().as_secs_f64() * 1000.0 / n_emb as f64
+    );
+    eprintln!();
+    eprintln!(
+        "{:<14} {:>7} {:>7} {:>7} {:>9}",
+        "perturbation", "min", "p5", "median", "rec ≥min"
+    );
+    let pct = |v: &mut Vec<f32>, p: f64| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v[((v.len() as f64 * p) as usize).min(v.len() - 1)]
+    };
+    let mut all_pos: Vec<(usize, f32)> = Vec::new();
+    for (k, name) in PERTURBATIONS.iter().enumerate() {
+        let mut v: Vec<f32> = (0..N as usize)
+            .map(|i| cosine(&base_e[i], &var_e[i][k]))
+            .collect();
+        for s in &v {
+            all_pos.push((k, *s));
+        }
+        let rec = v.iter().filter(|s| **s >= DEEP_MIN).count() as f64 / N as f64;
+        let (mn, p5, med) = (pct(&mut v, 0.0), pct(&mut v, 0.05), pct(&mut v, 0.5));
+        eprintln!(
+            "{:<14} {:>7.3} {:>7.3} {:>7.3} {:>8.1}%",
+            name,
+            mn,
+            p5,
+            med,
+            rec * 100.0
+        );
+    }
+    let mut neg: Vec<f32> = Vec::new();
+    for i in 0..N as usize {
+        for j in i + 1..N as usize {
+            neg.push(cosine(&base_e[i], &base_e[j]));
+            for v in &var_e[i] {
+                neg.push(cosine(v, &base_e[j]));
+            }
+            for v in &var_e[j] {
+                neg.push(cosine(v, &base_e[i]));
+            }
+        }
+    }
+    let mut sorted = neg.clone();
+    let (mx, p999, p99, med) = (
+        pct(&mut sorted, 1.0),
+        pct(&mut sorted, 0.999),
+        pct(&mut sorted, 0.99),
+        pct(&mut sorted, 0.5),
+    );
+    eprintln!();
+    eprintln!(
+        "deep negatives: {} pairs   max {:.3}   p99.9 {:.3}   p99 {:.3}   median {:.3}",
+        neg.len(),
+        mx,
+        p999,
+        p99,
+        med
+    );
+    eprint!("sweep (false positives | recall over all perturbations | recall over crops+rotations only):");
+    for t in [0.45f32, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8] {
+        let fp = neg.iter().filter(|s| **s >= t).count();
+        let rec = all_pos.iter().filter(|(_, s)| *s >= t).count() as f64 / all_pos.len() as f64;
+        let hard: Vec<&(usize, f32)> = all_pos
+            .iter()
+            .filter(|(k, _)| [6usize, 7, 8, 9, 10].contains(k))
+            .collect();
+        let rec_hard = hard.iter().filter(|(_, s)| *s >= t).count() as f64 / hard.len() as f64;
+        eprint!(
+            "  T={t:.2}: {fp} | {:.1}% | {:.1}%",
+            rec * 100.0,
+            rec_hard * 100.0
+        );
+    }
+    eprintln!();
+    eprintln!("shipped DEEP_MIN = {DEEP_MIN}");
+}

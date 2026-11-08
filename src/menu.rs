@@ -30,7 +30,11 @@ pub const WORKFLOWS: [(Workflow, &str, &str); 5] = [
         "send duplicates to the Recycle Bin",
     ),
     (Workflow::Undo, "undo", "reverse the last change"),
-    (Workflow::Doctor, "doctor", "check this terminal and folder"),
+    (
+        Workflow::Doctor,
+        "doctor",
+        "check this terminal, folder and tools",
+    ),
 ];
 
 pub const SCOPES: [(&str, &str); 2] = [("this folder only", ""), ("include subfolders", ".")];
@@ -70,6 +74,8 @@ pub struct Menu {
     pub folder_error: Option<String>,
     pub scope: usize,
     pub kind: usize,
+    /// Where the user is; left out of the command when it is the folder.
+    cwd: String,
 }
 
 impl Menu {
@@ -81,6 +87,7 @@ impl Menu {
             folder_error: None,
             scope: 0,
             kind: 0,
+            cwd: cwd.to_string(),
         }
     }
 
@@ -95,7 +102,9 @@ impl Menu {
         )
     }
 
-    /// argv without the program name.
+    /// argv without the program name. The folder is passed only when it
+    /// is not the current directory, so the composed command — and every
+    /// `next` line it prints — stays as short as the typed form.
     pub fn args(&self) -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
         match self.selected() {
@@ -105,7 +114,9 @@ impl Menu {
             Workflow::Undo => v.push("--undo".into()),
             Workflow::Doctor => v.push("doctor".into()),
         }
-        v.push(self.folder.clone());
+        if self.folder != self.cwd {
+            v.push(self.folder.clone());
+        }
         if self.needs_scope() {
             let s = SCOPES[self.scope].1;
             if !s.is_empty() {
@@ -137,7 +148,7 @@ impl Menu {
                 Key::Up => self.workflow = (self.workflow + WORKFLOWS.len() - 1) % WORKFLOWS.len(),
                 Key::Down => self.workflow = (self.workflow + 1) % WORKFLOWS.len(),
                 Key::Enter => self.step = Step::Folder,
-                Key::Esc => return Outcome::Quit,
+                Key::Esc | Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
             Step::Folder => match key {
@@ -171,6 +182,7 @@ impl Menu {
                 Key::Up | Key::Down => self.scope = 1 - self.scope,
                 Key::Enter => self.step = Step::Kind,
                 Key::Esc => self.step = Step::Folder,
+                Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
             Step::Kind => match key {
@@ -178,6 +190,7 @@ impl Menu {
                 Key::Down => self.kind = (self.kind + 1) % KINDS.len(),
                 Key::Enter => self.step = Step::Confirm,
                 Key::Esc => self.step = Step::Scope,
+                Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
             Step::Confirm => match key {
@@ -189,6 +202,7 @@ impl Menu {
                         Step::Folder
                     }
                 }
+                Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
         }
@@ -247,7 +261,7 @@ impl Menu {
                 push(
                     &mut body,
                     vec![dim(&format!(
-                        "  {}{} move   enter select   esc quit",
+                        "  {}{} move   enter select   q quit",
                         g.up, g.down
                     ))],
                 );
@@ -288,7 +302,7 @@ impl Menu {
                 push(
                     &mut body,
                     vec![dim(&format!(
-                        "  {}{} move   enter select   esc back",
+                        "  {}{} move   enter select   esc back   q quit",
                         g.up, g.down
                     ))],
                 );
@@ -309,7 +323,7 @@ impl Menu {
                 push(
                     &mut body,
                     vec![dim(&format!(
-                        "  {}{} move   enter select   esc back",
+                        "  {}{} move   enter select   esc back   q quit",
                         g.up, g.down
                     ))],
                 );
@@ -328,11 +342,11 @@ impl Menu {
                         "verifies bytes, then Recycle Bin; dedupe --undo reverses it"
                     }
                     Workflow::Undo => "reverses the newest journal for this folder",
-                    Workflow::Doctor => "runs the checks, changes nothing",
+                    Workflow::Doctor => "runs the checks; writes and removes one probe file",
                 };
                 push(&mut body, vec![dim(&format!("    {what}"))]);
                 push(&mut body, vec![plain("")]);
-                push(&mut body, vec![dim("  enter run   esc back")]);
+                push(&mut body, vec![dim("  enter run   esc back   q quit")]);
             }
         }
 
@@ -467,9 +481,25 @@ mod tests {
         );
         assert_eq!(
             out,
-            Outcome::Run(vec!["find".into(), cwd.into(), ".".into(), "img".into()])
+            Outcome::Run(vec!["find".into(), ".".into(), "img".into()])
         );
-        assert_eq!(m.command_line(), format!("dedupe find {cwd} . img"));
+        assert_eq!(m.command_line(), "dedupe find . img");
+
+        // a typed folder other than the cwd is passed through
+        let other = tempfile::tempdir().unwrap();
+        let mut m = Menu::new(cwd);
+        m.folder = other.path().to_str().unwrap().to_string();
+        press(
+            &mut m,
+            &[Key::Enter, Key::Enter, Key::Enter, Key::Enter, Key::Enter],
+        );
+        assert_eq!(
+            m.args(),
+            vec![
+                "find".to_string(),
+                other.path().to_str().unwrap().to_string()
+            ]
+        );
     }
 
     #[test]
@@ -488,7 +518,9 @@ mod tests {
                 Key::Enter,
             ],
         );
-        assert_eq!(out, Outcome::Run(vec!["--undo".into(), cwd.into()]));
+        assert_eq!(out, Outcome::Run(vec!["--undo".into()]));
+        let mut m = Menu::new(cwd);
+        assert_eq!(m.handle(Key::Char('q')), Outcome::Quit);
     }
 
     #[test]

@@ -69,6 +69,56 @@ pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
+/// Display width of text that may carry ANSI SGR sequences (`ESC [ … m`),
+/// which take no cells.
+pub fn visible_width(s: &str) -> usize {
+    let mut w = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for d in chars.by_ref() {
+                    if d.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        w += UnicodeWidthChar::width(c).unwrap_or(0);
+    }
+    w
+}
+
+/// "1 file" / "3 files".
+pub fn plural<'a>(n: u64, one: &'a str, many: &'a str) -> &'a str {
+    if n == 1 {
+        one
+    } else {
+        many
+    }
+}
+
+/// `n` with its noun: "1 file", "12,480 files".
+pub fn counted(n: u64, one: &str, many: &str) -> String {
+    format!("{} {}", fmt_count(n), plural(n, one, many))
+}
+
+/// Join `segments` with three spaces, dropping trailing segments while
+/// the visible width exceeds `max`. The first segment always stays.
+pub fn join_fit(segments: &[String], max: usize) -> String {
+    let mut n = segments.len();
+    while n > 1 {
+        let line = segments[..n].join("   ");
+        if visible_width(&line) <= max {
+            return line;
+        }
+        n -= 1;
+    }
+    segments.first().cloned().unwrap_or_default()
+}
+
 /// Fit `s` into `max` cells by cutting the middle and inserting `ellipsis`.
 /// Keeps the tail (file name) longer than the head.
 pub fn shorten_middle(s: &str, max: usize, ellipsis: &str) -> String {
@@ -150,6 +200,34 @@ pub fn rel_display(path: &Path, root: &Path) -> String {
     }
 }
 
+/// Strip the `\\?\` verbatim prefix `std::fs::canonicalize` adds on
+/// Windows (`\\?\C:\x` → `C:\x`, `\\?\UNC\srv\share` → `\\srv\share`).
+/// std re-adds it internally for long paths, so nothing is lost; the user
+/// sees the path as Explorer shows it.
+pub fn strip_verbatim(p: &Path) -> std::path::PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        return std::path::PathBuf::from(rest);
+    }
+    p.to_path_buf()
+}
+
+/// `<root as the user typed it, or ".">` + separator + `name`: the short
+/// form of a path under the root, for lines that would otherwise carry the
+/// full absolute root again.
+pub fn under_root(root_display: Option<&str>, name: &str) -> String {
+    let base = root_display.unwrap_or(".");
+    let sep = std::path::MAIN_SEPARATOR;
+    if base.ends_with(sep) || base.ends_with('/') {
+        format!("{base}{name}")
+    } else {
+        format!("{base}{sep}{name}")
+    }
+}
+
 /// Civil date from a Unix timestamp (days since 1970-01-01), proleptic
 /// Gregorian. Algorithm: Howard Hinnant, "chrono-Compatible Low-Level Date
 /// Algorithms" (civil_from_days).
@@ -167,12 +245,30 @@ pub fn civil_from_unix(secs: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
-/// `YYYY-MM-DD` for a file time (local offset is not applied; dates are
-/// shown in UTC, which keeps two machines' journals comparable).
+/// The machine's UTC offset in seconds, read once at start-up (before any
+/// worker thread exists — `time` refuses the lookup in a multi-threaded
+/// process on Unix). Zero when it cannot be determined.
+static LOCAL_OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+
+/// Call first thing in `main`.
+pub fn init_local_offset() {
+    LOCAL_OFFSET.get_or_init(|| {
+        time::UtcOffset::current_local_offset()
+            .map(|o| o.whole_seconds() as i64)
+            .unwrap_or(0)
+    });
+}
+
+pub fn local_offset_secs() -> i64 {
+    *LOCAL_OFFSET.get().unwrap_or(&0)
+}
+
+/// `YYYY-MM-DD` for a file time, in the local calendar (what Explorer
+/// shows beside the file). The journal id stays UTC (`stamp`).
 pub fn fmt_date(t: SystemTime) -> String {
     match t.duration_since(UNIX_EPOCH) {
         Ok(d) => {
-            let (y, m, dd) = civil_from_unix(d.as_secs() as i64);
+            let (y, m, dd) = civil_from_unix(d.as_secs() as i64 + local_offset_secs());
             format!("{y:04}-{m:02}-{dd:02}")
         }
         Err(_) => "----------".to_string(),
@@ -234,6 +330,45 @@ mod tests {
         assert_eq!(shorten_middle("short", 24, "…"), "short");
         let ascii = shorten_middle(s, 24, "...");
         assert!(width(&ascii) <= 24, "{ascii}");
+    }
+
+    #[test]
+    fn visible_width_ignores_sgr() {
+        assert_eq!(visible_width("\x1b[38;2;1;2;3mab\x1b[0m"), 2);
+        assert_eq!(visible_width("plain"), 5);
+        assert_eq!(visible_width("\x1b[1m×\x1b[22m"), 1);
+    }
+
+    #[test]
+    fn join_fit_drops_from_the_right() {
+        let segs = vec!["aaaa".to_string(), "bbbb".to_string(), "cccc".to_string()];
+        assert_eq!(join_fit(&segs, 100), "aaaa   bbbb   cccc");
+        assert_eq!(join_fit(&segs, 12), "aaaa   bbbb");
+        assert_eq!(join_fit(&segs, 2), "aaaa");
+        assert_eq!(counted(1, "file", "files"), "1 file");
+        assert_eq!(counted(1200, "file", "files"), "1,200 files");
+    }
+
+    #[test]
+    fn verbatim_prefix_is_stripped() {
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\C:\Users\x")),
+            std::path::PathBuf::from(r"C:\Users\x")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new(r"\\?\UNC\srv\share\d")),
+            std::path::PathBuf::from(r"\\srv\share\d")
+        );
+        assert_eq!(
+            strip_verbatim(Path::new("/plain/path")),
+            std::path::PathBuf::from("/plain/path")
+        );
+        let sep = std::path::MAIN_SEPARATOR;
+        assert_eq!(under_root(None, "_milked"), format!(".{sep}_milked"));
+        assert_eq!(
+            under_root(Some("pics"), "_milked"),
+            format!("pics{sep}_milked")
+        );
     }
 
     #[test]

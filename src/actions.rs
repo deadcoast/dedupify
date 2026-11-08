@@ -10,14 +10,15 @@ use rayon::prelude::*;
 
 use crate::cli::{Command, Invocation};
 use crate::exact::{self, Group, PipelineStats, Progress, Stage};
-use crate::journal::{self, Entry, Journal, Op};
+use crate::interrupt;
+use crate::journal::{self, Entry, Op, Writer};
 use crate::keeper;
 use crate::kind::Kind;
 use crate::near::{self, NearGroup, NearStats, Rep};
 use crate::perceptual;
 use crate::render::{LiveProgress, Renderer};
 use crate::theme::Role;
-use crate::util::{fmt_count, rel_display, unix_secs};
+use crate::util::{counted, fmt_count, rel_display, under_root, unix_secs};
 use crate::video::{self, VRep, VideoGroup, VideoStats};
 use crate::walk::{self, Candidate, ScanStats};
 use crate::MILKED_DIR;
@@ -25,6 +26,8 @@ use crate::MILKED_DIR;
 pub const EXIT_OK: i32 = 0;
 pub const EXIT_USER: i32 = 1;
 pub const EXIT_FAILED: i32 = 2;
+/// Ctrl-C during a change: what was done is journaled and reported.
+pub const EXIT_INTERRUPTED: i32 = interrupt::EXIT_INTERRUPTED;
 
 /// Dispatch. Returns the process exit code.
 pub fn run(inv: &Invocation, r: &Renderer) -> i32 {
@@ -59,16 +62,21 @@ impl Found {
     }
 }
 
-/// The near pass runs for `img` requests and for every `purge` (the
-/// comprehensive suite). Quick search is the obvious-duplicates tier and
-/// skips it.
+/// The near pass runs for `img` requests and for every `purge` whose scan
+/// can contain images (the comprehensive suite; `purge . vid` has none).
+/// Quick search is the obvious-duplicates tier and skips it.
 fn near_enabled(inv: &Invocation) -> bool {
-    !inv.quick && (inv.kind == Kind::Image || inv.command == Command::Purge)
+    !inv.quick
+        && inv.kind != Kind::Video
+        && (inv.kind == Kind::Image || inv.command == Command::Purge)
 }
 
-/// The video pass runs for `vid` requests and for every `purge`.
+/// The video pass runs for `vid` requests and for every `purge` whose scan
+/// can contain videos.
 fn video_enabled(inv: &Invocation) -> bool {
-    !inv.quick && (inv.kind == Kind::Video || inv.command == Command::Purge)
+    !inv.quick
+        && inv.kind != Kind::Image
+        && (inv.kind == Kind::Video || inv.command == Command::Purge)
 }
 
 fn is_video(p: &Path) -> bool {
@@ -105,7 +113,12 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         cands.iter().filter(|c| is_video(&c.path)).count() as u64
     };
 
-    let (mut groups, pipe) = exact::find_groups(cands, inv.quick, &lp);
+    // an empty scan has nothing to stage; the totals line says so
+    let (mut groups, pipe) = if cands.is_empty() {
+        (Vec::new(), PipelineStats::default())
+    } else {
+        exact::find_groups(cands, inv.quick, &lp)
+    };
     keeper::order(&mut groups);
 
     let mut near_groups = Vec::new();
@@ -136,7 +149,22 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
             })
             .collect();
         if reps.len() >= 2 {
-            let (hashed, mut stats) = near::hash_all(reps, &lp);
+            // the deep tier is on when a model file is installed
+            let deep_model =
+                crate::deep::installed().and_then(|p| match crate::deep::Deep::load(&p) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        r.note(
+                            Role::Warn,
+                            &format!(
+                                "deep model at {} could not be loaded: {e}",
+                                p.to_string_lossy()
+                            ),
+                        );
+                        None
+                    }
+                });
+            let (hashed, mut stats) = near::hash_all(reps, &lp, deep_model.as_ref());
             let e = lp.stage_elapsed(Stage::Decode);
             lp.finish_stage(Stage::Decode, lp.decode_summary(&stats, e));
             near_groups = near::group(hashed, &mut stats, &lp);
@@ -236,7 +264,11 @@ fn report(f: &Found, inv: &Invocation, r: &Renderer) {
     r.near_groups(&f.near, &inv.root, f.groups.len());
     r.video_groups(&f.video, &inv.root, f.groups.len() + f.near.len());
     r.skipped(&f.scan, &f.pipe);
-    r.totals(&f.groups, &f.scan);
+    r.totals(
+        &f.groups,
+        &f.scan,
+        !f.near.is_empty() || !f.video.is_empty(),
+    );
     r.near_totals(&f.near);
     r.video_totals(&f.video);
     if f.video_tools_missing {
@@ -301,9 +333,14 @@ fn items(f: &Found) -> Vec<Item<'_>> {
         let k = &g.members[0].hashed;
         for m in &g.members[1..] {
             let rel = m.relation.unwrap();
-            let mut txt = format!("d {} p {} q {}", rel.d, rel.p, rel.q);
+            if rel.deep_only() {
+                // found by the learned descriptor alone: listed by `find`,
+                // never moved or binned (docs/RESEARCH.md §2.6)
+                continue;
+            }
+            let mut txt = format!("d {:>2}  p {:>2}  q {:>3}", rel.d, rel.p, rel.q);
             if !rel.variant.label().is_empty() {
-                txt.push(' ');
+                txt.push_str("  ");
                 txt.push_str(rel.variant.label());
             }
             v.push(Item {
@@ -332,14 +369,14 @@ fn items(f: &Found) -> Vec<Item<'_>> {
             let tmk = if rel.level1 >= crate::video::LEVEL1_MIN {
                 format!("tmk {:.2}", rel.level2)
             } else {
-                "tmk -".to_string()
+                "tmk    -".to_string()
             };
             let mut txt = match rel.pos {
-                Some((d, p, q)) => format!("d {d} p {p} q {q} {tmk}"),
-                None => tmk,
+                Some((d, p, q)) => format!("d {d:>2} p {p:>2}  q {q:>3}  {tmk}"),
+                None => format!("frames     -  {tmk}"),
             };
             if rel.positional_ok() && !rel.variant.label().is_empty() {
-                txt.push(' ');
+                txt.push_str("  ");
                 txt.push_str(rel.variant.label());
             }
             v.push(Item {
@@ -382,17 +419,11 @@ fn unique_path(dst: &Path) -> PathBuf {
     }
 }
 
-fn write_journal(
-    j: &mut Journal,
-    inv: &Invocation,
-    r: &Renderer,
-    where_are_they: &str,
-) -> Option<String> {
-    if inv.dry_run || j.entries.is_empty() {
-        return None;
-    }
-    match journal::write(j) {
-        Ok(_) => Some(j.id.clone()),
+/// Close the journal of a change. `None` when nothing was recorded or the
+/// journal could not be written (said once, in the danger colour).
+fn close_journal(w: Writer, r: &Renderer, where_are_they: &str) -> Option<String> {
+    match w.finish() {
+        Ok(id) => id,
         Err(e) => {
             r.note(
                 Role::Danger,
@@ -405,6 +436,22 @@ fn write_journal(
     }
 }
 
+/// After an interrupted change: what stopped, what the journal covers.
+fn interrupted_note(r: &Renderer, done: u64, verb: &str, journaled: bool) {
+    r.note(
+        Role::Danger,
+        &format!(
+            "interrupted after {} {verb}{}",
+            fmt_count(done),
+            if journaled {
+                "; the journal covers them, dedupe --undo reverses them"
+            } else {
+                ""
+            }
+        ),
+    );
+}
+
 fn milk(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
     let f = scan_and_group(inv, r);
@@ -415,12 +462,22 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
     r.blank();
 
     let milked = inv.root.join(MILKED_DIR);
-    let mut j = Journal::new(&inv.root, &inv.command_line());
+    let milked_display = under_root(inv.root_display.as_deref(), MILKED_DIR);
+    let mut w = Writer::new(&inv.root, &inv.command_line());
     let mut moved: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
+    let mut stopped = false;
 
+    if !inv.dry_run {
+        interrupt::install();
+        interrupt::changing(true);
+    }
     for it in items(&f) {
+        if !inv.dry_run && interrupt::requested() {
+            stopped = true;
+            break;
+        }
         let rel = rel_display(it.path, &inv.root);
         let rel_path = it
             .path
@@ -464,7 +521,7 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
                 r.action(verb, Role::Ok, &rel, &detail);
                 moved += 1;
                 bytes += it.size;
-                j.entries.push(Entry {
+                w.record(Entry {
                     op: Op::Move {
                         from: it.path.to_path_buf(),
                         to: dst.clone(),
@@ -479,14 +536,19 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
             }
         }
     }
+    interrupt::changing(false);
 
-    let journal_id = write_journal(&mut j, inv, r, "moves done");
+    let journal_id = if inv.dry_run {
+        None
+    } else {
+        close_journal(w, r, "moves done")
+    };
     let verb = if inv.dry_run { "would move" } else { "moved" };
     r.action_totals(
         verb,
         moved,
         bytes,
-        &format!("into {}", milked.to_string_lossy()),
+        &format!("into {milked_display}"),
         journal_id.as_deref(),
     );
     if !f.near.is_empty() || !f.video.is_empty() {
@@ -504,10 +566,15 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
             ),
         );
     }
+    if stopped {
+        interrupted_note(r, moved, "moves", journal_id.is_some());
+    }
     if journal_id.is_some() {
         r.undo_hint(inv);
     }
-    if failed > 0 {
+    if stopped {
+        EXIT_INTERRUPTED
+    } else if failed > 0 {
         EXIT_FAILED
     } else {
         EXIT_OK
@@ -537,36 +604,31 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         .iter()
         .map(|it| it.near_confirmed.unwrap_or(false))
         .collect();
+    // --quick-search skips the full hash, never the byte verification:
+    // purge bins nothing it has not read against its keeper
     if total > 0 {
-        if inv.quick {
-            // sample-level matches, explicitly requested; no byte verify is meaningful
-            for &i in &exact_idx {
-                verified[i] = true;
+        lp.tick(Stage::Verify, 0, total);
+        let counter = std::sync::atomic::AtomicU64::new(0);
+        let results: Vec<(usize, bool)> = exact_idx
+            .par_iter()
+            .map(|&i| {
+                let it = &list[i];
+                let ok = exact::verify_identical(it.keeper, it.path).unwrap_or(false);
+                let d = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                lp.tick(Stage::Verify, d, total);
+                (i, ok)
+            })
+            .collect();
+        let mut ok_n = 0u64;
+        for (i, ok) in results {
+            verified[i] = ok;
+            if ok {
+                ok_n += 1;
             }
-        } else {
-            lp.tick(Stage::Verify, 0, total);
-            let counter = std::sync::atomic::AtomicU64::new(0);
-            let results: Vec<(usize, bool)> = exact_idx
-                .par_iter()
-                .map(|&i| {
-                    let it = &list[i];
-                    let ok = exact::verify_identical(it.keeper, it.path).unwrap_or(false);
-                    let d = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    lp.tick(Stage::Verify, d, total);
-                    (i, ok)
-                })
-                .collect();
-            let mut ok_n = 0u64;
-            for (i, ok) in results {
-                verified[i] = ok;
-                if ok {
-                    ok_n += 1;
-                }
-            }
-            let mut p = f.pipe;
-            p.confirmed = ok_n;
-            lp.done(Stage::Verify, &p);
         }
+        let mut p = f.pipe;
+        p.confirmed = ok_n;
+        lp.done(Stage::Verify, &p);
     }
 
     report(&f, inv, r);
@@ -600,10 +662,11 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         }
     }
 
-    let mut j = Journal::new(&inv.root, &inv.command_line());
+    let mut w = Writer::new(&inv.root, &inv.command_line());
     let mut binned: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
+    let mut stopped = false;
 
     if inv.dry_run {
         for &i in &to_bin {
@@ -620,8 +683,14 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         }
     } else {
         // batched bin calls (one shell operation per chunk on Windows), then
-        // confirm per file by checking it is gone
+        // confirm per file by checking it is gone; Ctrl-C stops between chunks
+        interrupt::install();
+        interrupt::changing(true);
         for chunk in to_bin.chunks(500) {
+            if interrupt::requested() {
+                stopped = true;
+                break;
+            }
             let paths: Vec<&Path> = chunk.iter().map(|&i| list[i].path).collect();
             let t = unix_secs(SystemTime::now());
             let res = trash::delete_all(&paths);
@@ -642,7 +711,7 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
                     );
                     binned += 1;
                     bytes += it.size;
-                    j.entries.push(Entry {
+                    w.record(Entry {
                         op: Op::Trash {
                             path: it.path.to_path_buf(),
                             time_deleted: t,
@@ -662,11 +731,16 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         }
     }
 
+    interrupt::changing(false);
     for (verb, path, why) in &kept {
         r.action(verb, Role::Warn, path, why);
     }
 
-    let journal_id = write_journal(&mut j, inv, r, "files are in the Recycle Bin");
+    let journal_id = if inv.dry_run {
+        None
+    } else {
+        close_journal(w, r, "files are in the Recycle Bin")
+    };
     let verb = if inv.dry_run { "would bin" } else { "binned" };
     r.action_totals(
         verb,
@@ -676,9 +750,10 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         journal_id.as_deref(),
     );
     if !f.near.is_empty() || !f.video.is_empty() {
-        r.note(
+        r.note_fit(
             Role::Dupe,
-            "~ near duplicate confirmed against the keeper (images: dHash+pHash+PDQ; videos: TMK or sampled frames), not a byte copy",
+            "~ confirmed near duplicate, not a byte copy",
+            "(images: dHash, pHash and PDQ agree; videos: TMK or sampled frames)",
         );
     }
     if kept_mismatch > 0 {
@@ -713,10 +788,15 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
             ),
         );
     }
+    if stopped {
+        interrupted_note(r, binned, "binned", journal_id.is_some());
+    }
     if journal_id.is_some() {
         r.undo_hint(inv);
     }
-    if failed > 0 {
+    if stopped {
+        EXIT_INTERRUPTED
+    } else if failed > 0 {
         EXIT_FAILED
     } else {
         EXIT_OK
@@ -727,13 +807,28 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
 
 fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
+    let root_display = inv
+        .root_display
+        .clone()
+        .unwrap_or_else(|| "this folder".to_string());
     let (jpath, mut j) = match journal::latest_pending(&inv.root) {
         Ok(Some(x)) => x,
         Ok(None) => {
-            r.note(
-                Role::Dupe,
-                &format!("nothing to undo under {}", inv.root.to_string_lossy()),
-            );
+            r.note(Role::Dupe, &format!("nothing to undo under {root_display}"));
+            // a journal under another root is the likely intent
+            for (root, command, n) in journal::pending_elsewhere(&inv.root).into_iter().take(3) {
+                let root_s = root.to_string_lossy();
+                let cmd = if root_s.contains(' ') {
+                    format!("dedupe --undo \"{root_s}\"")
+                } else {
+                    format!("dedupe --undo {root_s}")
+                };
+                r.hint(
+                    "undo",
+                    &cmd,
+                    &format!("{command}   {}", counted(n as u64, "entry", "entries")),
+                );
+            }
             return EXIT_OK;
         }
         Err(e) => {
@@ -744,10 +839,10 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     r.note(
         Role::Plate,
         &format!(
-            "journal {}   {}   {} entries",
+            "journal {}   {}   {}",
             j.id,
             j.command,
-            fmt_count(j.entries.len() as u64)
+            counted(j.entries.len() as u64, "entry", "entries")
         ),
     );
     r.blank();
@@ -755,10 +850,28 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     let mut restored: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
+    let mut stopped = false;
+    // entries not restored because the run was interrupted stay in the
+    // journal, which stays pending, so the next --undo continues
+    let mut remaining: Vec<Entry> = Vec::new();
+
+    if !inv.dry_run {
+        interrupt::install();
+        interrupt::changing(true);
+    }
 
     // moves, newest first
     for e in j.entries.iter().rev() {
         if let Op::Move { from, to } = &e.op {
+            if stopped {
+                remaining.push(e.clone());
+                continue;
+            }
+            if !inv.dry_run && interrupt::requested() {
+                stopped = true;
+                remaining.push(e.clone());
+                continue;
+            }
             let rel = rel_display(from, &inv.root);
             if inv.dry_run {
                 r.action("would", Role::Warn, &rel, "restore");
@@ -821,6 +934,15 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
                 restored += 1;
                 bytes += sz;
             }
+        } else if stopped || interrupt::requested() {
+            // the bin restore is one call; it is not started once Ctrl-C arrived
+            stopped = true;
+            remaining.extend(
+                j.entries
+                    .iter()
+                    .filter(|e| matches!(e.op, Op::Trash { .. }))
+                    .cloned(),
+            );
         } else {
             for (p, ok, why, sz) in restore_from_bin(&binned) {
                 let rel = rel_display(&p, &inv.root);
@@ -835,13 +957,16 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
             }
         }
     }
+    interrupt::changing(false);
 
     if !inv.dry_run {
-        if let Err(e) = journal::mark_consumed(&jpath, &mut j) {
-            r.note(
-                Role::Danger,
-                &format!("journal could not be marked undone: {e}"),
-            );
+        let res = if stopped {
+            journal::keep_remaining(&jpath, &j, remaining.clone())
+        } else {
+            journal::mark_consumed(&jpath, &mut j)
+        };
+        if let Err(e) = res {
+            r.note(Role::Danger, &format!("journal could not be updated: {e}"));
         }
         prune_empty_dirs(&inv.root.join(MILKED_DIR));
     }
@@ -857,6 +982,16 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
             Role::Danger,
             &format!("{} could not be restored", fmt_count(failed)),
         );
+    }
+    if stopped {
+        r.note(
+            Role::Danger,
+            &format!(
+                "interrupted; {} still to restore, the journal keeps them: dedupe --undo continues",
+                fmt_count(remaining.len() as u64)
+            ),
+        );
+        return EXIT_INTERRUPTED;
     }
     if failed > 0 {
         EXIT_FAILED

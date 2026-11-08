@@ -1,0 +1,29 @@
+ dedupe find  /tmp/claude-0/-hom…0b548/scratchpad/audit_root  recursive  videos
+ ──────────────────────────────────────────────────────────────────────────────
+ SCAN   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  10 files   39.3 MB   0.0 s
+ SIZE   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  4 share a size
+ SAMPLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  4 share a sample   512 KB
+ HASH   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  4 confirmed   13.3 MB   0.0 s
+ FRAMES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  6 videos hashed
+ MATCH  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  5 similar pairs   4 videos grouped
+
+ GROUP 001   2 copies   4.63 MB each   4.63 MB reclaimable
+   keep  clips/near/a.mp4                                            2026-11-07
+   dupe  clips/near/a_copy.mp4
+ GROUP 002   2 copies   2.00 MB each   2.00 MB reclaimable
+   keep  clips/a.mp4                                                 2021-05-31
+   dupe  clips/copy/a.mp4
+
+ VIDEO 003   3 similar   6.14 MB reclaimable   keeper of GROUP 001
+   keep  clips/near/a.mp4    0:20    4.63 MB  2026-11-07
+   near  clips/n…mirror.mp4  0:20    3.24 MB  d  0 p  0  q   2  tmk    -  mirror
+   near  clips/n…_small.mp4  0:20    95.3 KB  d  1 p  2  q   8  tmk 1.00
+   near  clips/n…_trim4.mp4  0:16    2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
+ ──────────────────────────────────────────────────────────────────────────────
+ 2 groups   2 duplicates   6.63 MB reclaimable   keep: oldest copy
+ 1 video group   3 similar   6.14 MB reclaimable
+   keep: longest, then most pixels
+ next   dedupe milk . vid   move duplicates into ./_milked
+        dedupe purge . vid  send duplicates to the Recycle Bin
+
+--- exit 0 ---

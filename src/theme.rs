@@ -3,8 +3,9 @@
 //! One struct decides everything the renderer draws with. Colour is
 //! 24-bit via ANSI escapes; off when stdout is not a terminal, when
 //! `NO_COLOR` is set, or when `TERM=dumb`. Glyphs fall back to ASCII when
-//! colour is off (same conditions mean "someone is piping this") or when
-//! `DEDUPE_ASCII=1`.
+//! stdout is not a terminal (someone is piping this), when `TERM=dumb`,
+//! or when `DEDUPE_ASCII=1`; `NO_COLOR` alone keeps the glyph set, since
+//! it asks for no colour, not for no Unicode.
 
 use std::io::IsTerminal;
 
@@ -121,7 +122,7 @@ impl Theme {
         let ascii_env = std::env::var("DEDUPE_ASCII")
             .map(|v| v == "1")
             .unwrap_or(false);
-        let unicode = ansi && !ascii_env;
+        let unicode = tty && !dumb && !ascii_env;
         let width = if tty {
             match crossterm::terminal::size() {
                 Ok((w, _)) if w >= 40 => w as usize,

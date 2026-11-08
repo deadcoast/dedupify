@@ -35,6 +35,16 @@ pub struct ScanStats {
     pub errors: u64,
 }
 
+/// `_milked` by name; case-insensitive on Windows, where the file system
+/// is, so a hand-renamed `_Milked` is still never scanned.
+fn is_milked_dir(name: &std::ffi::OsStr) -> bool {
+    if cfg!(windows) {
+        name.to_string_lossy().eq_ignore_ascii_case(MILKED_DIR)
+    } else {
+        name == MILKED_DIR
+    }
+}
+
 /// Walk `root`. `recurse = false` reads only the root's own entries.
 /// `progress` is called every 256 files with the running stats.
 pub fn scan(
@@ -52,7 +62,7 @@ pub fn scan(
         .follow_links(false)
         .max_depth(depth)
         .into_iter()
-        .filter_entry(|e| !(e.file_type().is_dir() && e.file_name() == MILKED_DIR));
+        .filter_entry(|e| !(e.file_type().is_dir() && is_milked_dir(e.file_name())));
 
     for entry in walker {
         let entry = match entry {

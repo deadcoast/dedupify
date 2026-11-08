@@ -393,3 +393,231 @@ missing), 192 of 208 clips grouped.
   piped stdout is the same code path; not run.
 - Files over ~2 hours (four minutes of ffmpeg each on this box; memory per
   descriptor is 256 KB regardless of length).
+
+---
+
+# VERIFICATION — Phase 4 (deep tier), run on 2026-11-07
+
+Same environment. The model ran through `tract` 0.23 on two cores.
+
+## Suite
+
+`cargo test --release`, without the model: 65 unit + 16 end-to-end pass
+(ignored: the two corpus harnesses, the video corpus, the bin round trip,
+the two fixture writers). With `DEDUPE_MODEL` set: the same 65 + 16 pass,
+the deep end-to-end test now running instead of skipping; one existing
+near-pass test needed a model-aware assertion, since the procedural
+`forest.png` is listed by the deep tier (as `deep`, never `near`) when the
+model is present. `cargo clippy --all-targets --release` clean after one
+redundant-closure fix; `cargo fmt` clean. With `--no-default-features`:
+63 unit + 16 end-to-end pass (the two deep unit tests are compiled out).
+
+Windows, type-checked only (`cargo check --target x86_64-pc-windows-msvc
+--all-targets --features blake3/pure`): passes without the deep feature,
+and with it when `clang` stands in as the cross C compiler for
+`tract-linalg`'s assembly kernels (`CC_x86_64_pc_windows_msvc=clang
+AR_x86_64_pc_windows_msvc=llvm-lib`). Not linked, not run.
+
+## Provenance checks
+
+- `sscd_disc_mixup.onnx` from Hugging Face `nutszebra/sscd_onnx`:
+  98,156,202 bytes, SHA-256
+  `e65e2a5b9a5e44a0b0f011bddaa6f28621021f6120ca7ce8b526c19f2f6156f8` —
+  matches the repository's own `sscd.json`.
+- Meta's `sscd_disc_mixup.torchscript.pt` downloaded from
+  `dl.fbaipublicfiles.com`: SHA-256
+  `9f26bd4c848cc19b73d2ae92eea6e04886f61a7b764ceb7a13aeee62e6a6db56` —
+  matches the `sourceSha256` the export declares. Output agreement between
+  the two was not checked (no PyTorch here).
+
+## Unit coverage added
+
+`skew_320` preprocessing shape and normalisation values; with the model
+installed: self-cosine 1.0, a 4× downscale at 0.97, a 30 % crop at 0.79,
+a structurally different picture at 0.51 — against `DEEP_MIN` 0.70.
+
+## Corpus — `DEDUPE_MODEL=… cargo test --release --test corpus -- --ignored measure_deep --nocapture`
+
+Run twice (the second time after the harness output of the first was lost;
+the table below is the second run's output, copied by a parser, not
+retyped). Every statistic recorded from the first run matches the second
+to three decimals; the first took 326 s (370 ms per embedding), the second
+343 s with an e2e test running beside it.
+
+| perturbation | min | p5 | median | recall at 0.70 |
+|---|---|---|---|---|
+| scale 50% | 0.907 | 0.939 | 0.987 | 100.0 % |
+| scale 25% | 0.764 | 0.886 | 0.955 | 100.0 % |
+| upscale 150% | 0.967 | 0.993 | 0.998 | 100.0 % |
+| jpeg q90 | 0.848 | 0.862 | 0.933 | 100.0 % |
+| jpeg q60 | 0.656 | 0.739 | 0.841 | 95.0 % |
+| jpeg q30 | 0.648 | 0.655 | 0.750 | 77.5 % |
+| crop 90% | 0.838 | 0.852 | 0.889 | 100.0 % |
+| crop 80% | 0.712 | 0.746 | 0.787 | 100.0 % |
+| crop 60% | 0.362 | 0.430 | 0.592 | 2.5 % |
+| rotate 2° | 0.748 | 0.763 | 0.836 | 100.0 % |
+| rotate 5° | 0.666 | 0.691 | 0.751 | 90.0 % |
+| rotate 90° | 0.619 | 0.638 | 0.712 | 77.5 % |
+| mirror | 0.909 | 0.911 | 0.940 | 100.0 % |
+| bright +20% | 0.938 | 0.944 | 0.977 | 100.0 % |
+| bright -20% | 0.936 | 0.959 | 0.971 | 100.0 % |
+| gamma 1.5 | 0.886 | 0.925 | 0.956 | 100.0 % |
+| watermark | 0.844 | 0.872 | 0.926 | 100.0 % |
+| blur | 0.831 | 0.905 | 0.983 | 100.0 % |
+| noise ±10 | 0.666 | 0.673 | 0.806 | 92.5 % |
+| letterbox | 0.662 | 0.694 | 0.768 | 92.5 % |
+| squeeze 75% | 0.972 | 0.996 | 0.998 | 100.0 % |
+
+Negatives, 33,540 pairs: **median 0.425, p99 0.582, p99.9 0.629, max 0.669.**
+Sweep (false positives | recall over all perturbations | over crops and
+rotations): 0.45 → 12,368 | 99.5 % | 98.0 %; 0.50 → 4,892 | 99.0 % | 96.0 %; 0.55 → 1,151 | 98.3 % | 93.0 %; 0.60 → 127 | 97.3 % | 88.5 %; 0.65 → 4 | 95.2 % | 82.5 %; **0.70 → 0 | 91.8 % | 78.5 %**; 0.75 → 0 | 82.9 % | 68.0 %; 0.80 → 0 | 70.7 % | 45.0 %.
+
+Shipped `DEEP_MIN = 0.70`.
+
+Where the hash pair stops and the model continues: dHash∧pHash caught
+70.0 % of the 10 % crops, 2.7 % of the 20 % crops and 62.0 % of the
+letterboxes (Phase 2 table); SSCD at 0.70 catches 100 %, 100 % and
+92.5 %. Neither handles the 40 % crop (0 % and 2.5 %): at that crop less
+than half of the picture's area remains, and the descriptor's median falls
+to 0.59.
+
+## Fixture — where the limit showed
+
+On the photo fixture (a different procedural generator, smoother), the
+unrelated `forest.png` scored **0.76** against `beach.png`: above the
+threshold. The letterbox scored 0.78 (a true catch the hash pair missed),
+the 95 % crop 0.82, the 50 % downscale 0.59 (a true copy below the
+threshold; the hash pair has it). Both deep-only members printed with the
+`deep` verb; `milk` left them in place; `purge -n` listed neither among
+the `would` lines. That false positive is the measured basis for the
+list-never-act rule.
+
+Before the grouping change the same run had made the letterbox (more
+pixels) the keeper and had pulled `forest.png` into the family through a
+deep edge in the union–find. Degree-first keeper selection and star-shaped
+deep attachment removed both; the no-model run is unchanged.
+
+## Scale and size
+
+Binary: 25.6 MB with the tier (default), 2.9 MB with
+`--no-default-features`. One embedding 307 ms on two cores (tract,
+single-threaded per image, parallel across images). DECODE for the
+10-image fixture: 2.2 s with the model, 0.1 s without.
+
+## Not verified here
+
+- Output agreement of the ONNX export with Meta's TorchScript model.
+- Behaviour on real photographs: the negative distribution above is for
+  procedural textures and is expected to sit lower on photographs; the
+  harness exists to measure that on a real library before the tier is
+  ever allowed to act.
+- Windows execution (type-checked only, see Suite); on a real Windows
+  build `tract-linalg` assembles its kernels with the MSVC toolchain's
+  `ml64`, a path this environment cannot exercise.
+
+---
+
+# VERIFICATION — Phase 5 (polish), run on 2026-11-08
+
+Same environment (two cores, Linux, `ffmpeg` present, the model file
+available through `DEDUPE_MODEL` for the deep cases). Windows: type-checked
+as before, not executed.
+
+## The audit
+
+A fixture tree of 37 files assembled from the earlier fixtures: the exact
+set (IMG_0041 ×4, two `a.mp4`, `notes.txt` + copy, the head/mid decoys,
+two empty files, a PNG pair), the photo set (beach and its mirror, export,
+copy, 5 % crop, small, rotated small, letterbox, forest), the video set
+(`a.mp4` and its copy, mirror, small, 4-second trim, two unrelated clips),
+an empty folder, a folder with one file, and a stale `_milked\backup\
+IMG_0041.jpg` to force a rename. 51 cases — every command × token × flag
+that the grammar admits, the error paths, the undo sequences, five menu
+drives — each run under a pseudo-terminal at 80 and/or 120 columns (100
+for the rest) and once piped; 56 terminal captures and 15 piped ones, all
+kept and read.
+
+Before the fixes, 36 of the 56 terminal captures held at least one line
+wider than the terminal (measured in display cells after stripping colour
+codes). After them, none at 80, 100 or 120 columns; the help page at 60
+columns has seven lines over, and its claim was changed from 60 to 80.
+
+## What the reading found, and what was done
+
+| seen | fix |
+|---|---|
+| `next` lines and action footers carried the full absolute root again (`move duplicates into /tmp/…/audit_root/_milked`), 130+ cells | the typed form: `.\_milked` or `<PATH>\_milked` |
+| DECODE / FRAMES stage lines wrapped at 80 columns; the in-place redraw then left debris | a stage line drops its rightmost segments to fit |
+| NEAR member lines overflowed at 80 (tail widths were estimated); VIDEO lines overflowed below ~95 | path column sized from the widest real tail; VIDEO drops codec, then dimensions, before the path falls under 18 cells |
+| NEAR / VIDEO headers said `6 similar` for keeper + 5 while the totals said 5 | headers count members beside the keeper |
+| totals lines (policy + thresholds) wrapped at 80 | policy part moves to an indented second line |
+| `near` / `video` hint verbs of different widths left the commands unaligned | fixed verb column |
+| after `find -q`, the `next` lines suggested `milk . --quick-search` | follow-ups are the full form |
+| `purge -q -n` listed `decoys/mid_differs.bin` as `would` — a size+sample match whose middle byte differs, with no byte check | quick purge verifies bytes; the line now reads `kept  bytes differ from keeper` and the total dropped from 9 to 8 |
+| `purge . img` printed `FRAMES 0 videos hashed`, `purge . vid` printed `DECODE 0 images hashed` | each pass runs only when the kind can feed it |
+| `find img` in a folder without images printed SIZE/SAMPLE/HASH/DECODE lines of zeros; one file printed `1 files` | empty scan: SCAN and totals only; nothing sharing a size: stage lines stop at SIZE; plurals |
+| `no duplicates` printed above a near group | `no exact duplicates` when near or video groups exist |
+| action-line details (`d 0 p 0 q 8 mirror`) ragged when right-aligned | same fixed-width layout as the NEAR/VIDEO lines |
+| `img vid` together silently kept the last | error: `one kind at a time` |
+| `q` did nothing in the menu; a menu-launched command carried the full cwd path, so its `next` lines were 200+ cells | `q` quits from the choice steps; the folder is omitted when it is the cwd |
+| doctor: `1 files`; paths wrapped at 80; fix line for the model path wrapped | plural; details and fix lines shortened in the middle |
+| the model was found through `DEDUPE_JOURNAL_DIR`'s sibling `models` folder (how the audit's own layout turned the deep tier on by accident) | the model path derives from the app data folder only; `DEDUPE_MODEL` overrides |
+| `NO_COLOR=1` also switched to ASCII glyphs | it only removes colour |
+| `tmk   -  ` (9 cells) beside `tmk 0.98` (8) | `tmk    -` |
+
+Read from the code rather than the screens: Ctrl-C mid-change lost the
+journal (written only at the end); Windows `canonicalize` would have shown
+`\\?\C:\…` in the header, the `next` lines and the journal; `_milked`
+matched case-sensitively on a case-insensitive file system; dates were
+UTC. All four changed (CLI.md §1, §3, §5).
+
+## Ctrl-C
+
+3,000 duplicate pairs (`a/fNNNN.bin` = `b/fNNNN.bin`, 512–1024 bytes);
+`dedupe milk .` started, SIGINT sent after the first `moved` line:
+
+- exit 130; `2,826 moved … journal 20261108-063254`, then
+  `interrupted after 2,826 moves; the journal covers them, dedupe --undo
+  reverses them`
+- the journal file holds 2,826 entries, `consumed: false`, no `.tmp` left
+  behind; `_milked` holds 2,826 files
+- `dedupe --undo`: `2,826 restored`; `a/` and `b/` back to 3,000 each,
+  `_milked` gone
+
+SIGINT during a `find` scan ends the process as before (no change had
+started). The same sequence is an end-to-end test on Unix
+(`interrupted_milk_leaves_a_journal_undo_can_use`).
+
+## Dates
+
+The build machine runs in PST. Fixture files stamped at UTC midnight
+(`2019-06-12 00:00Z`) now print `2019-06-11`, the local calendar date, as
+Explorer would show them on that machine. The journal id stays UTC.
+
+## Suite
+
+`cargo test --release`: 68 unit tests (3 new: ANSI-aware width, segment
+fitting and counting, the verbatim-prefix strip; the journal round trip
+now also covers the writer, `keep_remaining` and the unreadable count) and
+22 end-to-end tests (6 new: quick purge verifies bytes, one kind at a
+time, passes by kind, empty-scan stage lines, the undo-elsewhere hint,
+the Unix Ctrl-C sequence). All pass without the model and with
+`DEDUPE_MODEL` set; with `--no-default-features` 66 + 22 pass. `cargo
+clippy --all-targets --release` clean, `cargo fmt` clean.
+
+Windows, type-checked only (`cargo check --target x86_64-pc-windows-msvc
+--all-targets --features blake3/pure`): passes with and without the deep
+feature, so `ctrlc` (SetConsoleCtrlHandler) and `time`'s local offset
+compile for that target. Not linked, not run.
+
+Binary: 25,697,216 bytes with the deep tier (was 25,618,368; `ctrlc` and
+`time` add 79 KB), 3,018,152 bytes without.
+
+## Not verified here
+
+- Windows execution: the `\\?\` strip, the case-insensitive `_milked`
+  match, the console Ctrl-C handler and the local-date offset are all
+  type-checked, none observed on a Windows console. An attempt to place
+  the repository on the linked Windows machine for a real run was blocked
+  by the session's folder-access policy.
+- The deep tier's cost on Windows (tract's `ml64`-assembled kernels).

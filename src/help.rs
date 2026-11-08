@@ -1,5 +1,5 @@
 //! The help page (docs/CLI.md §1). Commands first and lit; everything
-//! else dimmer. Fits 60 cells so it reads the same in a narrow pane.
+//! else dimmer. Every line fits 80 cells.
 
 use crate::render::Renderer;
 use crate::theme::Role;
@@ -51,7 +51,7 @@ pub fn page(r: &Renderer) {
         ),
         c(
             "doctor",
-            "check terminal, folder, journal, Recycle Bin, ffmpeg",
+            "check terminal, folder, journal, Recycle Bin, ffmpeg, model",
         ),
         String::new(),
         tok("PATH", "root folder                         default: here"),
@@ -78,7 +78,11 @@ pub fn page(r: &Renderer) {
         ),
         row(
             p(&fit("keep", 8)),
-            "oldest copy stays; shallower, then shorter path breaks ties",
+            "oldest copy stays; shallower, then shorter name breaks ties",
+        ),
+        row(
+            p(&fit("ctrl-c", 8)),
+            "during milk or purge stops after the file in hand; undo still works",
         ),
         row(
             p(&fit("journal", 8)),

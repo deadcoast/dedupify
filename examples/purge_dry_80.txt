@@ -1,0 +1,77 @@
+ dedupe purge  /tmp/claude-0…ratchpad/audit_root  recursive  all kinds  dry run
+ ──────────────────────────────────────────────────────────────────────────────
+ SCAN   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  34 files   43.5 MB   0.0 s
+ SIZE   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  17 share a size
+ SAMPLE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  16 share a sample   1.69 MB
+ HASH   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  14 confirmed   15.0 MB   0.0 s
+ DECODE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  10 images hashed   3 undecodable
+ MATCH  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  15 similar pairs   6 images grouped
+ FRAMES ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  6 videos hashed
+ MATCH  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  5 similar pairs   4 videos grouped
+ VERIFY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  8 verified byte for byte
+
+ GROUP 001   2 copies   4.63 MB each   4.63 MB reclaimable
+   keep  clips/near/a.mp4                                            2026-11-07
+   dupe  clips/near/a_copy.mp4
+ GROUP 002   2 copies   2.00 MB each   2.00 MB reclaimable
+   keep  clips/a.mp4                                                 2021-05-31
+   dupe  clips/copy/a.mp4
+ GROUP 003   4 copies   300 KB each   900 KB reclaimable
+   keep  2019/trip/IMG_0041.jpg                                      2019-06-11
+   dupe  backup/IMG_0041.jpg
+   dupe  backup/old/IMG_0041 (1).jpg
+   dupe  archive/2020/photos/pho…exported/subset/final/IMG_0041.jpg
+ GROUP 004   2 copies   117 KB each   117 KB reclaimable
+   keep  wallpapers/sunset.png                                       2019-06-11
+   dupe  wallpapers/dl/sunset (1).png
+ GROUP 005   2 copies   45.9 KB each   45.9 KB reclaimable
+   keep  photos/export/beach.jpg                                     2021-05-31
+   dupe  photos/export/beach (copy).jpg
+ GROUP 006   2 copies   560 B each   560 B reclaimable
+   keep  notes.txt                                                   2019-06-11
+   dupe  notes (copy).txt
+
+ NEAR 007   5 similar   680 KB reclaimable
+   keep  photos/beach.png    1000×750     436 KB   2019-06-11
+   near  photos/…mirror.png  1000×750     444 KB   d  0  p  0  q   8  mirror
+   near  photos/…/beach.jpg  1000×750     45.9 KB  d  0  p  0  q   2  +GROUP 005
+   near  photos/…h_crop.jpg  950×712      41.7 KB  d 10  p  6  q  32
+   near  photos/…_small.jpg  500×375      10.6 KB  d  0  p  0  q   4
+   near  photos/…_small.png  375×500      137 KB   d  0  p  0  q   6  rot 90
+
+ VIDEO 008   3 similar   6.14 MB reclaimable   keeper of GROUP 001
+   keep  clips/near/a.mp4    0:20    4.63 MB  2026-11-07
+   near  clips/n…mirror.mp4  0:20    3.24 MB  d  0 p  0  q   2  tmk    -  mirror
+   near  clips/n…_small.mp4  0:20    95.3 KB  d  1 p  2  q   8  tmk 1.00
+   near  clips/n…_trim4.mp4  0:16    2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
+ skipped  2 empty
+ ──────────────────────────────────────────────────────────────────────────────
+ 6 groups   8 duplicates   7.67 MB reclaimable   keep: oldest copy
+ 1 near group   5 similar   680 KB reclaimable
+   keep: most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 to bin
+ 1 video group   3 similar   6.14 MB reclaimable
+   keep: longest, then most pixels
+
+ would     clips/near/a_copy.mp4
+ would     clips/copy/a.mp4
+ would     backup/IMG_0041.jpg
+ would     backup/old/IMG_0041 (1).jpg
+ would     archive/2020/photos/phone/c… roll/exported/subset/final/IMG_0041.jpg
+ would     wallpapers/dl/sunset (1).png
+ would     photos/export/beach (copy).jpg
+ would     notes (copy).txt
+ would~    photos/export/beach_mirror.png             d  0  p  0  q   8  mirror
+ would~    photos/export/beach.jpg                            d  0  p  0  q   2
+ would~    photos/beach_small.jpg                             d  0  p  0  q   4
+ would~    photos/beach_rot90_small.png               d  0  p  0  q   6  rot 90
+ would~    clips/near/a_mirror.mp4           d  0 p  0  q   2  tmk    -  mirror
+ would~    clips/near/a_small.mp4                    d  1 p  2  q   8  tmk 1.00
+ would~    clips/near/a_trim4.mp4                    d 15 p 20  q 102  tmk 0.98
+ kept~     photos/export/beach_crop.jpg                        PDQ q 32 over 31
+ ──────────────────────────────────────────────────────────────────────────────
+ 15 would bin   14.4 MB to the Recycle Bin
+ ~ confirmed near duplicate, not a byte copy
+   (images: dHash, pHash and PDQ agree; videos: TMK or sampled frames)
+ 1 kept~: similar, not confirmed for binning; dedupe milk . moves them instead
+
+--- exit 0 ---

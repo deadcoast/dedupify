@@ -28,8 +28,10 @@ help page.
 - `docs/RESEARCH.md` — the mathematics and the papers behind each choice
 - `docs/CLI.md` — the resolved grammar, output design, menu, safety model
 - `docs/VERIFICATION.md` — what was run in the build environment and what it showed
+- `docs/DEEP.md` — the optional learned tier: install, provenance, what it may do
 
 Nothing is cached or indexed on a scan. A change writes one journal in the
-OS local-data folder; `--undo` consumes it. Set `DEDUPE_JOURNAL_DIR` to
-move the journals, `NO_COLOR=1` for plain output, `DEDUPE_ASCII=1` for the
-ASCII glyph set.
+OS local-data folder; `--undo` consumes it. Ctrl-C during a change stops
+after the file in hand and the journal still covers every move. Set
+`DEDUPE_JOURNAL_DIR` to move the journals, `NO_COLOR=1` for uncoloured
+output, `DEDUPE_ASCII=1` for the ASCII glyph set.

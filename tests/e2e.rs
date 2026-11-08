@@ -320,6 +320,167 @@ fn quick_search_reports_sample_tier() {
         "quick search is sample-level by design\n{out}"
     );
     assert!(!out.contains("HASH "), "{out}");
+    // the follow-up commands are the full form: moving and binning run on
+    // full evidence, the quick flag is for looking
+    assert!(out.contains("next   dedupe milk . "), "{out}");
+    assert!(!out.contains("milk . --quick-search"), "{out}");
+}
+
+#[test]
+fn quick_purge_still_verifies_bytes() {
+    let fx = fixture();
+    let before = files(&fx.root);
+    let (code, out, _) = run(&fx, &["purge", ".", "-q", "-n"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("VERIFY"), "{out}");
+    assert!(
+        out.contains("kept      decoys/mid_differs.bin")
+            || out.contains("kept      decoys\\mid_differs.bin"),
+        "the sample-only match must be caught by the byte check\n{out}"
+    );
+    assert!(out.contains("bytes differ from keeper"), "{out}");
+    assert!(out.contains("4 would bin"), "{out}");
+    assert_eq!(files(&fx.root), before);
+}
+
+#[test]
+fn one_kind_at_a_time() {
+    let fx = fixture();
+    let (code, _, err) = run(&fx, &["find", ".", "img", "vid"]);
+    assert_eq!(code, 1);
+    assert!(err.contains("one kind at a time"), "{err}");
+}
+
+#[test]
+fn purge_runs_only_the_pass_its_kind_can_use() {
+    let fx = fixture_with_photos();
+    let (code, out, _) = run(&fx, &["purge", ".", "img", "-n"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("DECODE"), "{out}");
+    assert!(
+        !out.contains("FRAMES"),
+        "no video pass over an image-only scan\n{out}"
+    );
+    let (code, out, _) = run(&fx, &["purge", ".", "vid", "-n"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !out.contains("DECODE"),
+        "no image pass over a video-only scan\n{out}"
+    );
+}
+
+#[test]
+fn empty_scan_prints_no_empty_stages() {
+    let fx = fixture();
+    fs::create_dir_all(fx.root.join("nothing")).unwrap();
+    let (code, out, _) = run(&fx, &["find", "nothing", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("SCAN"), "{out}");
+    assert!(!out.contains("SIZE"), "{out}");
+    assert!(out.contains("no duplicates   0 files"), "{out}");
+    // one file: SIZE says nothing shares, and the sample/hash lines are not printed
+    put(&fx.root, "nothing/only.bin", &blob(9, 4096));
+    let (_, out, _) = run(&fx, &["find", "nothing", "."]);
+    assert!(out.contains("0 share a size"), "{out}");
+    assert!(!out.contains("SAMPLE"), "{out}");
+    assert!(out.contains("1 file   4.00 KB checked"), "{out}");
+}
+
+#[test]
+fn undo_elsewhere_is_named() {
+    let fx = fixture();
+    let (code, out, _) = run(&fx, &["milk", "."]);
+    assert_eq!(code, 0, "{out}");
+    // from a root with no journal of its own, the pending one is pointed at
+    let other = fx.root.join("unique");
+    let (code, out, _) = run(&fx, &["--undo", "unique"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("nothing to undo under unique"), "{out}");
+    assert!(out.contains("undo   dedupe --undo "), "{out}");
+    assert!(out.contains("dedupe milk .   4 entries"), "{out}");
+    let _ = other;
+    let (code, _, _) = run(&fx, &["--undo"]);
+    assert_eq!(code, 0);
+}
+
+/// Ctrl-C in the middle of a milk: the moves made so far are journaled
+/// and undo restores every one of them. Unix only (SIGINT by `kill`).
+#[cfg(unix)]
+#[test]
+fn interrupted_milk_leaves_a_journal_undo_can_use() {
+    use std::io::Read as _;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("fx");
+    let journal = tmp.path().join("journal");
+    fs::create_dir_all(&root).unwrap();
+    // many small duplicate pairs so the move loop runs long enough to stop
+    let n = 6000;
+    for i in 0..n {
+        let data = blob(i as u8, 256 + (i % 7) * 64);
+        put(&root, &format!("a/f{i:04}.bin"), &data);
+        put(&root, &format!("b/f{i:04}.bin"), &data);
+    }
+    let before = files(&root);
+    let mut child = Command::new(bin())
+        .args(["milk", "."])
+        .current_dir(&root)
+        .env("DEDUPE_JOURNAL_DIR", &journal)
+        .env("NO_COLOR", "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    // wait until the first move is reported, then interrupt
+    let mut out = child.stdout.take().unwrap();
+    let mut seen = String::new();
+    let t0 = Instant::now();
+    let mut buf = [0u8; 4096];
+    while !seen.contains(" moved     ") && t0.elapsed() < Duration::from_secs(20) {
+        let k = out.read(&mut buf).unwrap();
+        if k == 0 {
+            break;
+        }
+        seen.push_str(&String::from_utf8_lossy(&buf[..k]));
+    }
+    assert!(
+        seen.contains(" moved     "),
+        "no move seen before the deadline\n{seen}"
+    );
+    // SAFETY: the pid is our own child's, still running (we hold its stdout)
+    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    let mut rest = String::new();
+    out.read_to_string(&mut rest).unwrap();
+    seen.push_str(&rest);
+    let st = child.wait().unwrap();
+    assert_eq!(st.code(), Some(130), "{seen}");
+    assert!(seen.contains("interrupted after"), "{seen}");
+    assert!(seen.contains("the journal covers them"), "{seen}");
+    let moved = seen.matches(" moved     ").count();
+    assert!(
+        moved < n,
+        "the run must have stopped early ({moved} of {n})\n{seen}"
+    );
+    let after = files(&root);
+    assert_eq!(
+        after.iter().filter(|p| p.starts_with("_milked/")).count(),
+        moved
+    );
+
+    let fx = Fx {
+        _tmp: tmp,
+        root: root.clone(),
+        journal,
+    };
+    let (code, out, _) = run(&fx, &["--undo"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("{moved} restored")), "{out}");
+    assert_eq!(
+        files(&fx.root),
+        before,
+        "every interrupted move is reversed"
+    );
 }
 
 #[test]
@@ -441,7 +602,8 @@ fn near_pass_runs_for_img_and_groups_variants() {
         "{out}"
     );
     // near: original, small jpeg, export jpeg (keeper of GROUP 001), mirror
-    assert!(out.contains("NEAR 003   5 similar"), "{out}");
+    // the header counts members beside the keeper, as the totals do
+    assert!(out.contains("NEAR 003   4 similar"), "{out}");
     assert!(out.contains("q "), "PDQ distance column\n{out}");
     assert!(
         out.contains("beach_crop"),
@@ -455,10 +617,20 @@ fn near_pass_runs_for_img_and_groups_variants() {
     assert!(out.contains("+GROUP 002"), "{out}");
     assert!(out.contains("1 near group   4 similar"), "{out}");
     assert!(out.contains("1 flat, skipped"), "{out}");
-    assert!(
-        !out.contains("forest"),
-        "a different picture must not join the group\n{out}"
-    );
+    if dedupe::deep::installed().is_some() {
+        // the procedural forest scores 0.76 against beach on the model
+        // (VERIFICATION.md, Phase 4): it may be listed by the deep tier,
+        // never as a near duplicate
+        assert!(
+            !out.contains("near  photos/forest") && !out.contains("near  photos\\forest"),
+            "a different picture must not join the group as near\n{out}"
+        );
+    } else {
+        assert!(
+            !out.contains("forest"),
+            "a different picture must not join the group\n{out}"
+        );
+    }
     assert!(out.contains("DECODE") && out.contains("MATCH"), "{out}");
 }
 
@@ -636,7 +808,7 @@ fn video_pass_groups_derivatives_and_labels_them() {
         "{out}"
     );
     // video group: zoom (keeper, longest and most pixels), phone copy, mirror, cut
-    assert!(out.contains("VIDEO 003   4 similar"), "{out}");
+    assert!(out.contains("VIDEO 003   3 similar"), "{out}");
     assert!(
         out.contains("keep  video/zoom.mp4") || out.contains("keep  video\\zoom.mp4"),
         "{out}"
@@ -660,10 +832,7 @@ fn video_pass_off_for_plain_find_and_on_for_purge() {
     let (code, out, _) = run(&fx, &["find", "."]);
     assert_eq!(code, 0);
     assert!(!out.contains("VIDEO"), "{out}");
-    assert!(
-        out.contains("video   dedupe find . vid"),
-        "hint line\n{out}"
-    );
+    assert!(out.contains("video  dedupe find . vid"), "hint line\n{out}");
     let (code, out, _) = run(&fx, &["purge", ".", "-n"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("VIDEO"), "purge runs every pass\n{out}");
@@ -699,6 +868,52 @@ fn milk_vid_moves_and_undo_restores() {
     assert!(after.contains(&"video/pattern.mp4".to_string()));
     let (code, out, _) = run(&fx, &["--undo"]);
     assert_eq!(code, 0, "{out}");
+    assert_eq!(files(&fx.root), before);
+}
+
+// ---------------------------------------------------------------------------
+// deep tier (runs only with the model installed; see docs/DEEP.md)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn deep_tier_lists_heavy_edits_and_never_acts_on_them() {
+    if dedupe::deep::installed().is_none() {
+        eprintln!("no model installed; skipped");
+        return;
+    }
+    let fx = fixture_with_photos();
+    // a letterboxed copy: the 64-bit pair misses it (p 20), SSCD does not
+    let beach = image::open(fx.root.join("photos/beach.png"))
+        .unwrap()
+        .to_rgb8();
+    let (w, h) = (beach.width(), beach.height());
+    let mut lb = image::RgbImage::from_pixel(w, h * 5 / 4, image::Rgb([0, 0, 0]));
+    image::imageops::overlay(&mut lb, &beach, 0, (h / 8) as i64);
+    put(&fx.root, "photos/beach_letterbox.png", &png_bytes(&lb));
+
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("hashed   +deep"), "{out}");
+    assert!(
+        out.contains("deep  photos/beach_letterbox.png")
+            || out.contains("deep  photos\\beach_letterbox.png"),
+        "{out}"
+    );
+    assert!(out.contains("by deep only   listed for review"), "{out}");
+    assert!(
+        out.contains("keep  photos/beach.png") || out.contains("keep  photos\\beach.png"),
+        "the original stays keeper\n{out}"
+    );
+
+    let before = files(&fx.root);
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        fx.root.join("photos/beach_letterbox.png").exists(),
+        "deep-only member must not move\n{out}"
+    );
+    let (code, _, _) = run(&fx, &["--undo"]);
+    assert_eq!(code, 0);
     assert_eq!(files(&fx.root), before);
 }
 

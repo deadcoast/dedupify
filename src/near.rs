@@ -27,9 +27,11 @@ pub struct Rep {
 pub struct Hashed {
     pub rep: Rep,
     pub sig: Signature,
+    /// SSCD embedding when the deep tier is active.
+    pub deep: Option<crate::deep::Embedding>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Relation {
     pub variant: Variant,
     pub d: u32,
@@ -39,6 +41,8 @@ pub struct Relation {
     /// PDQ quality of the lower-quality side; below `PDQ_QUALITY_MIN` the
     /// PDQ distance carries no weight.
     pub q_quality: u8,
+    /// SSCD cosine to the keeper when the deep tier is active.
+    pub deep: Option<f32>,
 }
 
 impl Relation {
@@ -52,8 +56,23 @@ impl Relation {
             && self.q_quality >= PDQ_QUALITY_MIN
     }
 
+    /// Grouped by the deep tier alone: the two 64-bit hashes disagree.
+    pub fn deep_only(&self) -> bool {
+        (self.d > DHASH_MAX || self.p > PHASH_MAX)
+            && self.deep.is_some_and(|c| c >= crate::deep::DEEP_MIN)
+    }
+
     /// Why `confirmed()` is false, for the `kept` line.
     pub fn unconfirmed_reason(&self) -> String {
+        if self.deep_only() {
+            return format!(
+                "deep {:.2} only; frames d {} p {} q {}",
+                self.deep.unwrap_or(0.0),
+                self.d,
+                self.p,
+                self.q
+            );
+        }
         if self.q_quality < PDQ_QUALITY_MIN {
             format!("PDQ quality {} below {}", self.q_quality, PDQ_QUALITY_MIN)
         } else if self.q > PDQ_MAX {
@@ -78,12 +97,21 @@ pub struct NearGroup {
 }
 
 impl NearGroup {
+    /// Bytes `milk`/`purge` act on: deep-only members are listed, not acted on.
     pub fn reclaimable(&self) -> u64 {
         self.members
             .iter()
             .skip(1)
+            .filter(|m| !m.relation.is_some_and(|r| r.deep_only()))
             .map(|m| m.hashed.rep.cand.size)
             .sum()
+    }
+
+    pub fn deep_only_count(&self) -> usize {
+        self.members
+            .iter()
+            .filter(|m| m.relation.is_some_and(|r| r.deep_only()))
+            .count()
     }
 }
 
@@ -94,6 +122,11 @@ pub struct NearStats {
     pub low_quality: u64,
     pub pairs: u64,
     pub grouped: u64,
+    /// Deep tier active for this run.
+    pub deep: bool,
+    pub deep_failed: u64,
+    /// Pairs the deep tier added that the 64-bit hashes had not.
+    pub deep_pairs: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -149,29 +182,54 @@ impl MatchProgress for MatchTicker<'_> {
 }
 
 /// Decode and hash every representative in parallel.
-pub fn hash_all(reps: Vec<Rep>, progress: &dyn Progress) -> (Vec<Hashed>, NearStats) {
+pub fn hash_all(
+    reps: Vec<Rep>,
+    progress: &dyn Progress,
+    deep: Option<&crate::deep::Deep>,
+) -> (Vec<Hashed>, NearStats) {
     let total = reps.len() as u64;
     let done = AtomicU64::new(0);
+    let deep_failed = AtomicU64::new(0);
     progress.tick(Stage::Decode, 0, total);
-    let results: Vec<(Rep, Result<Signature, perceptual::DecodeError>)> = reps
+    type Decoded = Result<(Signature, Option<crate::deep::Embedding>), perceptual::DecodeError>;
+    let results: Vec<(Rep, Decoded)> = reps
         .into_par_iter()
         .map(|rep| {
-            let sig = perceptual::signature(&rep.cand.path);
+            // one decode feeds every hash and, when active, the embedding
+            let r = perceptual::load_image(&rep.cand.path).map(|img| {
+                let sig = perceptual::signature_from_image(&img);
+                let emb = deep.and_then(|m| match m.embed(&img) {
+                    Ok(e) => Some(e),
+                    Err(_) => {
+                        deep_failed.fetch_add(1, Ordering::Relaxed);
+                        None
+                    }
+                });
+                (sig, emb)
+            });
             let d = done.fetch_add(1, Ordering::Relaxed) + 1;
             progress.tick(Stage::Decode, d, total);
-            (rep, sig)
+            (rep, r)
         })
         .collect();
-    let mut stats = NearStats::default();
+    let mut stats = NearStats {
+        deep: deep.is_some(),
+        ..Default::default()
+    };
+    stats.deep_failed = deep_failed.load(Ordering::Relaxed);
     let mut out = Vec::with_capacity(results.len());
-    for (rep, sig) in results {
-        match sig {
-            Ok(sig) => {
+    for (rep, r) in results {
+        match r {
+            Ok((sig, emb)) => {
                 stats.decoded += 1;
                 if sig.quality < QUALITY_MIN {
                     stats.low_quality += 1;
                 } else {
-                    out.push(Hashed { rep, sig });
+                    out.push(Hashed {
+                        rep,
+                        sig,
+                        deep: emb,
+                    });
                 }
             }
             Err(_) => stats.undecodable += 1,
@@ -180,9 +238,22 @@ pub fn hash_all(reps: Vec<Rep>, progress: &dyn Progress) -> (Vec<Hashed>, NearSt
     (out, stats)
 }
 
-/// Keeper order: most pixels (a downscaled copy is the derivative), then
-/// oldest (the original predates its exports), then largest file (at equal
-/// age and size a lossless encoding outweighs a lossy one), then path.
+/// Keeper order inside one group: the member the most other members match
+/// directly on the two 64-bit hashes (the hub — an original is what its
+/// derivatives all resemble, derivatives need not resemble each other),
+/// then most pixels (a downscaled copy is the derivative), then oldest, then
+/// largest file (at equal age and size a lossless encoding outweighs a lossy
+/// one), then path. Degree comes first so a padded or letterboxed copy with
+/// more pixels than the original cannot take the keeper seat.
+pub fn keeper_order_with_degree(
+    a: &Hashed,
+    da: usize,
+    b: &Hashed,
+    db: usize,
+) -> std::cmp::Ordering {
+    db.cmp(&da).then_with(|| keeper_order(a, b))
+}
+
 pub fn keeper_order(a: &Hashed, b: &Hashed) -> std::cmp::Ordering {
     b.sig
         .pixels()
@@ -192,10 +263,14 @@ pub fn keeper_order(a: &Hashed, b: &Hashed) -> std::cmp::Ordering {
         .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))
 }
 
-pub const NEAR_POLICY_LABEL: &str = "keep: most pixels";
+pub const NEAR_POLICY_LABEL: &str = "keep: most matched, then most pixels";
 
 /// Best relation of `m` to the keeper `k`, searching both directions.
 pub fn relation(k: &Signature, m: &Signature) -> Relation {
+    relation_deep(k, m, None)
+}
+
+pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>) -> Relation {
     let mut best: Option<(Variant, u32, u32, u32)> = None;
     for (i, v) in perceptual::VARIANT_ORDER.iter().enumerate() {
         let d1 = perceptual::hamming(k.dhash[0], m.dhash[i]);
@@ -217,10 +292,18 @@ pub fn relation(k: &Signature, m: &Signature) -> Relation {
         p,
         q,
         q_quality: k.pdq_quality.min(m.pdq_quality),
+        deep,
     }
 }
 
 /// Match, cluster, order. Returns groups largest-reclaim first.
+///
+/// The two 64-bit hashes build the graph (union–find over pairs). The deep
+/// tier, when active, never adds edges to that graph: a deep match attaches
+/// an image to an existing group's keeper, or pairs two leftover images,
+/// always by its direct cosine to the keeper. That keeps one false deep
+/// score from welding two families together, and makes the `deep` number
+/// printed on a line the number that admitted it.
 pub fn group(
     hashed: Vec<Hashed>,
     stats: &mut NearStats,
@@ -238,8 +321,11 @@ pub fn group(
     stats.pairs = pairs.len() as u64;
 
     let mut uf = UnionFind::new(n);
+    let mut degree = vec![0usize; n];
     for m in &pairs {
         uf.union(m.a, m.b);
+        degree[m.a] += 1;
+        degree[m.b] += 1;
     }
     let mut buckets: std::collections::HashMap<usize, Vec<usize>> =
         std::collections::HashMap::new();
@@ -248,30 +334,121 @@ pub fn group(
         buckets.entry(r).or_default().push(i);
     }
 
-    let mut hashed: Vec<Option<Hashed>> = hashed.into_iter().map(Some).collect();
-    let mut groups: Vec<NearGroup> = Vec::new();
-    for (_, mut idxs) in buckets {
-        if idxs.len() < 2 {
-            continue;
+    // components of two or more: keeper by degree, then the usual order
+    let mut comps: Vec<Vec<usize>> = Vec::new();
+    let mut singles: Vec<usize> = Vec::new();
+    for (_, idxs) in buckets {
+        if idxs.len() >= 2 {
+            comps.push(idxs);
+        } else {
+            singles.push(idxs[0]);
         }
-        let mut members: Vec<Hashed> = idxs.drain(..).map(|i| hashed[i].take().unwrap()).collect();
-        members.sort_by(keeper_order);
-        let keeper_sig = members[0].sig.clone();
-        let members: Vec<NearMember> = members
-            .into_iter()
-            .enumerate()
-            .map(|(i, h)| {
-                let relation = if i == 0 {
-                    None
-                } else {
-                    Some(relation(&keeper_sig, &h.sig))
-                };
-                NearMember {
+    }
+    for c in comps.iter_mut() {
+        c.sort_by(|&a, &b| keeper_order_with_degree(&hashed[a], degree[a], &hashed[b], degree[b]));
+    }
+
+    // deep attachments: singletons join the keeper they are closest to
+    let mut deep_attached: Vec<(usize, usize, f32)> = Vec::new(); // (comp index, member, cosine)
+    if stats.deep {
+        let cos_to = |a: usize, b: usize| -> Option<f32> {
+            match (hashed[a].deep.as_ref(), hashed[b].deep.as_ref()) {
+                (Some(x), Some(y)) => Some(crate::deep::cosine(x, y)),
+                _ => None,
+            }
+        };
+        let mut leftover: Vec<usize> = Vec::new();
+        for &s_ in &singles {
+            let mut best: Option<(usize, f32)> = None;
+            for (ci, c) in comps.iter().enumerate() {
+                if let Some(cs) = cos_to(s_, c[0]) {
+                    if cs >= crate::deep::DEEP_MIN && best.is_none_or(|(_, b)| cs > b) {
+                        best = Some((ci, cs));
+                    }
+                }
+            }
+            match best {
+                Some((ci, cs)) => deep_attached.push((ci, s_, cs)),
+                None => leftover.push(s_),
+            }
+        }
+        // leftovers pair among themselves, star-shaped around the better keeper
+        let mut cand: Vec<(f32, usize, usize)> = Vec::new();
+        for i in 0..leftover.len() {
+            for j in i + 1..leftover.len() {
+                if let Some(cs) = cos_to(leftover[i], leftover[j]) {
+                    if cs >= crate::deep::DEEP_MIN {
+                        cand.push((cs, leftover[i], leftover[j]));
+                    }
+                }
+            }
+        }
+        cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut placed: std::collections::HashMap<usize, usize> = std::collections::HashMap::new(); // member → comp
+        for (cs, a, b) in cand {
+            match (placed.get(&a).copied(), placed.get(&b).copied()) {
+                (None, None) => {
+                    let (k, m) = if keeper_order(&hashed[a], &hashed[b]) == std::cmp::Ordering::Less
+                    {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    comps.push(vec![k]);
+                    let ci = comps.len() - 1;
+                    placed.insert(k, ci);
+                    placed.insert(m, ci);
+                    deep_attached.push((ci, m, cs));
+                }
+                (Some(ci), None) if comps[ci][0] == a => {
+                    placed.insert(b, ci);
+                    deep_attached.push((ci, b, cs));
+                }
+                (None, Some(ci)) if comps[ci][0] == b => {
+                    placed.insert(a, ci);
+                    deep_attached.push((ci, a, cs));
+                }
+                _ => {} // both placed, or the placed one is not a keeper: no chaining
+            }
+        }
+        stats.deep_pairs = deep_attached.len() as u64;
+    }
+
+    let mut slots: Vec<Option<Hashed>> = hashed.into_iter().map(Some).collect();
+    let mut groups: Vec<NearGroup> = Vec::new();
+    for (ci, idxs) in comps.iter().enumerate() {
+        let keeper = slots[idxs[0]].take().unwrap();
+        let keeper_sig = keeper.sig.clone();
+        let keeper_deep = keeper.deep;
+        let mut members: Vec<NearMember> = vec![NearMember {
+            hashed: keeper,
+            relation: None,
+        }];
+        for &i in &idxs[1..] {
+            let h = slots[i].take().unwrap();
+            let cs = match (keeper_deep.as_ref(), h.deep.as_ref()) {
+                (Some(a), Some(b)) => Some(crate::deep::cosine(a, b)),
+                _ => None,
+            };
+            let relation = Some(relation_deep(&keeper_sig, &h.sig, cs));
+            members.push(NearMember {
+                hashed: h,
+                relation,
+            });
+        }
+        for &(aci, m, cs) in &deep_attached {
+            if aci == ci {
+                let h = slots[m].take().unwrap();
+                let relation = Some(relation_deep(&keeper_sig, &h.sig, Some(cs)));
+                members.push(NearMember {
                     hashed: h,
                     relation,
-                }
-            })
-            .collect();
+                });
+            }
+        }
+        if members.len() < 2 {
+            continue;
+        }
         stats.grouped += members.len() as u64;
         groups.push(NearGroup { members });
     }

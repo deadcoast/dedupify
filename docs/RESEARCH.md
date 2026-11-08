@@ -241,14 +241,62 @@ have blocked 62 % of confirmations for no measured benefit. Flat images
 are already excluded from the near pass by the gradient gate
 (`QUALITY_MIN`).
 
-Learned descriptors (SSCD — Pizzi et al., CVPR 2022,
-[paper](https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html),
-trained for copy detection on DISC2021 and reported to beat SimCLR
-descriptors by 48 % absolute) are the current frontier for crops,
-rotations and heavy edits. They require a ~100 MB model and an inference
-runtime. They are scheduled as an optional Phase 4 tier, off by default,
-because they answer a different question ("same picture, edited") than
-the core tool ("copies of this file").
+### 2.6 The deep tier — Phase 4, optional **[CLAUDE]**
+
+Learned descriptors are the frontier for crops, rotations and heavy edits.
+**SSCD** (Pizzi et al., CVPR 2022,
+[paper](https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html)):
+a ResNet-50 with GeM pooling trained with SimCLR-style contrastive
+learning plus an entropy regulariser on DISC2021, producing a 512-d
+L2-normalised embedding compared by dot product; reported to beat plain
+SimCLR descriptors by 48 % absolute micro-AP on that benchmark.
+
+`deep.rs` runs the `sscd_disc_mixup` checkpoint as ONNX through `tract`
+(pure Rust, single binary, no runtime to install — the model file is the
+only download; `docs/DEEP.md` has the install line and the provenance
+chain back to Meta's checkpoint hash). Preprocessing is the official
+`skew_320` transform. The tier is on when the model file exists and off
+otherwise; no flag.
+
+**Measured** (`measure_deep` in `tests/corpus.rs`: 40 procedural sources ×
+21 perturbations, 880 embeddings, 33,540 negative pairs; table in
+docs/VERIFICATION.md):
+
+- Minimum / median cosine, with recall at the shipped threshold 0.70 where
+  it is below 100 %: rescale and brightness ≥ 0.90; mirror 0.91; 10 % crop
+  0.84; 20 % crop 0.71 / 0.79; 40 % crop 0.36 / 0.59 (2.5 %); 90° rotation
+  0.62 / 0.71 (77.5 %); letterbox 0.66 / 0.77 (92.5 %); watermark 0.84;
+  JPEG q30 0.65 / 0.75 (77.5 %); noise 0.67 / 0.81 (92.5 %).
+- Negatives: median **0.425**, 99th percentile 0.582, maximum **0.669**.
+  Procedural value-noise pictures are one texture family to this model;
+  unrelated photographs will score lower, but that is a prediction, not a
+  measurement here. 0.70 gives 0 false positives on this corpus with a
+  0.03 margin; 0.65 lets 4 through, 0.60 lets 127 through.
+- On the hand-made photo fixture a different procedural picture scored
+  0.76 against the keeper — above the threshold. That is the measured
+  reason the tier **lists and never acts**.
+
+**How it enters the groups.** The deep tier adds no edges to the
+union–find graph. After the 64-bit pair has built its components and
+chosen keepers, a leftover image is attached to the keeper it scores
+highest against when that cosine is ≥ 0.70, and leftover pairs form
+star-shaped two-groups around the better keeper. One false deep score can
+therefore pull one image into one group; it cannot weld two families
+together through a chain, and the `deep 0.78` printed on a line is the
+number that admitted it. Deep-only members print with the verb `deep`,
+`milk` and `purge` leave them in place, and the totals say so.
+
+**Keeper policy change.** A letterboxed derivative has more pixels than
+its original and would have taken the keeper seat under "most pixels". The
+near keeper is now the member with the most direct 64-bit matches inside
+the group (the hub — derivatives resemble the original more than each
+other), then most pixels, then oldest, then largest file.
+
+Cost: ~0.3 s per image on two cores through tract; the binary grows from
+2.9 MB to 25.6 MB with the tier compiled in (`--no-default-features`
+builds without it). ONNX Runtime was not used because its prebuilt
+binaries are not on crates.io and would have to be installed beside the
+executable; whether it would be faster here was not measured.
 
 ### 2.3 Searching Hamming space — Multi-Index Hashing
 
@@ -403,6 +451,13 @@ added to a user's directory except the `_milked` folder the spec defines.
 - One journal per action; undo consumes the latest unconsumed journal for
   that root. Journals are small JSON files and are never required for a
   scan.
+- Written as the change runs, not after it (Phase 5): the first move
+  creates the file, later moves rewrite it at most every 250 ms through a
+  sibling `.tmp` and one rename, so a kill between writes leaves the last
+  complete journal rather than a truncated one. Ctrl-C is handled: the
+  loop stops after the file in hand and the final write happens; a second
+  Ctrl-C ends the process. An interrupted undo rewrites the journal with
+  the entries still to restore and leaves it pending.
 
 ---
 
@@ -413,7 +468,9 @@ Within a group, one file stays and the rest are duplicates. Policy
 is older than its copies); tie → fewest path components (the copy in a
 nested `backup/old/` folder is the duplicate); tie → shorter name; tie →
 lexicographic path. The policy is printed in every result footer so it is
-never hidden.
+never hidden. The date on a `keep` line is the local calendar date of that
+modification time (Phase 5), the same day Explorer shows; the comparison
+itself uses the full timestamp.
 
 ---
 
@@ -427,5 +484,7 @@ never hidden.
 - Pizzi et al., A Self-Supervised Descriptor for Image Copy Detection — https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html
 - TMK reference implementation — https://github.com/facebook/ThreatExchange/tree/main/tmk (cpp/algo/tmkfv.cpp, cpp/bin/tmk-hash-video.cpp, README.md); kernel paper — Poullot et al., ACM MM 2015, https://dblp.org/rec/conf/mm/PoullotTNJS15
 - PDQ reference implementation — https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md
+- SSCD ONNX export used — https://huggingface.co/nutszebra/sscd_onnx (sscd_disc_mixup.onnx, sha256 e65e2a5b…); Meta's checkpoint — https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt (sha256 9f26bd4c…); SSCD repository — https://github.com/facebookresearch/sscd-copy-detection
+- `tract` — https://github.com/sonos/tract
 - `trash` crate — https://docs.rs/trash
 - `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher

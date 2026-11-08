@@ -106,6 +106,7 @@ pub enum CliError {
     UnknownToken(String),
     MissingCommand(String),
     SecondPath { first: String, second: String },
+    SecondKind { first: String, second: String },
     RootMissing(String),
     RootNotDir(String),
 }
@@ -120,6 +121,12 @@ impl fmt::Display for CliError {
             }
             CliError::SecondPath { first, second } => {
                 write!(f, "two paths given  {first}  and  {second}")
+            }
+            CliError::SecondKind { first, second } => {
+                write!(
+                    f,
+                    "one kind at a time  {first}  and  {second}   (leave both out for everything)"
+                )
             }
             CliError::RootMissing(s) => write!(f, "folder not found  {s}"),
             CliError::RootNotDir(s) => write!(f, "not a folder  {s}"),
@@ -197,6 +204,12 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
             continue;
         }
         if let Some(k) = Kind::from_token(t) {
+            if kind != Kind::All {
+                return Err(CliError::SecondKind {
+                    first: kind.token().to_string(),
+                    second: t.to_string(),
+                });
+            }
             kind = k;
             continue;
         }
@@ -273,8 +286,13 @@ fn resolve_root(path: Option<&str>, cwd: &Path, command: Command) -> Result<Path
     if !candidate.is_dir() {
         return Err(CliError::RootNotDir(path.unwrap_or(".").to_string()));
     }
-    // canonicalize for a stable journal key; fall back to the joined path
-    Ok(std::fs::canonicalize(&candidate).unwrap_or(candidate))
+    // canonicalize for a stable journal key; fall back to the joined path.
+    // On Windows canonicalize answers with a `\\?\` verbatim path; the
+    // prefix is stripped so every printed and journaled path reads as
+    // Explorer shows it (std re-adds it for long paths internally).
+    Ok(crate::util::strip_verbatim(
+        &std::fs::canonicalize(&candidate).unwrap_or(candidate),
+    ))
 }
 
 #[cfg(test)]
@@ -366,6 +384,14 @@ mod tests {
         assert!(matches!(
             parse(&a(&["find", "a", "b"]), &cwd()),
             Err(CliError::SecondPath { .. })
+        ));
+        assert!(matches!(
+            parse(&a(&["find", ".", "img", "vid"]), &cwd()),
+            Err(CliError::SecondKind { .. })
+        ));
+        assert!(matches!(
+            parse(&a(&["find", ".", "img", "image"]), &cwd()),
+            Err(CliError::SecondKind { .. })
         ));
         assert!(matches!(
             parse(&a(&["find", "/definitely/not/here/xyz"]), &cwd()),
