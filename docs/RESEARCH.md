@@ -139,42 +139,116 @@ Benchmark evidence used for the decision:
   **quality** score (proportional to feature count) that flags flat images
   whose hashes are unreliable.
 
-### 2.2 Decision **[CLAUDE]**
+### 2.2 Decision **[CLAUDE]** — implemented in Phase 2
 
-Phase 2 implements **dHash and pHash in-house** (both are ~60 lines each; the
-DCT is a 32×32 matrix product), with:
+`perceptual.rs` implements **dHash and pHash in-house** on one shared
+luminance grid:
 
-- dHash as the first-pass filter at normalised threshold 0.159 → **≤ 10 of 64
-  bits** for "likely same image";
-- pHash agreement at normalised threshold 0.224 → **≤ 14 of 64 bits**
-  required to confirm a pair;
-- a pair is a near-duplicate when **both** agree. The two hashes fail on
-  different perturbations (dHash is a gradient sign, pHash is a frequency
-  magnitude), so conjunction lowers the false-positive rate below either
-  alone. The combined false-positive rate is not simply the product (the
-  errors are correlated on the same image pair); Phase 2 verification
-  measures it on a generated corpus before the thresholds ship.
+- Decode once (EXIF orientation applied), Rec. 601 luminance, integer box
+  prefilter for large images, Lanczos3 to a **288×288** grid. 288 is
+  9·32 = 8·36 = 32·9, so the 9×8 dHash grid and the 32×32 pHash grid are
+  exact block means of the same array — no second resampling, and every
+  dihedral variant (identity, three rotations, two flips, two transposes)
+  is a free index permutation of that array. Eight variants are hashed per
+  image; matching compares an image's identity hash against every variant
+  of the other image in both directions, so mirrored and rotated copies
+  are found with one decode.
+- pHash follows the `imagehash` convention (8×8 low band including the DC
+  term, median threshold with the even-count mean), because that is the
+  convention the benchmark thresholds were measured with.
+- A **quality** gate (share of 9×8 gradients above 2/255) drops flat
+  images from matching, as PDQ's quality score does; `QUALITY_MIN = 10`.
+- A pair matches when **both** dHash ≤ 10 and pHash ≤ 14 on the same
+  variant. Conjunction: the two hashes fail on different perturbations.
 
-PDQ (256-bit, with quality gating) is scheduled for Phase 2b as the
-high-precision tier used by `purge`; the paper's threshold of 30/256 and its
-quality gate carry over. The `image_hasher` crate (a fork of `img_hash`) was
-evaluated and not adopted: no PDQ, uncertain maintenance
-([lib.rs](https://lib.rs/crates/image_hasher)), and owning the DCT means the
-thresholds above are tied to code we control.
+**Measured on the generated corpus** (`tests/corpus.rs`: 150 procedural
+photographs × 21 perturbations, 3,300 signatures, 480,525 negative pairs;
+full table in docs/VERIFICATION.md):
 
-Horizontal mirror: none of the block hashes tolerate it (Zauner). Phase 2
-hashes each image **and its mirror** and stores both (2 × 64 bits); a match
-against either counts. Cost: one extra 9×8 and 32×32 pass per image, which is
-negligible against decode time.
+- 0 false positives at d≤10 ∧ p≤14; the closest negative pair sat at
+  d+p = 26 against a threshold sum of 24.
+- 100 % recall for rescale (25 %–150 %), JPEG q30–q90, rotation by 90°,
+  mirror, brightness ±20 %, gamma 1.5, blur, ±10 noise, 75 % aspect
+  squeeze, 2° rotation.
+- Partial: 5° rotation 77 %, 10 % border crop 70 %, watermark 77 % (pHash
+  is what the bright patch breaks; dHash stays ≤ 2), letterbox 62 %.
+- Fails, as the literature predicts for every block hash: 20 %–40 % crops.
+- The sweep showed d≤12 ∧ p≤14 adds 1.1 points of recall at 0 false
+  positives on this corpus; the shipped thresholds stay at the published
+  values because the corpus negatives are procedural and photographs
+  share more structure than procedural noise. Loosening is a measured,
+  one-constant change if a real library shows misses.
+
+### 2.2b PDQ — the confirmation tier for `purge` **[CLAUDE]** — Phase 2b
+
+`pdq.rs` is a port of the reference algorithm
+([pdqhashing.cpp, downscaling.cpp](https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp)):
+Rec. 601 luma → Jarosz filter (two passes of horizontal-then-vertical box
+filters, window ⌈dim/128⌉ per axis, which composes to a tent) → decimate to
+64×64 at cell centres → quality = Σ|⌊(u−v)·100/255⌋| / 90 over adjacent
+pairs, capped at 100 → 16 rows of the 64-point DCT-II basis (rows 1–16, DC
+skipped), B = D·A·Dᵀ → bit = value > median → 256 bits. The seven other
+orientations come from the 16×16 band by sign flips and transposes
+(reversing an axis negates the even-indexed basis rows), unit-tested
+against pixel-domain transforms of the 64×64 buffer. The documentation's
+recommended threshold is ≤ 31 and its quality cutoff ≤ 49
+([README](https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md)).
+
+Two departures from the reference, both measured:
+
+- The Jarosz filter runs on the integer-box-prefiltered luma that the grid
+  path already produces (short side 576–1151 px), not the full image. A
+  24-megapixel file would otherwise need two 96 MB float buffers per
+  concurrent decode. Hashes are therefore not bit-identical to the
+  reference tool's; `dedupe` only ever compares its own hashes. (The
+  Python wrapper of the reference could not be installed in the build
+  environment, so bit-level agreement was not measured either way.)
+- Inputs with a short side under 384 px are Lanczos-upscaled by an integer
+  factor first. Below 128 px the reference window is 1 — no filtering —
+  and centre sampling lands up to half a cell off. On the corpus this took
+  25 % thumbnails from a worst case of 32 bits (one miss at the threshold)
+  to 14; 384 measured better than 256 on every row and no worse than 512
+  on the rest.
+
+**Measured on the same corpus** (full table in docs/VERIFICATION.md):
+
+- 0 false positives at every threshold up to 64; the closest of 480,525
+  negative pairs sat at 74 bits (mean 115.5, i.e. near the 128 expected
+  for unrelated codes).
+- 100 % recall for rescale 25–150 %, JPEG q30–q90, 90° rotation, mirror,
+  brightness ±20 %, blur, ±10 noise, 75 % squeeze; 98.7 % for gamma 1.5.
+- Where PDQ fails and the 64-bit pair does not: 10 % border crop 0 % (vs
+  70 %), 2° rotation 22 % (vs 100 %), watermark 0.7 % (vs 76.7 %),
+  letterbox 0 % (vs 62 %). The 16×16 band reaches four times the
+  frequency of pHash's 8×8, and those edits shift mid-band phase.
+
+**The rule.** `find` and `milk` group on dHash ≤ 10 ∧ pHash ≤ 14 (milk is
+reversible by `--undo`). `purge` bins a near duplicate only when PDQ ≤ 31
+also holds against the keeper; the others print as `kept~` with the
+reason and the `milk` command that moves them instead. On this corpus both
+rules have zero false positives, so the benefit of requiring PDQ before
+deletion is not visible here; it rests on PDQ's published operation at
+billion-image scale at this threshold, and the cost — crops, small
+rotations, watermarks and letterboxes are not auto-deleted — is the
+measured recall gap above, which is the set of edits where "same file" is
+most arguable.
+
+**Quality is shown, not enforced.** 93 of the 150 corpus sources fall
+below PDQ's recommended quality 50 (the procedural textures are smoother
+than photographs), yet their negative pairs never came within 74 bits and
+their positives matched at the rates above. Gating `purge` on it would
+have blocked 62 % of confirmations for no measured benefit. Flat images
+are already excluded from the near pass by the gradient gate
+(`QUALITY_MIN`).
 
 Learned descriptors (SSCD — Pizzi et al., CVPR 2022,
 [paper](https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html),
 trained for copy detection on DISC2021 and reported to beat SimCLR
-descriptors by 48 % absolute) are the current frontier for crops, rotations
-and heavy edits. They require a ~100 MB model and an inference runtime. They
-are scheduled as an optional Phase 4 tier, off by default, because they
-answer a different question ("same picture, edited") than the core tool
-("copies of this file").
+descriptors by 48 % absolute) are the current frontier for crops,
+rotations and heavy edits. They require a ~100 MB model and an inference
+runtime. They are scheduled as an optional Phase 4 tier, off by default,
+because they answer a different question ("same picture, edited") than
+the core tool ("copies of this file").
 
 ### 2.3 Searching Hamming space — Multi-Index Hashing
 
@@ -205,58 +279,107 @@ radius 1. Radius-2 lookups in a 16-bit table cost 1 + 16 + 120 = 137 bucket
 probes; radius 1 costs 17. Per query ≈ 3 × 137 + 17 = 428 probes plus
 verification of the candidates, versus 10⁵ full comparisons for linear scan.
 
-Decision **[CLAUDE]**: Phase 2 uses linear scan when n ≤ 20,000 (bounded at
-2 × 10⁸ popcounts, well under a second) and MIH above that. The crossover is
-measured in Phase 2 verification, not assumed.
+Implemented in `hamming.rs` with m = 4 substrings of 16 bits over the
+dHash; pHash is verified on the same variant for every candidate. Both
+engines are tested to return identical pairs on random and on real
+signatures. **Measured** (2 vCPUs, random codes with planted copies):
+linear 0.15 s / MIH 0.12 s at n = 5,500; 2.4 s / 0.8 s at 22,000; 10.4 s /
+2.3 s at 44,000. `LINEAR_MAX = 4,000` is the shipped crossover.
 
 ### 2.4 Grouping
 
 Near-duplicate relations are not transitive (A≈B, B≈C does not force A≈C),
-so groups are connected components of the match graph. Union–find with path
-compression and union by rank (Tarjan 1975) gives near-constant amortised
-time per union. Exact-duplicate groups in Phase 1 are equivalence classes
-of one hash value and need no graph.
+so groups are connected components of the match graph. Union–find with
+path halving and union by rank (Tarjan 1975) gives near-constant amortised
+time per union (`near.rs`). A member linked only transitively shows its
+real distance to the keeper, in the warning colour when it exceeds a
+threshold. Exact-duplicate groups are equivalence classes of one hash
+value and need no graph; the near pass runs over exact-group keepers and
+singletons only, so a byte copy is never reported twice.
+
+Near keeper **[CLAUDE]**: most pixels (a downscaled copy is the
+derivative), then oldest, then largest file (at equal age and size a
+lossless encoding outweighs a lossy one), then path.
 
 ---
 
-## 3. Near-duplicate video
+## 3. Near-duplicate video — Phase 3
 
 ### 3.1 Evidence
 
 **TMK + PDQF** (Temporal Match Kernel on PDQ float features; Meta 2019; test
 drive in [arXiv 1912.07745](https://ar5iv.labs.arxiv.org/html/1912.07745)):
-videos are resampled to 15 fps; each frame yields PDQF (the PDQ float
-vector before binarisation); features are averaged over periods and combined
-with trigonometric weights into a fixed-size descriptor (level 1 ≈ 1 KB,
-level 2 ≈ 256 KB). Two-phase match: cosine similarity on level 1 and a
-level-2 score, both at threshold 0.7. Robust to bitrate, format and
-half-scale changes; trimming performs well; a 5-second title card
-"dramatically" reduces matching; crops beyond 20 % are improbable to detect.
+videos are resampled to 15 fps; each frame yields PDQF (the 256 PDQ DCT
+values before binarisation); features are pooled with trigonometric weights
+over four periods into a fixed-size descriptor. Two-phase match: cosine of
+the mean features (level 1) and a kernel maximised over time offsets (level
+2), both suggested at 0.7 in the reference README. Robust to bitrate,
+format and scale; trims perform well; cropping beyond ~20 % and letterboxing
+are weak.
 
-The underlying kernel is from Poullot, Tsukatani, Nguyen, Jégou, Satoh,
-*Temporal Matching Kernel with Explicit Feature Maps*, ACM Multimedia 2015.
+The kernel is from Poullot, Tsukatani, Nguyen, Jégou, Satoh, *Temporal
+Matching Kernel with Explicit Feature Maps*, ACM Multimedia 2015
+([dblp](https://dblp.org/rec/conf/mm/PoullotTNJS15)). The reference
+constants ([tmkfv.cpp](https://github.com/facebook/ThreatExchange/blob/main/tmk/cpp/algo/tmkfv.cpp)):
+periods {2731, 4391, 9767, 14653} frames; 32 Fourier coefficients
+a_0 = (I_0(β) − e^−β)/(2 sinh β), a_j = I_j(β)/sinh β with β = 32, so that
+Σ a_j cos(jδ) approximates a von Mises kernel in the offset δ; per frame the
+L2-normalised feature is accumulated as cos(2πjt/T) and sin(2πjt/T)
+projections; each projection vector is L2-normalised and scaled by √a_j;
+level 2 = max over offsets of Σ_j a_j-weighted
+[cos(jδ)(⟨c,c′⟩+⟨s,s′⟩) + sin(jδ)(⟨s,c′⟩−⟨c,s′⟩)], divided by
+a_0 + 2Σa_j. The default hasher resamples to 15 fps with `pdqf` features
+([tmk-hash-video.cpp](https://github.com/facebook/ThreatExchange/blob/main/tmk/cpp/bin/tmk-hash-video.cpp)).
 
-### 3.2 Decision **[CLAUDE]**
+### 3.2 Implementation (`video.rs`)
 
-Phase 3 implements video matching in two tiers:
+One `ffprobe` for metadata, then one `ffmpeg` process per file streaming
+`fps=15,scale=288:288:flags=area,format=gray` as raw bytes through a pipe
+— no temp files, frames hashed as they arrive, 83 KB per frame. The 288
+grey frame is the same grid the image path uses, so dHash/pHash/PDQ run on
+frames unchanged (PDQ's Jarosz window on 288 is ⌈288/128⌉ = 3). Every
+frame's PDQ band feeds the TMK accumulator; the twelve frames nearest to
+(i+0.5)/12 of the duration also get the full eight-orientation image
+signature — the **positional tier**. ffmpeg is a subprocess, not a linked
+library, because linking FFmpeg into a Rust build on Windows needs vcpkg
+and a matching toolchain; `doctor` reports whether `ffmpeg`/`ffprobe` are
+on PATH, and a run that wanted the pass without them says so and finishes
+the exact tier. Concurrency: ⌈cores/2⌉ clamped to 1–4 ffmpeg processes with
+`-threads 2` each **[CLAUDE]**.
 
-1. **Positional frame hashing.** Decode k = 12 frames at normalised
-   positions t_i = (i + 0.5)/k × duration via `ffmpeg` as a subprocess
-   (`-ss` seek, `-frames:v 1`, scaled to grayscale 32×32 raw output), hash
-   each frame with dHash + pHash from Phase 2, and compare two videos by the
-   median per-position Hamming distance. Normalised positions make the
-   comparison invariant to re-encoding and resolution; they are not
-   invariant to trims, which tier 2 covers. ffmpeg is used as a process, not
-   linked, because linking FFmpeg into a Rust build on Windows requires
-   vcpkg and a matching toolchain; `--doctor` checks that `ffmpeg` and
-   `ffprobe` are on PATH.
-2. **TMK-style descriptor** for trim/offset robustness, following the
-   published pipeline (15 fps resample, per-frame float features,
-   period-averaged trigonometric pooling, two-phase 0.7 thresholds).
+Two tiers, because they fail differently:
+
+- **Positional** — medians over the shared positions of (d, p, q) on the
+  modal orientation. Invariant to re-encode, scale, mirror/rotation, speed
+  change and frame-rate change (positions are fractions of duration); blind
+  to trims.
+- **TMK** — handles trims, head/tail cuts, title cards; blind to mirrors
+  (PDQF sign flips → negative level 1) and letterboxes.
+
+**Measured** (`tests/video_corpus.rs`: 16 synthetic sources × 12 edits,
+208 clips, 60,304 frames, 3,000 negative pairs; table in
+docs/VERIFICATION.md):
+
+- The README's 0.7/0.7 gave **19 false groups**: two different zooms into
+  the same fractal share a mean appearance (level 1 up to 0.817) and a
+  temporal profile (level 2 up to 0.769). Level 1 is a weak discriminator;
+  level 2 separated every negative (max 0.769) from every trim (min 0.785).
+- Shipped **[CLAUDE]**: level 1 ≥ 0.5 as the gate before the offset search,
+  **level 2 ≥ 0.8 to group** (0 false groups, 99.3 % of the TMK-carried
+  edits), **level 2 ≥ 0.9 to bin** (0.13 margin over the closest negative;
+  96.5 % recall — trims between 0.8 and 0.9 are grouped, printed `kept~`,
+  left to `milk`). Positional confirms with the image rule plus q ≤ 31.
+- Negatives on the positional tier came as close as d 1 with p 28 (two
+  static bar patterns): the conjunction holds; q never below 118.
+- The recovered time offset is approximate under the reference's
+  per-coefficient normalisation (unit-tested on synthetic features) and is
+  not displayed; trims are labelled from the ffprobe durations instead.
+
+Cost: 2.2 ms per 15-fps frame end to end, of which ffmpeg's decode and
+scale are ~88 %; the per-frame hashing is ~0.3 ms. A two-hour file is about
+four minutes of one ffmpeg process.
 
 Audio fingerprinting (Chromaprint) is out of scope.
-
----
 
 ## 4. Undo — the journal
 
@@ -302,5 +425,7 @@ never hidden.
 - PDQ & TMK+PDQF test drive — https://ar5iv.labs.arxiv.org/html/1912.07745
 - Norouzi, Punjani, Fleet, Fast Exact Search in Hamming Space with Multi-Index Hashing — https://ar5iv.arxiv.org/html/1307.2982 (PAMI version: https://www.cs.toronto.edu/~fleet/research/Papers/MIH-pami2014.pdf)
 - Pizzi et al., A Self-Supervised Descriptor for Image Copy Detection — https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html
+- TMK reference implementation — https://github.com/facebook/ThreatExchange/tree/main/tmk (cpp/algo/tmkfv.cpp, cpp/bin/tmk-hash-video.cpp, README.md); kernel paper — Poullot et al., ACM MM 2015, https://dblp.org/rec/conf/mm/PoullotTNJS15
+- PDQ reference implementation — https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md
 - `trash` crate — https://docs.rs/trash
 - `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher

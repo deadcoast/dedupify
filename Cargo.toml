@@ -1,0 +1,39 @@
+[package]
+name = "dedupe"
+version = "0.1.0"
+edition = "2021"
+description = "Dedupelifier — duplicate finder with a designed terminal experience"
+license = "MIT"
+default-run = "dedupe"
+
+[[bin]]
+name = "dedupe"
+path = "src/main.rs"
+
+[lib]
+name = "dedupe"
+path = "src/lib.rs"
+
+[dependencies]
+blake3 = { version = "1.8", features = ["rayon"] }
+rayon = "1.12"
+walkdir = "2.5"
+same-file = "1.0"
+trash = "5.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "7.0"
+crossterm = "0.29"
+unicode-width = "0.2"
+anyhow = "1.0"
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"] }
+
+[dev-dependencies]
+tempfile = "3"
+walkdir = "2.5"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

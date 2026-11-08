@@ -58,7 +58,13 @@ what did complete).
 ### find **[SPEC]**
 Runs the exact-duplicate pipeline (size → sample → full hash), prints every
 group, then the **next** lines: the exact `milk` and `purge` invocations for
-this root, so the follow-up is a copy-paste.
+this root, so the follow-up is a copy-paste. With the `img` token the
+near-duplicate image pass runs as well (DECODE → MATCH stages, NEAR
+groups); with `vid`, the video pass (FRAMES → MATCH, VIDEO groups; needs
+`ffmpeg` and `ffprobe` on PATH). Without them, an exact-only run that saw
+images or videos ends with a `near` / `video` line giving the token form of
+the same command **[CLAUDE]**: the default stays fast, the comprehensive
+form is one line away.
 
 ### milk **[SPEC]**
 `find`, then moves every duplicate into `<root>/_milked/`, created if absent.
@@ -69,16 +75,22 @@ restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
 scanned, so running `milk` twice is idempotent.
 
 ### purge **[SPEC]**
-The full suite. Phase 1: exact pipeline plus byte-for-byte verification of
-each duplicate against its keeper, then the Recycle Bin. Phase 2 adds
-perceptual image matching; Phase 3 adds video. `purge` reports the OS bin it
-used and how to undo.
+The full suite: exact pipeline with byte-for-byte verification of each
+duplicate against its keeper, **and** the near-duplicate image and video
+passes on every run, whatever the kind token. Near duplicates
+cannot be byte-verified; `purge` bins one only when a third hash, PDQ
+(256-bit), also agrees with the keeper (Phase 2b). Such lines carry `~` and
+the three distances. A member the two 64-bit hashes grouped but PDQ did not
+confirm prints as `kept~` with the reason, and the footer names the `milk`
+command that moves it instead. `purge` reports the OS bin it used and how
+to undo. `--quick-search` skips the near pass: quick is the obvious-
+duplicates tier.
 
 ### doctor **[SPEC]**
 Checks and prints PASS / WARN / FAIL with a one-line fix for each:
 terminal colour and Unicode support, terminal width, journal directory
 writable, root readable and writable, `_milked` present and its size,
-Recycle Bin reachable, `ffmpeg`/`ffprobe` on PATH (video phase), Windows
+Recycle Bin reachable, `ffmpeg`/`ffprobe` on PATH (the video pass), Windows
 long-path support when any path exceeds 260 characters, and the state of
 the last journal (consumed or pending).
 
@@ -138,6 +150,49 @@ Groups are ordered by reclaimable bytes, largest first, and numbered. Paths
 are shown relative to the root. The keeper line carries its modification
 date; duplicate lines do not repeat the size (it is in the group header).
 
+Near groups follow the exact groups and continue the numbering:
+
+```
+ NEAR 003   5 similar   542 KB reclaimable
+   keep  photos\beach.png                        1000×750   436 KB   2019-06-12
+   near  photos\export\beach_mirror.png          1000×750   444 KB   d  0  p  0  q   8  mirror
+   near  photos\export\beach.jpg                 1000×750   45.9 KB  d  0  p  0  q   2  +GROUP 002
+   near  photos\export\beach_crop.jpg            950×712    41.7 KB  d 10  p  6  q  32
+   near  photos\beach_small.jpg                   500×375    10.6 KB  d  0  p  0  q   4
+ ───────────────────────────────────────────────────────────────
+ 2 groups   3 duplicates   646 KB reclaimable   keep: oldest copy
+ 1 near group   4 similar   542 KB reclaimable   keep: most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 to bin
+```
+
+`d` and `p` are the dHash and pHash distances to the keeper (of 64 bits),
+`q` the PDQ distance (of 256); `mirror`, `rot 90`, `flip`, `transpose` name
+the orientation that matched; `+GROUP 002` says the member is itself the
+keeper of an exact group, whose copies are listed there. A distance over
+its threshold is lit in the warning colour: `d`/`p` when the member is
+linked only through another member, `q` when `purge` will keep it (`q 32`
+on the crop above).
+
+Video groups follow, numbered on:
+
+```
+ VIDEO 004   4 similar   6.14 MB reclaimable
+   keep  a.mp4              640×360   0:20   h264  4.63 MB  2026-11-08
+   near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  d  0 p  0  q   2  tmk   -    mirror
+   near  a_small.mp4        320×180   0:20   h264  95.3 KB  d  1 p  2  q   8  tmk 1.00
+   near  a_trim4.mp4        640×360   0:16   h264  2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
+ ───────────────────────────────────────────────────────────────
+ 1 video group   3 similar   6.14 MB reclaimable   keep: longest, then most pixels   tmk ≥0.8 groups, ≥0.9 or frames q ≤31 to bin
+```
+
+`d p q` are the medians over twelve sampled frames at fixed fractions of
+the duration; `tmk` is the TMK level-2 score, `-` when the mean features
+disagree so strongly that the offset search is skipped (a mirror, or
+different content — the frames carry those); `trim` marks a duration more
+than 2 % off the keeper's. A `tmk` between 0.8 and 0.9 is lit in the
+warning colour: grouped, not binned. The two DECODE and
+MATCH stage lines report images hashed, undecodable, flat-and-skipped,
+similar pairs and images grouped.
+
 `milk` and `purge` print the same scan block, then one line per moved or
 binned file in condensed form, then a footer with the journal id and the
 undo command. A `moved` line carries only the source path: the destination
@@ -145,7 +200,9 @@ is always `_milked/<same relative path>`, so it is printed once in the
 footer; a renamed collision is the one case that gets a word on the line
 (`as IMG_0041 (2).jpg`). `--dry-run` prints the same lines prefixed
 `would` and writes no journal. A `LIKELY` header (quick search) says
-`files`, not `copies`, because the match is sample-level.
+`files`, not `copies`, because the match is sample-level. A near duplicate
+being moved or binned gets `moved~` / `binned~` / `would~` with its
+distances; the footer states once what `~` means.
 
 ---
 
@@ -186,7 +243,12 @@ than five choices on one screen **[SPEC: no bloat]**.
 - `milk` moves within the same volume (rename); nothing is copied, nothing
   is deleted. A file that cannot be renamed is reported as `failed` and
   left where it is; the exit code becomes 2.
-- `purge` verifies bytes before the bin call and never hard-deletes.
+- `purge` verifies bytes before the bin call and never hard-deletes. Near
+  duplicates go to the bin only when confirmed against the keeper — images:
+  dHash, pHash and PDQ all agree; videos: TMK level 2 ≥ 0.9, or the three
+  image hashes agree on the sampled frames — marked `~` on their line; the
+  rest print as `kept~`. `--undo` restores binned files like any other
+  entry.
 - Every change writes one journal; `--undo` reverses it. No cache, no index,
   no lock file, nothing persisted on a scan.
 - `_milked` and the journal directory are the only things `dedupe` creates.
