@@ -192,14 +192,51 @@ pub fn grid_from_luma(pre: &[f32], pw: usize, ph: usize) -> Vec<f32> {
 
 /// Both planes from one decoded image.
 pub fn planes_from_image(img: &DynamicImage) -> (Vec<f32>, Pdq) {
+    planes_from_image_with(img, PDQ_PREP)
+}
+
+/// How the PDQ input is prepared from the decoded image. The hash
+/// algorithm itself is the reference's (bit-identical given the same
+/// input, `examples/pdq_ref.rs`); the two differ only in what they hand
+/// it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PdqPrep {
+    /// The box-prefiltered luma the grid uses, with the small-input
+    /// upscale floor of Phase 2b. Shipped: on real photographs it keeps
+    /// 98.3 % of half-size copies and 100 % of rotations and mirrors
+    /// within PDQ_MAX, where the tool's input keeps 91.7 % and 93–95 %
+    /// (VERIFICATION.md, Phase 7). Hashes land 2–8 bits from the tool's
+    /// on the reference regression images — inside PDQ_MAX, so a hash
+    /// published by the reference tool still matches.
+    Prefiltered,
+    /// The reference tool's input (nearest-neighbour squash to 512×512
+    /// when larger): bit-identical to published PDQ hashes. Kept for the
+    /// conformance check and the measurement harness; nearest-neighbour
+    /// decimation aliases, which is what costs it recall above.
+    Tool,
+}
+
+/// The preparation this build ships (measured in VERIFICATION.md, Phase 7).
+pub const PDQ_PREP: PdqPrep = PdqPrep::Prefiltered;
+
+pub fn planes_from_image_with(img: &DynamicImage, prep: PdqPrep) -> (Vec<f32>, Pdq) {
     let (pre, pw, ph) = prefiltered_luma(img);
     let grid = grid_from_luma(&pre, pw, ph);
-    let p = pdq::compute(&pdq::Luma {
-        data: &pre,
-        width: pw,
-        height: ph,
-    });
+    let p = match prep {
+        PdqPrep::Prefiltered => pdq::compute(&pdq::Luma {
+            data: &pre,
+            width: pw,
+            height: ph,
+        }),
+        PdqPrep::Tool => pdq::compute_tool(img),
+    };
     (grid, p)
+}
+
+/// Signature with a chosen PDQ preparation (the measurement harness).
+pub fn signature_from_image_with(img: &DynamicImage, prep: PdqPrep) -> Signature {
+    let (grid, p) = planes_from_image_with(img, prep);
+    signature_from_planes(&grid, &p, img.width(), img.height())
 }
 
 /// The grid alone (tests).

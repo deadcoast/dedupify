@@ -1,11 +1,13 @@
 //! Near-duplicate video (docs/RESEARCH.md §3).
 //!
-//! One `ffprobe` call for metadata, then one `ffmpeg` process per file
-//! streaming 15 fps, 288×288 grey frames through a pipe. Every frame feeds
-//! the TMK descriptor (Temporal Matching Kernel on PDQ float features —
-//! Poullot et al. 2015; Meta's `tmkfv.cpp` for the constants); twelve
-//! frames at fixed fractions of the duration also get a full image
-//! signature, which gives the fast positional tier for same-length copies.
+//! One `ffprobe` call for metadata, one short `ffmpeg` pass over the
+//! keyframes alone to find black bars around the picture, then one
+//! `ffmpeg` process per file streaming 15 fps, 288×288 grey frames of the
+//! picture inside the bars through a pipe. Every frame feeds the TMK
+//! descriptor (Temporal Matching Kernel on PDQ float features — Poullot
+//! et al. 2015; Meta's `tmkfv.cpp` for the constants); twelve frames at
+//! fixed fractions of the duration also get a full image signature, which
+//! gives the fast positional tier for same-length copies.
 //!
 //! Nothing is written to disk; frames are hashed as they arrive.
 
@@ -416,6 +418,108 @@ pub fn level2(a: &Tmk, b: &Tmk) -> (f32, f32) {
 // hashing a file
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// black bars
+// ---------------------------------------------------------------------------
+
+/// The picture inside black bars: a pillarbox (bars left and right) or a
+/// letterbox (bars above and below), in source pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Bars {
+    pub width: u32,
+    pub height: u32,
+    pub x: u32,
+    pub y: u32,
+}
+
+/// Luma at or under this (of 255) counts as black — ffmpeg's `cropdetect`
+/// default (24/255). Limited-range video black is 16; compression noise
+/// stays well under 24 on a bar.
+pub const BAR_LIMIT: u32 = 24;
+/// Bars thinner than this share of a side are left alone: a 2 px edge is
+/// an encoder's, not a bar's. [CLAUDE]
+pub const BAR_MIN_SHARE: f64 = 0.02;
+/// A detected picture smaller than this share of either side is not a
+/// picture inside bars but a dark video; nothing is cropped. [CLAUDE]
+pub const BAR_KEEP_MIN: f64 = 0.25;
+
+/// Parse the last `crop=W:H:X:Y` ffmpeg's `cropdetect` printed. With
+/// `reset=0` the box only grows across frames, so the last line is the
+/// union over every frame seen.
+pub fn parse_cropdetect(stderr: &str, width: u32, height: u32) -> Option<Bars> {
+    let last = stderr.lines().rev().find_map(|l| {
+        let i = l.find("crop=")?;
+        Some(&l[i + 5..])
+    })?;
+    let nums: Vec<u32> = last
+        .split(':')
+        .take(4)
+        .map(|s| s.trim_end().parse().ok())
+        .collect::<Option<Vec<u32>>>()?;
+    if nums.len() != 4 {
+        return None;
+    }
+    let (w, h, x, y) = (nums[0], nums[1], nums[2], nums[3]);
+    if w == 0 || h == 0 || x + w > width || y + h > height {
+        return None;
+    }
+    let removed_w = (width - w) as f64 / width as f64;
+    let removed_h = (height - h) as f64 / height as f64;
+    if removed_w < BAR_MIN_SHARE && removed_h < BAR_MIN_SHARE {
+        return None; // no bars worth the name
+    }
+    if (w as f64) < BAR_KEEP_MIN * width as f64 || (h as f64) < BAR_KEEP_MIN * height as f64 {
+        return None; // a dark video, not a picture inside bars
+    }
+    Some(Bars {
+        width: w,
+        height: h,
+        x,
+        y,
+    })
+}
+
+/// Find black bars with ffmpeg's `cropdetect` over the keyframes alone
+/// (`-skip_frame nokey`: no inter-frame decoding, so a fraction of the
+/// main pass), the box accumulated over the whole file so a dark opening
+/// or a dark edge in one scene cannot pass for a bar. `None` when there
+/// are none, or when ffmpeg says nothing usable.
+pub fn detect_bars(path: &Path, meta: &Meta) -> Option<Bars> {
+    let out = Command::new("ffmpeg")
+        .args([
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "info",
+            "-threads",
+            &FFMPEG_THREADS.to_string(),
+            "-skip_frame",
+            "nokey",
+        ])
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-an",
+            "-sn",
+            "-dn",
+            "-vf",
+            &format!("cropdetect=limit={BAR_LIMIT}:round=2:reset=0:skip=0"),
+            "-f",
+            "null",
+            "-",
+        ])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .ok()?;
+    parse_cropdetect(
+        &String::from_utf8_lossy(&out.stderr),
+        meta.width,
+        meta.height,
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct VideoSig {
     pub meta: Meta,
@@ -424,6 +528,9 @@ pub struct VideoSig {
     pub positional: Vec<Signature>,
     pub tmk: Tmk,
     pub frames: u32,
+    /// Black bars found around the picture; every frame was cropped to
+    /// the picture inside them before hashing.
+    pub bars: Option<Bars>,
 }
 
 /// Frame indices (at FPS) for the positional tier.
@@ -434,8 +541,23 @@ pub fn position_indices(duration: f64) -> Vec<u32> {
         .collect()
 }
 
-/// Stream and hash one file.
+/// Stream and hash one file: the bar pass, then the frame pass.
 pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
+    let bars = detect_bars(path, meta);
+    hash_video_inside(path, meta, bars)
+}
+
+/// The frame pass alone, cropping to `bars` when given.
+pub fn hash_video_inside(
+    path: &Path,
+    meta: &Meta,
+    bars: Option<Bars>,
+) -> Result<VideoSig, VideoError> {
+    // the picture's own size, for the signature's aspect
+    let (pic_w, pic_h) = bars.map_or((meta.width, meta.height), |b| (b.width, b.height));
+    let crop = bars.map_or(String::new(), |b| {
+        format!("crop={}:{}:{}:{},", b.width, b.height, b.x, b.y)
+    });
     let mut child = Command::new("ffmpeg")
         .args([
             "-nostdin",
@@ -452,7 +574,7 @@ pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
             "-sn",
             "-dn",
             "-vf",
-            &format!("fps={FPS},scale={FRAME}:{FRAME}:flags=area,format=gray"),
+            &format!("fps={FPS},{crop}scale={FRAME}:{FRAME}:flags=area,format=gray"),
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -506,12 +628,7 @@ pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
                 hashes[k] = pdq::bits(&bv);
             }
             let p = pdq::Pdq { hashes, quality: q };
-            positional.push(perceptual::signature_from_planes(
-                &grid,
-                &p,
-                meta.width,
-                meta.height,
-            ));
+            positional.push(perceptual::signature_from_planes(&grid, &p, pic_w, pic_h));
             next_pos += 1;
         }
         t += 1;
@@ -525,6 +642,7 @@ pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
         positional,
         tmk: builder.finish(),
         frames: t,
+        bars,
     })
 }
 
@@ -767,6 +885,41 @@ mod tests {
     }
 
     #[test]
+    fn cropdetect_lines_become_bars_or_nothing() {
+        // the last line wins (reset=0 accumulates); 32 px pillars of 480
+        let log = "[Parsed_cropdetect_0 @ 0x1] x1:40 x2:439 y1:0 y2:719 w:400 h:720 x:40 y:0 pts:0 t:0.000000 crop=400:720:40:0\n\
+                   [Parsed_cropdetect_0 @ 0x1] x1:32 x2:447 y1:0 y2:719 w:416 h:720 x:32 y:0 pts:512 t:1.000000 crop=416:720:32:0\n";
+        assert_eq!(
+            parse_cropdetect(log, 480, 720),
+            Some(Bars {
+                width: 416,
+                height: 720,
+                x: 32,
+                y: 0
+            })
+        );
+        // the whole frame: no bars
+        assert_eq!(parse_cropdetect("crop=720:1280:0:0\n", 720, 1280), None);
+        // a 2 px edge is not a bar (under BAR_MIN_SHARE)
+        assert_eq!(parse_cropdetect("crop=1916:1080:2:0\n", 1920, 1080), None);
+        // a dark video: the box keeps under a quarter of a side
+        assert_eq!(parse_cropdetect("crop=200:1080:860:0\n", 1920, 1080), None);
+        // nonsense and nothing
+        assert_eq!(parse_cropdetect("crop=2000:1080:0:0\n", 1920, 1080), None);
+        assert_eq!(parse_cropdetect("no frames here\n", 1920, 1080), None);
+        // letterbox
+        assert_eq!(
+            parse_cropdetect("crop=1920:816:0:132\n", 1920, 1080),
+            Some(Bars {
+                width: 1920,
+                height: 816,
+                x: 0,
+                y: 132
+            })
+        );
+    }
+
+    #[test]
     fn position_indices_are_inside_and_increasing() {
         let idx = position_indices(10.0); // 150 frames
         assert_eq!(idx.len(), POSITIONS);
@@ -909,13 +1062,23 @@ impl VideoGroup {
 
 pub const VIDEO_POLICY_LABEL: &str = "keep: longest, then most pixels";
 
+/// Pixels of the picture itself: inside the black bars when there are
+/// any, so a padded export never outranks the picture it was padded from.
+fn picture_pixels(v: &VHashed) -> u64 {
+    match v.sig.bars {
+        Some(b) => b.width as u64 * b.height as u64,
+        None => v.sig.meta.width as u64 * v.sig.meta.height as u64,
+    }
+}
+
 /// Keeper order: longest duration (a trim is the derivative), then most
-/// pixels, then highest bitrate, then oldest, then path.
+/// picture pixels, then the file without bars (the padding is the
+/// derivative), then highest bitrate, then oldest, then path.
 pub fn keeper_order(a: &VHashed, b: &VHashed) -> std::cmp::Ordering {
     let da = (a.sig.meta.duration * 10.0).round() as i64;
     let db = (b.sig.meta.duration * 10.0).round() as i64;
-    let pa = a.sig.meta.width as u64 * a.sig.meta.height as u64;
-    let pb = b.sig.meta.width as u64 * b.sig.meta.height as u64;
+    let pa = picture_pixels(a);
+    let pb = picture_pixels(b);
     let bra = if a.sig.meta.duration > 0.0 {
         a.rep.cand.size as f64 / a.sig.meta.duration
     } else {
@@ -928,6 +1091,7 @@ pub fn keeper_order(a: &VHashed, b: &VHashed) -> std::cmp::Ordering {
     };
     db.cmp(&da)
         .then_with(|| pb.cmp(&pa))
+        .then_with(|| a.sig.bars.is_some().cmp(&b.sig.bars.is_some()))
         .then_with(|| brb.partial_cmp(&bra).unwrap_or(std::cmp::Ordering::Equal))
         .then_with(|| a.rep.cand.mtime.cmp(&b.rep.cand.mtime))
         .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))

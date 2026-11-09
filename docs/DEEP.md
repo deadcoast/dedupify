@@ -19,16 +19,20 @@ shipped threshold catches 100 % of both, and 92.5 % of letterboxes against
 
 ## What it is allowed to do
 
-**List, never act.** A member brought into a group by the deep score alone
-prints with the verb `deep` instead of `near`, its 64-bit distances lit in
-the warning colour and its `deep 0.78` score lit. `milk` and `purge` leave
-such members where they are; the totals line says so. The model's
-threshold was measured on procedural pictures where unrelated images score
-higher than unrelated photographs would, so it is a floor, and a learned
-score is one signal where the acting tiers require two or three to agree.
-Promoting the deep tier to an acting tier is a measurement away — the
-harness is `cargo test --release --test corpus -- --ignored measure_deep`
-— and needs real photographs, which this repository does not ship.
+**List alone, act with the fit.** A member brought into a group by the
+deep score alone prints with the verb `deep` instead of `near`, its 64-bit
+distances lit in the warning colour and its `deep 0.78` score lit; `milk`
+and `purge` leave such members where they are and the totals line says
+so. Since Phase 6 every deep-admitted member is also put to the geometric
+fit (`docs/RESEARCH.md` §2.7): when the fit confirms it — a letterboxed
+copy at `deep 0.78  fit 1.00` — the member is an ordinary `near` and the
+commands act on it; when it does not (`forest.png`, `deep 0.76  fit 0.51`)
+it stays listed. Two independent families, the learned descriptor and
+spatial correlation, have then agreed; the descriptor's word alone never
+moves a file. The model's threshold was measured on procedural pictures
+where unrelated images score higher than unrelated photographs would, so
+it is a floor; the harness for a real library is
+`cargo test --release --test corpus -- --ignored measure_deep`.
 
 ## Install
 

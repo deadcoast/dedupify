@@ -28,6 +28,7 @@ unicode-width = "0.2"
 ctrlc = "3.4"
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"] }
+kamadak-exif = "0.6"
 tract-onnx = { version = "0.23", optional = true }
 
 [features]

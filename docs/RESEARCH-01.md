@@ -194,15 +194,40 @@ against pixel-domain transforms of the 64×64 buffer. The documentation's
 recommended threshold is ≤ 31 and its quality cutoff ≤ 49
 ([README](https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md)).
 
-Two departures from the reference, both measured:
+**Conformance (Phase 7).** The port is bit-identical to the reference.
+`examples/pdq_ref.rs` hashes the eight regression images Meta ships
+(`pdq/data/reg-test-input/dih`) and compares with the hashes the
+reference `pdq-photo-hasher` recorded in `cpp/reg_test/expected/out`.
+Two things had to be matched first: the text layout — the reference
+prints sixteen 16-bit words, last DCT row first, column j at bit j — and
+the reference *tool's* input, which is not the full image: before luma
+it squashes any picture with a side over 512 to 512×512 by nearest
+neighbour (CImg `resize(512, 512, 1, 3, 1)`, source index ⌊x·W/512⌋).
+Given that input, all eight hashes agree in all 256 bits, with both JPEG
+decoders tried (`zune-jpeg` and libjpeg via PIL), and our seven DCT-domain
+orientation variants land on the reference's eight dihedral hashes at
+0 bits. (The reference C++ could not be built in the environment — its
+`make` was refused — so the comparison is against the recorded outputs,
+which is what the reference's own regression test compares against.)
 
-- The Jarosz filter runs on the integer-box-prefiltered luma that the grid
-  path already produces (short side 576–1151 px), not the full image. A
-  24-megapixel file would otherwise need two 96 MB float buffers per
-  concurrent decode. Hashes are therefore not bit-identical to the
-  reference tool's; `dedupe` only ever compares its own hashes. (The
-  Python wrapper of the reference could not be installed in the build
-  environment, so bit-level agreement was not measured either way.)
+Two departures from the reference *tool* in what the algorithm is fed,
+both measured:
+
+- The hash runs on the integer-box-prefiltered luma that the grid path
+  already produces (short side 576–1151 px), not on the tool's 512
+  nearest-neighbour squash and not on the full image (a 24-megapixel file
+  would need two 96 MB float buffers per concurrent decode). Nearest-
+  neighbour decimation aliases, and it shows: on real photographs the
+  tool's input keeps 91.7 % of half-size copies, 88.3 % of quarter-size,
+  95 % of 90° rotations and 93.3 % of mirrors within 31 bits, where the
+  prefiltered input keeps 98.3 %, 98.3 %, 100 % and 100 % (the one miss
+  is a synthetic ramp); the procedural corpus agrees in direction
+  (VERIFICATION.md, Phase 7). The prefiltered hashes land 2–8 bits from
+  the tool's on the regression images — inside the threshold, so a hash
+  published by the reference tool still matches ours. `perceptual::
+  PDQ_PREP` selects the preparation; `PdqPrep::Tool` reproduces the tool
+  exactly and is what the conformance check and the measurement harness
+  use.
 - Inputs with a short side under 384 px are Lanczos-upscaled by an integer
   factor first. Below 128 px the reference window is 1 — no filtering —
   and centre sampling lands up to half a cell off. On the corpus this took
@@ -297,6 +322,116 @@ Cost: ~0.3 s per image on two cores through tract; the binary grows from
 builds without it). ONNX Runtime was not used because its prebuilt
 binaries are not on crates.io and would have to be installed beside the
 executable; whether it would be faster here was not measured.
+
+### 2.7 The geometric fit — Phase 6 **[CLAUDE]**
+
+Where the hashes stop, correlation continues. Every hash above works in
+the frequency domain on the whole frame, which is why crops, letterboxes
+and small rotations defeat all three at once: the frame is a different
+frame. The fit answers the question the hashes cannot — *does one picture
+sit inside the other?* — directly, in the spatial domain, and that makes
+it an independent family of evidence.
+
+**Measure.** For a window `A_w` of picture A and a picture B resized to
+the window's size, the normalised cross-correlation
+
+```
+ρ(A_w, B) = Σ (a − ā)(b − b̄) / √( Σ (a − ā)² · Σ (b − b̄)² )
+```
+
+over the window's pixels. ρ is invariant to any `b → αb + β` with α > 0,
+so a crop that was also brightened, gamma-shifted or re-encoded still
+scores as the same picture; ρ = 1 is an affine match, ρ ≈ 0 is unrelated.
+
+**Band.** Both sides are band-passed first — a narrow box blur (radius 1
+at 128 px) minus a wide one (radius 8). The wide term removes the mean and
+every slow gradient (a box filter maps a linear ramp onto itself, so the
+difference of two is zero on ramps), which stops a smooth sky from
+correlating with a smooth ramp; the narrow term makes thin strokes
+tolerant of the half-pixel shifts a rescale introduces. What is left to
+correlate is edges and texture — the content. A border of the wide radius
+is excluded from each window, because the crop's own edge and the
+original's continuing picture blur differently there.
+
+**Search.** Thumbnails keep their aspect, longest side 128. For B inside
+A: window widths `s·W_A` for `s ∈ {1.00, 0.95, …, 0.50}` (a crop keeping
+less than half a side — a quarter of the area — is not claimed), window
+height from B's aspect, every integer offset. Coarse at 64 px (about five
+million multiply-adds per direction), then the best placement refined at
+128 px over ±1 scale step and ±2 px. Then A inside B (a letterbox is the
+original inside a larger frame), B stretched onto A's whole frame and the
+reverse (aspect changes), and rotations of ±2°, ±4°, ±6° at full frame
+either way. The best ρ of all of these is the fit. Measured cost: 18 ms a
+pair on the build machine with thumbnails in hand; about 40 ms including
+the two decodes. It runs only where the cheaper evidence left a question.
+
+**Where it is consulted.** Never over all pairs — as a confirmation:
+
+1. a member the two 64-bit hashes grouped that PDQ did not confirm
+   (crops, small rotations, letterboxes, watermarks — and, on real
+   photographs, the same scene from another position);
+2. a member the learned descriptor admitted (crops the hashes cannot
+   reach).
+
+**Measured** (`measure_geometry` in `tests/corpus.rs` and
+`tests/real_corpus.rs`; full tables in VERIFICATION.md, Phase 6):
+
+- Procedural positives at the shipped `FIT_MIN = 0.92`: crops 90/80/60 %,
+  rotations 2°/5°, letterbox all ≥ 0.918 (minimum), 100 % recall; the
+  real-photograph set at the 5th percentile: crop 90 % 0.963, crop 80 %
+  0.929, crop 60 % 0.861, letterbox 0.950, rotate 5° 0.921.
+- Negatives over every pair of distinct files: procedural max 0.929 (two
+  value-noise textures, above the threshold); real photographs: the only
+  pairs above 0.92 are two consecutive video frames (0.931) and two
+  optical-flow frames (0.995) — the same picture both times; the highest
+  unrelated pair is two text images at 0.918. Pairs the fit is actually
+  asked about did better still: the chessboard photographed from other
+  positions, which the hashes grouped and PDQ refused, fit at 0.31–0.45;
+  the procedural `forest.png` the deep tier listed at 0.76 fit at 0.51.
+- What it does not catch, by construction: mirror and 90° rotation
+  (ρ ≈ 0.3–0.5; the hashes own those), rotations past 6°, crops under
+  half a side, and text or line art, where band-passed strokes correlate
+  across unrelated documents at 0.91 (never a candidate unless a hash or
+  the descriptor admitted the pair first).
+
+**What changes.** `milk` and `purge` act on a member only when two
+families agree: the hash pair **and** (PDQ **or** the fit); or the deep
+descriptor **and** the fit. A hash-pair member with neither prints as
+`kept~` in both commands. On the real set this is the difference between
+moving two distinct chessboard photographs and leaving them; on the
+fixture it is the difference between leaving a 5 % crop (PDQ 32, one bit
+over) and moving it (fit 1.00). The deep tier gains an acting path: a
+letterboxed copy the hashes miss (p 20) is admitted by the descriptor
+(0.78) and confirmed by the fit (1.00); `forest.png` (0.76, fit 0.51)
+stays listed.
+
+### 2.8 Capture moment — Phase 6 **[CLAUDE]**
+
+Two photographs taken at different moments are two photographs, however
+alike they look. A camera writes EXIF `DateTimeOriginal` at exposure
+(with `SubSecTimeOriginal` where it keeps fractions); every editor and
+exporter that preserves EXIF preserves it, so a copy, a re-encode, a
+resize or a crop carries its source's moment. A burst, a stereo pair, the
+same board from another angle each carry their own.
+
+Rule: when both files state a moment and the two differ, the member is
+`kin` — shown in its group with `taken <moment>`, never moved or binned,
+whatever the hashes, PDQ or the fit say. When either file states none
+(screenshots, renders, stripped exports) the rule says nothing and the
+pictures decide. Fractions separate frames within one second only when
+both sides recorded them.
+
+The keeper of a near group is now the member whose moment the most
+members share, before degree and pixels: a burst frame that strayed into
+an exposure's family is the kin, not the family's keeper.
+
+Known limits, all on the conservative side (a `kin` is never acted on):
+two scans of one print carry two scan times and are shown as kin; a tool
+that rewrites `DateTimeOriginal` on export turns derivatives into kin.
+The real-photograph set used here carries no EXIF, so the rule is
+verified on synthesised capture times (`capture.rs` builds a JPEG with an
+EXIF segment in its tests; `tests/e2e.rs` stamps the fixture) and not yet
+on a camera roll.
 
 ### 2.3 Searching Hamming space — Multi-Index Hashing
 
@@ -427,6 +562,72 @@ Cost: 2.2 ms per 15-fps frame end to end, of which ffmpeg's decode and
 scale are ~88 %; the per-frame hashing is ~0.3 ms. A two-hour file is about
 four minutes of one ffmpeg process.
 
+### 3.3 Conformance with the reference — Phase 7
+
+`examples/tmk_ref.rs` parses the `.tmk` files Meta ships for its fifteen
+sample videos (`tmk/sample-hashes`, produced by the reference
+`tmk-hash-video`; layout from `io/tmkiotypes.h`: three 4-byte magics,
+five `int`s, the periods, the coefficients, the pure average, then
+cos[period][coefficient] and sin[period][coefficient], all little-endian
+`float`) and scores them against our descriptor of the same files.
+
+- Fed the reference tool's frames (ffmpeg `-s 64:64 -pix_fmt rgb24 -r 15`,
+  Rec. 601 luma, the 64×64 straight to the DCT as `pdqFloat256FromFloatLuma`
+  does when the input is already 64×64), our descriptor matches every
+  reference file element for element to within 6.1·10⁻⁵ (the files store
+  `float`), frame counts equal, level 1 and level 2 = 1.0000.
+- Fed our shipped frames (288-px area-scaled grey → Jarosz → 64), the same
+  video scores level 2 0.982–0.9999 against its reference file, and the
+  level-2 pair scores between videos sit within 0.013 of the scores the
+  reference files give each other across the fifteen related and
+  unrelated pairs tried. The frame paths differ (ours filters before decimating; the
+  tool's `-s 64:64` is bicubic), and the frame counts by one or two
+  (`fps=15` against `-r 15`); the descriptor is the same.
+
+### 3.4 Black bars — Phase 7 **[CLAUDE]**
+
+Meta's sample set has the same clip exported with and without pillarbox
+bars (`chair-orig-22-sd-bar`, 480×720 with 32 px black pillars, against
+`chair-orig-22-hd-no-bar`, 720×1280). The reference's own hashes score
+that pair at level 2 0.738 — over the README's 0.7 by a little, under
+our 0.8 (set where the synthetic negatives stopped, §3.2) — and the
+positional tier is worse off, since a bar shifts every frame's content. TMK does not see past bars (§3.1: letterboxing
+is one of its weak cases — the frame feature is the DCT of the whole
+frame, bars included); the field answer is to find the bars first
+(czkawka's video matcher has a crop-detect option; ffmpeg ships
+`cropdetect`).
+
+Before the frame pass, one ffmpeg pass over the keyframes alone
+(`-skip_frame nokey`, so no inter-frame decoding) runs
+`cropdetect=limit=24:round=2:reset=0:skip=0` and the last `crop=W:H:X:Y`
+it prints — with `reset=0` the box only grows, so it is the union over
+every keyframe — becomes the picture. Two guards: bars thinner than 2 %
+of a side are ignored (an encoder's edge, not a bar), and a box smaller
+than a quarter of a side is a dark video, not a picture in bars, and
+nothing is cropped. The frame pass then inserts `crop=W:H:X:Y` before the
+scale, so the hashes see the picture at full resolution; the file's own
+dimensions stay in the listing and a `bars` mark on the line says the
+frames were compared inside them. Limit 24/255 is ffmpeg's default:
+limited-range black is 16 and compression noise on a bar stays well
+under 24. Non-black bars (white, blurred-copy "ambient" bars) are not
+detected; the same file's dims are what the listing shows regardless.
+
+The video keeper order counts the picture's pixels, not the file's —
+inside the bars when there are any — and at equal pictures keeps the
+file without bars: a padded export is a packaging of the picture it was
+padded from, and under "most pixels" of the file it would have taken the
+keeper seat (the fixture's 800×360 pillarboxed copy outranked its
+640×360 source until this was changed). The footer still reads
+`keep: longest, then most pixels`; the pixels are the picture's.
+
+Measured on the sample set (VERIFICATION.md, Phase 7): the bar pair
+scores level 2 1.00 and joins the group; the `pattern` family with bars
+moves from 0.74–0.80 to 0.86–0.94 against its keeper; the two groups
+that were one clip become one group. On the real AVI set, which has no
+bars, nothing changes. The pass costs 15 % of the frame stage on h264
+clips with keyframes every few seconds, and 32 % on all-intra AVI, where
+every frame is a keyframe.
+
 Audio fingerprinting (Chromaprint) is out of scope.
 
 ## 4. Undo — the journal
@@ -486,5 +687,7 @@ itself uses the full timestamp.
 - PDQ reference implementation — https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md
 - SSCD ONNX export used — https://huggingface.co/nutszebra/sscd_onnx (sscd_disc_mixup.onnx, sha256 e65e2a5b…); Meta's checkpoint — https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt (sha256 9f26bd4c…); SSCD repository — https://github.com/facebookresearch/sscd-copy-detection
 - `tract` — https://github.com/sonos/tract
+- Normalised cross-correlation for template matching — J. P. Lewis, "Fast Normalized Cross-Correlation", Vision Interface 1995, http://scribblethink.org/Work/nvisionInterface/nip.html
+- EXIF 2.32 (CIPA DC-008-2019), tags 0x9003 DateTimeOriginal and 0x9291 SubSecTimeOriginal — https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf; reader: `kamadak-exif` — https://github.com/kamadak/exif-rs
 - `trash` crate — https://docs.rs/trash
 - `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher

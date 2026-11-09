@@ -113,13 +113,64 @@ items below that reading the code found.
 - Docs read against the binary line by line; VERIFICATION.md Phase 5 holds
   the audit record
 
+## Phase 6 — real photographs, the fit, the moment   ← delivered 2026-11-08
+
+The first measurements on real photographs (98 OpenCV sample pictures,
+4,753 pairs; four real clips with re-encodes) and what they changed:
+
+- `tests/real_corpus.rs`: the library as it is (which pairs the rule
+  groups, which PDQ confirms) and derivatives of real sources; the
+  chessboard photographed from several positions was grouped by the two
+  hashes (d 10, p 12) and refused by PDQ — a false move `milk` would have
+  made
+- `geometry.rs`: the geometric fit (band-passed normalised
+  cross-correlation searched over crops, offsets, small rotations,
+  letterbox and stretch) as a second, spatial-domain family of evidence;
+  measured on both corpora, shipped at 0.92
+- Acting rule: `milk` and `purge` act only on two agreeing families — the
+  hash pair with PDQ or the fit, or the deep descriptor with the fit; a
+  hash-pair member confirmed by neither prints `kept~` in both commands;
+  the deep tier gains an acting path (letterbox: deep 0.78 + fit 1.00)
+- `capture.rs`: EXIF capture moment; two files with different moments are
+  `kin` — shown, never acted on; the near keeper is the member whose
+  moment most of the group shares
+- `docs/COMPARISON.md`: what here is the standard pipeline and what is
+  not, against the tools one would otherwise fork
+
+## Phase 7 — conformance, and the second real set   ← delivered 2026-11-08
+
+Checking the two ported algorithms against Meta's recorded outputs, and
+what the second labelled real set (Meta's fifteen TMK sample videos)
+changed:
+
+- `examples/pdq_ref.rs`: PDQ against the reference regression hashes —
+  bit-identical (0 of 256 on all eight images, both JPEG decoders) once
+  the reference tool's 512-px nearest-neighbour input is reproduced
+  (`pdq::compute_tool`); the eight dihedral hashes at 0 bits
+- `perceptual::PDQ_PREP`: the tool's input measured against the shipped
+  prefiltered input on both corpora; the prefiltered input kept (half-size
+  copies 98.3 % against 91.7 % on real photographs, rotations and mirrors
+  100 % against 93–95 %); the tool's input kept behind `PdqPrep::Tool`
+  for the check
+- `examples/tmk_ref.rs`: TMK against the reference `.tmk` files — equal
+  element for element to 6.1·10⁻⁵ on the reference's frames; level 2
+  0.982–0.9999 on ours; level-2 pair scores within 0.013 of the reference's own
+- Black bars (`video::detect_bars`): one keyframe-only `cropdetect` pass
+  before the frame pass; frames hashed inside the bars; `bars` on the
+  line. The reference's own hashes score the sample set's pillarbox pair
+  at 0.738; with the bars found it scores 1.00 and the clip's nine
+  exports are one group. The video keeper counts the picture's pixels,
+  not the file's, and at a tie keeps the file without bars
+
 ## Standing rules
 
 - No cache, index or lock file is ever written on a scan.
 - A change writes exactly one journal; `--undo` consumes it.
 - Thresholds ship only after they are measured on a corpus in the phase
   that introduces them.
-- A tier acts (moves or bins) only on evidence from at least two
-  independent hash families; a single learned score lists.
+- A tier acts (moves or bins) only when two independent families of
+  evidence agree: the two 64-bit hashes with PDQ or the geometric fit, or
+  the learned descriptor with the fit. A single family lists. Two files
+  that state different capture moments are never acted on.
 - New flags need a reason stronger than convenience; the menu stays at five
   choices per screen.

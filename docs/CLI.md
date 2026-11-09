@@ -243,7 +243,9 @@ different content — the frames carry those); `trim` marks a duration more
 than 2 % off the keeper's; `bars` marks a file with black bars around the
 picture (pillarbox or letterbox) when the keeper has none, or the
 reverse — the frames were compared inside the bars, which is why the
-dimensions in the two columns need not agree. A `tmk` between 0.8 and
+dimensions in the two columns need not agree; the keeper's "most pixels"
+counts the picture inside the bars, and at a tie the file without bars
+stays. A `tmk` between 0.8 and
 0.9 is lit in the warning colour: grouped, not binned. The two DECODE and
 MATCH stage lines report images hashed, undecodable, flat-and-skipped,
 similar pairs and images grouped.

@@ -8,6 +8,7 @@
 //! `doctor`, `help` and `menu` are the remaining entry points.
 
 pub mod actions;
+pub mod capture;
 pub mod cli;
 #[cfg(feature = "deep")]
 pub mod deep;
@@ -52,6 +53,7 @@ pub mod deep {
 }
 pub mod doctor;
 pub mod exact;
+pub mod geometry;
 pub mod hamming;
 pub mod help;
 pub mod interrupt;
