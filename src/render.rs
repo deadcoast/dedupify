@@ -963,17 +963,18 @@ impl Renderer {
     }
 
     /// A `verb   command   note` line: the verb in a fixed column, the
-    /// note shortened before the command ever is.
+    /// command always whole (it is there to be copied), the note whole or
+    /// not at all — a note cut to its first and last letters says nothing.
     pub fn hint(&self, verb: &str, command: &str, note: &str) {
         let t = &self.theme;
         let lead = 1 + HINT_VERB + 2;
         let room = t.width.saturating_sub(lead + width(command) + 3 + 1);
-        let note = shorten_middle(note, room.max(8), t.glyphs.ellipsis);
+        let note = if width(note) <= room { note } else { "" };
         self.line(&format!(
             " {}  {}   {}",
             t.paint_bold(Role::Keep, &fit(verb, HINT_VERB)),
             t.paint(Role::Plate, command),
-            t.paint(Role::Dupe, &note)
+            t.paint(Role::Dupe, note)
         ));
     }
 
@@ -1163,23 +1164,33 @@ impl Renderer {
         let purge = full.command_line_as(Command::Purge);
         let w = width(&milk).max(width(&purge)) + 2;
         let lead = 1 + HINT_VERB + 2 + w + 1;
+        let room = t.width.saturating_sub(lead);
+        // notes whole or not at all: the commands are the payload and a
+        // note cut to its ends says nothing. The milk note names the full
+        // destination when there is room, the bare folder name otherwise.
         let dest = under_root(inv.root_display.as_deref(), MILKED_DIR);
-        let note = shorten_middle(
-            &format!("move duplicates into {dest}"),
-            t.width.saturating_sub(lead).max(8),
-            t.glyphs.ellipsis,
-        );
+        let long_note = format!("move duplicates into {dest}");
+        let short_note = format!("move duplicates into {MILKED_DIR}");
+        let milk_note = if width(&long_note) <= room {
+            long_note.as_str()
+        } else if width(&short_note) <= room {
+            short_note.as_str()
+        } else {
+            ""
+        };
+        let purge_note = "send duplicates to the Recycle Bin";
+        let purge_note = if width(purge_note) <= room { purge_note } else { "" };
         self.line(&format!(
             " {}  {}{}",
             t.paint_bold(Role::Keep, &fit("next", HINT_VERB)),
             t.paint(Role::Plate, &fit(&milk, w)),
-            t.paint(Role::Dupe, &note)
+            t.paint(Role::Dupe, milk_note)
         ));
         self.line(&format!(
             " {}  {}{}",
             " ".repeat(HINT_VERB),
             t.paint(Role::Plate, &fit(&purge, w)),
-            t.paint(Role::Dupe, "send duplicates to the Recycle Bin")
+            t.paint(Role::Dupe, purge_note)
         ));
     }
 
