@@ -113,8 +113,14 @@ first it scores 1.00.
 - The capture-moment rule.
 - A reversible staging step (`milk` into `_milked`) separate from the
   bin, a journal for every change, undo across both, interrupt safety.
-- The output as a designed record rather than a log: every line fitted,
-  every number on a line the number that produced the verdict.
+- The output as a designed record rather than a log: every line says
+  what the file is in words (`cropped 80%`, `another shot, 05:06:08`),
+  then the evidence that produced the verdict, dim, every line fitted.
+- The result as the workspace (Phase 8): `find` ends on a keyed bar —
+  move these, bin these, preview, change a keeper, undo — acting on the
+  groups already listed. fclones prints a report and expects `fclones
+  dedupe`/`move` to be run over it; czkawka has a GUI for this; the
+  other CLIs print and stop.
 
 ## 6. Where "it does nothing" would be a fair verdict today
 

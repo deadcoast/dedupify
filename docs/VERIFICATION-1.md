@@ -1313,3 +1313,213 @@ Not verified here:
   `ctrlc` handler is installed but was not exercised.
 - Bars that are not black; long all-intra files; the capture-moment rule
   on a camera roll (carried).
+
+---
+
+# VERIFICATION — Phase 8 (the result is the workspace), run on 2026-11-09
+
+Same environment. The sample tree of the Windows run (39 files: real
+OpenCV pictures with derived copies, three EXIF-stamped shots and the
+next frame, `vtest.avi` with a re-encode, a pillarboxed export, a trim
+and a byte copy, the unrelated `tree.avi`), on Linux.
+
+## 1. One rule for depth
+
+`find <sample> .` now runs SCAN → SIZE → SAMPLE → HASH → DECODE → MATCH →
+FRAMES → MATCH and lists 3 exact groups, 10 near groups (13 similar,
+1 kin) and 1 video group (4 similar). `milk <sample> . -n` previews the
+same 12 + 4 files; before this phase it answered `no duplicates` to the
+same folder. `find <sample> . -q` lists the 3 exact groups and ends with
+`full   dedupe find <sample> .   33 images, 6 videos seen; the full run
+matches near duplicates`. `find <sample> . img` has no FRAMES line;
+`find <sample> . vid` no DECODE line; a folder without images prints no
+DECODE line at all (before: `DECODE 0 images`).
+
+## 2. Words first
+
+Every member line on the sample, 120 columns:
+
+```
+ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
+   keep  clips/vtest.avi                                                                                     2026-11-09
+   dupe  clips/vtest - Copy.avi
+ GROUP 002   2 copies   296 KB each   296 KB reclaimable
+   keep  photos/starry_night.jpg                                                                             2026-11-09
+   dupe  photos/exports/starry_night (1).jpg
+ GROUP 003   2 copies   31.4 KB each   31.4 KB reclaimable
+   keep  photos/home.jpg                                                                                     2026-11-09
+   dupe  photos/exports/home-copy.jpg
+ NEAR 004   1 similar   955 KB reclaimable
+   keep  photos/graf1.png                      800x640      929 KB   2026-11-09
+   near  photos/exports/graf1_mirror.png       800x640      955 KB   mirrored                d  0  p  0  q   0
+ NEAR 005   3 similar  +1 kin   918 KB reclaimable
+   keep  photos/shot_a.jpg                     1282x1110    531 KB   2026-11-09
+   near  photos/exports/shot_a_export.jpg      961x832      223 KB   resized 75%             d  0  p  0  q   4
+   near  photos/aloeL.jpg                      1282x1110    308 KB   same picture            d  0  p  0  q   0
+   near  photos/exports/shot_a_stripped.jpg    1282x1110    387 KB   same picture            d  0  p  0  q   0
+   kin   photos/shot_b.jpg                     1282x1110    642 KB   another shot, 05:06:08  d  1  p  2  q   4
+ NEAR 006   1 similar   353 KB reclaimable
+   keep  photos/rubberwhale1.png               584x388      352 KB   2026-11-09
+   near  photos/rubberwhale2.png               584x388      353 KB   re-encoded              d  1  p  0  q   8
+ NEAR 007   1 similar   163 KB reclaimable
+   keep  photos/board.jpg                      640x480      119 KB   2026-11-09
+   near  photos/exports/board_rot90.jpg        480x640      163 KB   rotated 90°             d  0  p  0  q   6
+ NEAR 008   1 similar   130 KB reclaimable
+   keep  photos/basketball1.png                640x480      130 KB   2026-11-09
+   near  photos/basketball2.png                640x480      130 KB   near copy               d  4  p  2  q  22
+ NEAR 009   1 similar   47.0 KB reclaimable
+   keep  photos/castle.jpg                     1012x675     162 KB   2026-11-09
+   near  photos/exports/castle_q60.jpg         1012x675     47.0 KB  same picture            d  0  p  0  q   0
+ NEAR 010   1 similar   24.8 KB reclaimable
+   keep  photos/Blender_Suzanne1.jpg           640x480      24.8 KB  2026-11-09
+   near  photos/Blender_Suzanne2.jpg           640x480      24.8 KB  mirrored                d  1  p  0  q  24
+ NEAR 011   1 similar   17.9 KB reclaimable
+   keep  photos/butterfly.jpg                  493x356      43.7 KB  2026-11-09
+   near  photos/exports/butterfly_small.jpg    246x178      17.9 KB  resized 50%             d  0  p  0  q   4
+ NEAR 012   1 similar   0 B reclaimable
+   keep  photos/lena.jpg                       512x512      89.7 KB  2026-11-09
+   near  photos/lena_tmpl.jpg                  512x512      77.6 KB  similar, unconfirmed    d  3  p 12  q  44  fit 0.80
+ NEAR 013   2 similar   0 B reclaimable
+   keep  photos/right01.jpg                    640x480      26.4 KB  2026-11-09
+   near  photos/right06.jpg                    640x480      27.2 KB  similar, unconfirmed    d 10  p 12  q  76  fit 0.45
+   near  photos/right09.jpg                    640x480      25.3 KB  similar, unconfirmed    d 10  p 12  q 102  fit 0.31
+ VIDEO 014   3 similar   10.2 MB reclaimable   keeper of GROUP 001
+   keep  clips/vtest.avi                                       768x576      1:20    msmpe  7.75 MB  2026-11-09
+   near  clips/vtest_x264.mp4                                  768x576      1:20    h264   4.33 MB  re-encoded          
+   near  clips/vtest_pillars.mp4                               960x576      1:20    h264   4.29 MB  pillarboxed         
+   near  clips/vtest_trim30.mp4                                768x576      0:30    h264   1.61 MB  similar, unconfirmed
+```
+
+The same files on Windows (Phase 7 run) read `d 0 p 0 q 0 mirror`,
+`d 0 p 0 q 4`, `d 1 p 2 q 4 taken 2021-03-04 05:06:08`, `d 0 p 0 q 6 rot
+90`; the evidence is still there, dim, after the words, and is the first
+column to go when the width is short — at 110 columns and under on this
+listing (a `fit 0.80` line makes the evidence 27 cells), at 80 the path
+still keeps 24 cells. `basketball1~2` — consecutive frames of a moving
+scene, `d 4 p 2 q 22` — reads `near copy`, not `re-encoded`: the hashes
+cannot tell a re-encode from a small motion, and the word says only what
+they can.
+
+Unit tests on `Relation::words_for` cover: `same picture`, `re-encoded`,
+`near copy`, `resized 50%` / `150%`, an odd shape (`800×750`), `rotated
+90°` on swapped dimensions, `mirrored`, `mirrored, resized 50%`, `cropped
+95%`, `letterboxed` against `with a border` by aspect, `rotated +4°`,
+`similar, unconfirmed` when the fit fell short, `another shot, 05:06:08`
+and `another shot, 2021-03-05` by day, `looks alike`, `edited`.
+
+## 3. The workspace
+
+Driven through a pseudo-terminal (`python3 pty` here; `script(1)` in the
+end-to-end test) on a copy of the sample, 120 columns, keys
+`k 3 ⏎ 2 ⏎ p ⏎ u q`:
+
+(the terminal clears the bar line before each answer; the capture below keeps the redraws)
+```
+10 near groups   13 similar   2.55 MB reclaimable
+   keep: shared moment, most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
+
+ ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  k keeper  q quit ▸  keeper of group (1-12)  ▸  keeper of group (1-12) 3
+    1  keep  photos/graf1.png
+    2        photos/exports/graf1_mirror.png
+ ▸  new keeper  ▸  new keeper 2
+ NEAR 003   1 similar   929 KB reclaimable
+   keep  photos/exports/graf1_mirror.png                               800×640      955 KB   2026-11-09
+   near  photos/graf1.png                                              800×640      929 KB   mirrored  d  0  p  0  q   0
+
+ ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  k keeper  q quit ▸  purge 12 → Recycle Bin, 2.84 MB  enter go  esc back dedupe purge <sample> . img
+
+
+ VERIFY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  2 verified byte for byte
+ binned    photos/exports/starry_night (1).jpg
+ binned    photos/exports/home-copy.jpg
+ binned~   photos/graf1.png                                                                 mirrored  d  0  p  0  q   0
+ binned~   photos/exports/shot_a_export.jpg                                              resized 75%  d  0  p  0  q   4
+ binned~   photos/aloeL.jpg                                                             same picture  d  0  p  0  q   0
+ binned~   photos/exports/shot_a_stripped.jpg                                           same picture  d  0  p  0  q   0
+ binned~   photos/rubberwhale2.png                                                        re-encoded  d  1  p  0  q   8
+ binned~   photos/exports/board_rot90.jpg                                                rotated 90°  d  0  p  0  q   6
+ binned~   photos/basketball2.png                                                          near copy  d  4  p  2  q  22
+ binned~   photos/exports/castle_q60.jpg                                                same picture  d  0  p  0  q   0
+ binned~   photos/Blender_Suzanne2.jpg                                                      mirrored  d  1  p  0  q  24
+ binned~   photos/exports/butterfly_small.jpg                                            resized 50%  d  0  p  0  q   4
+ kept~     photos/lena_tmpl.jpg                                                   PDQ q 44 over 31; fit 0.80 under 0.92
+ kept~     photos/right06.jpg                                                     PDQ q 76 over 31; fit 0.45 under 0.92
+ kept~     photos/right09.jpg                                                    PDQ q 102 over 31; fit 0.31 under 0.92
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 12 binned   2.84 MB to the Recycle Bin   journal 20261109-122730
+ ~ confirmed near duplicate, not a byte copy
+   (images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)
+ 3 kept~: similar on two hashes, confirmed by nothing else; shown, left in place
+ undo   dedupe --undo <sample>   
+
+ ▸  u undo  q quit dedupe --undo <sample>
+
+ journal 20261109-122730   dedupe purge <sample> . img   12 entries
+
+ restored  photos/exports/starry_night (1).jpg                                                         from Recycle Bin
+ restored  photos/exports/home-copy.jpg                                                                from Recycle Bin
+ restored  photos/graf1.png                                                                            from Recycle Bin
+ restored  photos/exports/shot_a_export.jpg                                                            from Recycle Bin
+ restored  photos/aloeL.jpg                                                                            from Recycle Bin
+ restored  photos/exports/shot_a_stripped.jpg                                                          from Recycle Bin
+ restored  photos/rubberwhale2.png                                                                     from Recycle Bin
+ restored  photos/exports/board_rot90.jpg                                                              from Recycle Bin
+ restored  photos/basketball2.png                                                                      from Recycle Bin
+ restored  photos/exports/castle_q60.jpg                                                               from Recycle Bin
+ restored  photos/Blender_Suzanne2.jpg                                                                 from Recycle Bin
+ restored  photos/exports/butterfly_small.jpg                                                          from Recycle Bin
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 12 restored   2.84 MB back in place   journal 20261109-122730
+
+ ▸  q quit
+```
+
+`k` listed group 3's two members, took `2`, reprinted the group with
+`graf1_mirror.png` as keeper and `graf1.png` as `near … mirrored` with
+the relation recomputed (`d 0 p 0 q 0`); `p` showed the confirm bar,
+enter printed the native command, VERIFY read the 2 exact items byte for
+byte, 12 files went to the trash — `graf1.png` among them now, not its
+mirror — and 3 stayed `kept~`; `u` restored the 12 from the trash;
+`q` left. No second SCAN line anywhere: every action worked on the groups
+already on screen. The tree after `u` was the tree before (the
+end-to-end test asserts the file list; the SHA-256 round trip is the
+Windows script's).
+
+The same session with `n` first printed the twelve `would~` lines under
+`dedupe milk <root> . img --dry-run` and returned to the bar; `m`
+printed `dedupe milk <root> . img`, moved 12 into `_milked`, and the bar
+offered `u undo  q quit`; `u` brought them back.
+
+Piped (`| cat`), `find` prints the `next` lines and no bar; `milk` and
+`purge` from the command line are unchanged.
+
+## 4. Widths
+
+Every listing, preview and action line of `find`/`milk -n`/`purge -n` on
+the sample at 80, 100 and 120 columns fits the width, with two documented
+exceptions: the `next` lines and the `full` line carry the command whole
+— a 95-character root path makes them 109–113 cells — because a cut
+command cannot be copied; and the action totals line, which carried the
+full `_milked` path, now falls back to `into _milked` when the full path
+would not fit.
+
+## Suite
+
+`cargo test --release`: 82 unit tests (3 new: the words) and 25
+end-to-end tests pass (2 rewritten for the depth rule, 1 new: the
+pseudo-terminal session); with `DEDUPE_MODEL` set the 25 pass; with
+`--no-default-features` 80 + 25. `cargo clippy --all-targets --release`
+and `cargo fmt` clean. Windows type-checks pass with and without the deep
+feature. Binary 25,943,800 bytes.
+
+## Not verified here
+
+- The workspace on Windows: the key loop is crossterm's, the same crate
+  the bare `dedupe` menu uses, and neither has been pressed on Windows
+  yet; the next `RUN_VERIFY.cmd` ends on a live `find` whose bar is the
+  person's to press.
+- Keeper re-election on a video group and on an exact group through the
+  bar: the code paths are `VideoGroup::set_keeper` (relate) and a member
+  swap; driven here on a near group only.
+- Colour of the words column (info for members that stay, plain for
+  members that act): judged from the plain output.

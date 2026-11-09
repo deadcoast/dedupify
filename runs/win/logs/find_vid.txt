@@ -1,4 +1,3 @@
-<<<<<<< HEAD
  dedupe find  C:\github\dedupify\runs\win\sample  recursive  videos
  --------------------------------------------------------------------------------------------------
  SCAN   ==============================  6 files   27.0 MB   0.0 s
@@ -21,27 +20,3 @@
  next   dedupe milk C:\github\dedupify\runs\win\sample . vid   move duplicates into _milked
         dedupe purge C:\github\dedupify\runs\win\sample . vid  send duplicates to the Recycle Bin
 exit 0  1 s
-=======
- dedupe find  C:\github\dedupify\runs\win\sample  recursive  videos
- --------------------------------------------------------------------------------------------------
- SCAN   ==============================  6 files   27.0 MB   0.0 s
- SIZE   ==============================  2 share a size
- SAMPLE ==============================  0 share a sample   256 KB
- HASH   ==============================  0 confirmed   0 B   0.0 s
- FRAMES ==============================  6 videos hashed   5,671 frames at 15 fps   1.2 s
- MATCH  ==============================  10 similar pairs   5 videos grouped   0.0 s
-
- VIDEO 001   4 similar   18.0 MB reclaimable
-   keep  clips\v...- Copy.avi  768x576      1:20    msmpe  7.76 MB  2026-11-09
-   near  clips\vtest.avi       768x576      1:20    msmpe  7.76 MB  d  0 p  0  q   0  tmk 1.00
-   near  clips\vtest_x264.mp4  768x576      1:20    h264   4.33 MB  d  0 p  0  q   0  tmk 1.00
-   near  clips\v...illars.mp4  960x576      1:20    h264   4.30 MB  d  0 p  0  q   0  tmk 1.00  bars
-   near  clips\v...trim30.mp4  768x576      0:30    h264   1.62 MB  d  7 p 12  q  52  tmk 0.85  trim
- --------------------------------------------------------------------------------------------------
- no exact duplicates   6 files   27.0 MB checked
- 1 video group   4 similar   18.0 MB reclaimable
-   keep: longest, then most pixels   tmk >=0.8 groups, >=0.9 bins, or frames q <=31
- next   dedupe milk C:\github\dedupify\runs\win\sample . vid   move duplicates into _milked
-        dedupe purge C:\github\dedupify\runs\win\sample . vid  send duplicates to the Recycle Bin
-exit 0  1 s
->>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4

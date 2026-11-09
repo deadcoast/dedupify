@@ -1,5 +1,1 @@
-<<<<<<< HEAD
 tree identical after purge+undo: 39 files, every SHA-256 equal
-=======
-tree identical after purge+undo: 39 files, every SHA-256 equal
->>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4

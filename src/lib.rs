@@ -69,6 +69,7 @@ pub mod theme;
 pub mod util;
 pub mod video;
 pub mod walk;
+pub mod workspace;
 
 /// Name of the directory `milk` moves duplicates into, created under the root.
 pub const MILKED_DIR: &str = "_milked";

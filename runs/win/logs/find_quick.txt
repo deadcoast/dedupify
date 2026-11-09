@@ -1,4 +1,3 @@
-<<<<<<< HEAD
  dedupe find  C:\github\dedupify\runs\win\sample  recursive  all kinds  quick: size + sample only
  --------------------------------------------------------------------------------------------------
  SCAN   ==============================  39 files   35.3 MB   0.0 s
@@ -9,15 +8,3 @@
  near   dedupe find C:\github\dedupify\runs\win\sample . img   
  video  dedupe find C:\github\dedupify\runs\win\sample . vid   
 exit 0  0 s
-=======
- dedupe find  C:\github\dedupify\runs\win\sample  recursive  all kinds  quick: size + sample only
- --------------------------------------------------------------------------------------------------
- SCAN   ==============================  39 files   35.3 MB   0.0 s
- SIZE   ==============================  6 share a size
- SAMPLE ==============================  0 share a sample   586 KB
- --------------------------------------------------------------------------------------------------
- no duplicates   39 files   35.3 MB checked
- near   dedupe find C:\github\dedupify\runs\win\sample . img   
- video  dedupe find C:\github\dedupify\runs\win\sample . vid   
-exit 0  0 s
->>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4

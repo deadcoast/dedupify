@@ -395,7 +395,7 @@ impl Renderer {
         Renderer { theme }
     }
 
-    fn line(&self, s: &str) {
+    pub fn line(&self, s: &str) {
         let mut out = io::stdout().lock();
         let _ = writeln!(out, "{s}");
     }
@@ -466,14 +466,19 @@ impl Renderer {
 
     /// The group list. `root` makes paths relative.
     pub fn groups(&self, groups: &[Group], root: &Path) {
+        self.groups_from(groups, root, 0);
+    }
+
+    /// Exact groups numbered from `offset + 1` (the workspace reprints one).
+    pub fn groups_from(&self, groups: &[Group], root: &Path, offset: usize) {
         let t = &self.theme;
         if groups.is_empty() {
             return;
         }
         self.blank();
-        let digits = groups.len().to_string().len().max(3);
+        let digits = (offset + groups.len()).to_string().len().max(3);
         for (i, g) in groups.iter().enumerate() {
-            let n = format!("{:0width$}", i + 1, width = digits);
+            let n = format!("{:0width$}", offset + i + 1, width = digits);
             let head = match g.tier {
                 Tier::Full => t.paint_bold(Role::Plate, &format!("GROUP {n}")),
                 Tier::Sample => t.paint_bold(Role::Warn, &format!("LIKELY {n}")),
@@ -544,12 +549,13 @@ impl Renderer {
             plain: String,
             painted: String,
         }
-        // `compact` drops the dimensions column when the width is short, so
-        // the path keeps at least 14 cells beside a long evidence tail
-        let compact = std::cell::Cell::new(false);
+        // Two steps of compaction when the width is short: first the
+        // evidence numbers go (the words stay), then the dimensions column,
+        // so the path keeps at least 14 cells.
+        let compact = std::cell::Cell::new(0u8);
         let lead_cols = |w: u32, h: u32, size: u64| -> (String, String) {
             let mut cols: Vec<String> = Vec::new();
-            if !compact.get() {
+            if compact.get() < 2 {
                 cols.push(fit(&format!("{w}{}{h}", t.glyphs.times), 11));
             }
             cols.push(fit(&fmt_bytes(size), 7));
@@ -569,60 +575,37 @@ impl Renderer {
                 painted: format!("{lq}  {}", t.paint(Role::Dupe, &date)),
             }
         };
-        let member_tail = |m: &crate::near::NearMember| -> Tail {
+        // the words column is as wide as the longest words in the list
+        let words_cells = groups
+            .iter()
+            .flat_map(|g| {
+                let k = &g.members[0].hashed;
+                g.members[1..]
+                    .iter()
+                    .map(move |m| width(&m.relation.unwrap().words(k, &m.hashed)))
+            })
+            .max()
+            .unwrap_or(0);
+        let member_tail = |m: &crate::near::NearMember, k: &crate::near::Hashed| -> Tail {
             let c = &m.hashed.rep.cand;
             let r = m.relation.unwrap();
             let (lp, lq) = lead_cols(m.hashed.sig.width, m.hashed.sig.height, c.size);
-            // d, p: 64-bit distances to the keeper; q: PDQ (256-bit). A
-            // distance over its threshold is lit: d/p when the member is in
-            // through the deep tier alone, q when purge would not bin on it.
-            let dp_txt = format!("d {:>2}  p {:>2}", r.d, r.p);
-            let q_txt = format!("q {:>3}", r.q);
-            let dp_over = r.d > DHASH_MAX || r.p > PHASH_MAX;
-            let q_over = r.q > PDQ_MAX;
-            let mut plain = format!("{lp}  {dp_txt}  {q_txt}");
-            let mut painted = format!(
-                "{lq}  {}  {}",
-                t.paint(if dp_over { Role::Warn } else { Role::Dupe }, &dp_txt),
-                t.paint(if q_over { Role::Warn } else { Role::Dupe }, &q_txt)
-            );
-            if let Some(cos) = r.deep {
-                let txt = format!("deep {cos:.2}");
-                let role = if r.deep_only() {
-                    Role::Info
-                } else {
-                    Role::Dupe
-                };
-                plain.push_str(&format!("  {txt}"));
-                painted.push_str(&format!("  {}", t.paint(role, &txt)));
-            }
-            // the geometric fit, where it was asked for: lit when it is the
-            // evidence that confirmed the member, warning when it fell short
-            if let Some(f) = r.fit {
-                let txt = f.label();
-                let role = if r.fit_ok() && !r.pdq_ok() {
-                    Role::Info
-                } else if !r.fit_ok() {
-                    Role::Warn
-                } else {
-                    Role::Dupe
-                };
-                plain.push_str(&format!("  {txt}"));
-                painted.push_str(&format!("  {}", t.paint(role, &txt)));
-            }
-            // a different capture moment: the member's own time
-            if r.kin {
-                if let Some(c) = &m.hashed.capture {
-                    let txt = format!("taken {}", c.display());
-                    plain.push_str(&format!("  {txt}"));
-                    painted.push_str(&format!("  {}", t.paint(Role::Info, &txt)));
-                }
-            }
-            // the orientation is a 64-bit finding; meaningless on a deep-only line
-            let label = r.variant.label();
-            if !label.is_empty() && !r.deep_only() {
-                plain.push_str(&format!("  {label}"));
-                painted.push_str(&format!("  {}", t.paint(Role::Dupe, label)));
+            // the words: what the member is. Lit in the info colour when the
+            // member stays (another shot, the descriptor's word alone, or
+            // nothing confirmed it), plain otherwise.
+            let words = r.words(k, &m.hashed);
+            let words_role = if r.listed_only() || !r.confirmed() {
+                Role::Info
+            } else {
+                Role::Dupe
+            };
+            let mut plain = format!("{lp}  {}", fit(&words, words_cells));
+            let mut painted = format!("{lq}  {}", t.paint(words_role, &fit(&words, words_cells)));
+            // the evidence, dim, dropped first when the width is short
+            if compact.get() < 1 {
+                let numbers = r.numbers();
+                plain.push_str(&format!("  {numbers}"));
+                painted.push_str(&format!("  {}", t.paint(Role::Rule, &numbers)));
             }
             if let Some(eg) = m.hashed.rep.exact_group {
                 let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
@@ -635,8 +618,11 @@ impl Renderer {
         let widest = || {
             groups
                 .iter()
-                .flat_map(|g| g.members.iter().enumerate())
-                .map(|(j, m)| {
+                .flat_map(|g| {
+                    let k = &g.members[0].hashed;
+                    g.members.iter().enumerate().map(move |(j, m)| (j, m, k))
+                })
+                .map(|(j, m, k)| {
                     if j == 0 {
                         width(
                             &keeper_tail(
@@ -647,17 +633,23 @@ impl Renderer {
                             .plain,
                         )
                     } else {
-                        width(&member_tail(m).plain)
+                        width(&member_tail(m, k).plain)
                     }
                 })
                 .max()
                 .unwrap_or(0)
         };
-        // margin 1 + indent 2 + verb 4 + 2 + path + 2 + tail, inside the width
+        // margin 1 + indent 2 + verb 4 + 2 + path + 2 + tail, inside the width.
+        // The path is the identifier: the evidence numbers go before it
+        // drops under 32 cells, the dimensions before it drops under 18.
         let lead = 1 + 2 + 4 + 2 + 2;
         let mut widest_tail = widest();
-        if t.width < lead + widest_tail + 14 {
-            compact.set(true);
+        if t.width < lead + widest_tail + 32 {
+            compact.set(1);
+            widest_tail = widest();
+        }
+        if t.width < lead + widest_tail + 18 {
+            compact.set(2);
             widest_tail = widest();
         }
         let path_cells = t.width.saturating_sub(lead + widest_tail).max(12);
@@ -696,6 +688,7 @@ impl Renderer {
             }
             self.line(&format!(" {}", parts.join("   ")));
 
+            let keeper = &g.members[0].hashed;
             for (j, m) in g.members.iter().enumerate() {
                 let c = &m.hashed.rep.cand;
                 let rel = rel_display(&c.path, root);
@@ -717,7 +710,7 @@ impl Renderer {
                         "near" => t.paint(Role::Dupe, "near"),
                         other => t.paint(Role::Info, &fit(other, 4)),
                     };
-                    let tail = member_tail(m);
+                    let tail = member_tail(m, keeper);
                     self.line(&format!(
                         "   {}  {}  {}",
                         verb,
@@ -743,21 +736,22 @@ impl Renderer {
             painted: String,
         }
         // "1920×1080  04:12  h264   1.1 GB" is common to both line kinds.
-        // `compact` drops columns when the width is short: 1 drops the
-        // codec, 2 also drops the dimensions (duration and size stay).
+        // Compaction when the width is short: 1 drops the evidence numbers
+        // (the words stay), 2 drops the codec, 3 drops the dimensions
+        // (duration and size stay).
         let compact = std::cell::Cell::new(0u8);
         let meta_cols = |m: &crate::video::VideoMember| -> (String, String) {
             let c = &m.hashed.rep.cand;
             let meta = &m.hashed.sig.meta;
             let mut cols: Vec<String> = Vec::new();
-            if compact.get() < 2 {
+            if compact.get() < 3 {
                 cols.push(fit(
                     &format!("{}{}{}", meta.width, t.glyphs.times, meta.height),
                     11,
                 ));
             }
             cols.push(fit(&fmt_clock(meta.duration), 6));
-            if compact.get() < 1 {
+            if compact.get() < 2 {
                 cols.push(fit(&meta.codec, 5));
             }
             cols.push(fit(&fmt_bytes(c.size), 7));
@@ -777,59 +771,37 @@ impl Renderer {
                 painted: format!("{painted}  {}", t.paint(Role::Dupe, &date)),
             }
         };
+        let words_cells = groups
+            .iter()
+            .flat_map(|g| {
+                let k = &g.members[0].hashed.sig;
+                g.members[1..]
+                    .iter()
+                    .map(move |m| width(&m.relation.unwrap().words(k, &m.hashed.sig)))
+            })
+            .max()
+            .unwrap_or(0);
         let member_tail =
             |m: &crate::video::VideoMember, keeper: &crate::video::VideoMember| -> Tail {
-                let keeper_dur = keeper.hashed.sig.meta.duration;
-                let keeper_bars = keeper.hashed.sig.bars.is_some();
                 let (mut plain, mut painted) = meta_cols(m);
                 let r = m.relation.unwrap();
-                match r.pos {
-                    Some((d, p, q)) => {
-                        let over = d > DHASH_MAX || p > PHASH_MAX;
-                        let dp = format!("d {d:>2} p {p:>2}");
-                        let qq = format!("q {q:>3}");
-                        plain.push_str(&format!("  {dp}  {qq}"));
-                        painted.push_str(&format!(
-                            "  {}  {}",
-                            t.paint(if over { Role::Warn } else { Role::Dupe }, &dp),
-                            t.paint(if q > PDQ_MAX { Role::Warn } else { Role::Dupe }, &qq)
-                        ));
-                    }
-                    None => {
-                        let txt = "frames     -";
-                        plain.push_str(&format!("  {txt}"));
-                        painted.push_str(&format!("  {}", t.paint(Role::Dupe, txt)));
-                    }
-                }
-                // level 2 is only computed when the mean features agree (level 1);
-                // a mirror or different content shows "-" and the frames carry it
-                let tmk = if r.level1 >= crate::video::LEVEL1_MIN {
-                    format!("tmk {:.2}", r.level2)
-                } else {
-                    "tmk    -".to_string()
-                };
-                let tmk_role = if r.level2 >= LEVEL2_MIN && r.level2 < LEVEL2_CONFIRM {
-                    Role::Warn
-                } else {
+                // the words: what the member is; lit when nothing confirmed it
+                let words = r.words(&keeper.hashed.sig, &m.hashed.sig);
+                let words_role = if r.confirmed() {
                     Role::Dupe
+                } else {
+                    Role::Info
                 };
-                plain.push_str(&format!("  {tmk}"));
-                painted.push_str(&format!("  {}", t.paint(tmk_role, &tmk)));
-                let label = r.variant.label();
-                if !label.is_empty() && r.positional_ok() {
-                    plain.push_str(&format!("  {label}"));
-                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, label)));
-                }
-                let dur = m.hashed.sig.meta.duration;
-                if keeper_dur > 0.0 && (dur - keeper_dur).abs() / keeper_dur > 0.02 {
-                    plain.push_str("  trim");
-                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, "trim")));
-                }
-                // one side carries black bars the other does not: the frames
-                // were compared inside them, which is why the sizes differ
-                if m.hashed.sig.bars.is_some() != keeper_bars {
-                    plain.push_str("  bars");
-                    painted.push_str(&format!("  {}", t.paint(Role::Dupe, "bars")));
+                plain.push_str(&format!("  {}", fit(&words, words_cells)));
+                painted.push_str(&format!(
+                    "  {}",
+                    t.paint(words_role, &fit(&words, words_cells))
+                ));
+                // the evidence, dim, dropped first
+                if compact.get() < 1 {
+                    let numbers = r.numbers();
+                    plain.push_str(&format!("  {numbers}"));
+                    painted.push_str(&format!("  {}", t.paint(Role::Rule, &numbers)));
                 }
                 if let Some(eg) = m.hashed.rep.exact_group {
                     let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
@@ -856,10 +828,15 @@ impl Renderer {
                 .max()
                 .unwrap_or(0)
         };
-        // give the path at least 18 cells before dropping columns
+        // the path is the identifier: the evidence numbers go before it
+        // drops under 32 cells, the codec and the dimensions under 18
         let lead = 1 + 2 + 4 + 2 + 2;
         let mut widest_tail = widest();
-        while compact.get() < 2 && t.width < lead + widest_tail + 18 {
+        if t.width < lead + widest_tail + 32 {
+            compact.set(1);
+            widest_tail = widest();
+        }
+        while compact.get() < 3 && t.width < lead + widest_tail + 18 {
             compact.set(compact.get() + 1);
             widest_tail = widest();
         }
@@ -978,18 +955,24 @@ impl Renderer {
         ));
     }
 
-    /// After a run that saw videos without the video pass. The suggested
-    /// command is the full form: no `--quick-search`, which has no near pass.
-    pub fn video_hint(&self, inv: &Invocation, videos: u64) {
+    /// After a quick search that saw images or videos: the full form of
+    /// the same command, which matches near duplicates too.
+    pub fn full_hint(&self, inv: &Invocation, images: u64, videos: u64) {
         let mut i = inv.clone();
-        i.kind = crate::kind::Kind::Video;
         i.quick = false;
+        let mut seen: Vec<String> = Vec::new();
+        if images >= 2 {
+            seen.push(counted(images, "image", "images"));
+        }
+        if videos >= 2 {
+            seen.push(counted(videos, "video", "videos"));
+        }
         self.hint(
-            "video",
+            "full",
             &i.command_line_as(Command::Find),
             &format!(
-                "{} seen; adds near-duplicate matching",
-                counted(videos, "video", "videos")
+                "{} seen; the full run matches near duplicates",
+                seen.join(", ")
             ),
         );
     }
@@ -1058,21 +1041,6 @@ impl Renderer {
                     ),
                 ),
             ],
-        );
-    }
-
-    /// After an exact-only run that saw images: how to add the near pass.
-    pub fn near_hint(&self, inv: &Invocation, images: u64) {
-        let mut i = inv.clone();
-        i.kind = crate::kind::Kind::Image;
-        i.quick = false;
-        self.hint(
-            "near",
-            &i.command_line_as(Command::Find),
-            &format!(
-                "{} seen; adds near-duplicate matching",
-                counted(images, "image", "images")
-            ),
         );
     }
 
@@ -1233,16 +1201,25 @@ impl Renderer {
         ));
     }
 
+    /// `destination` names where the files went; `short_destination`, when
+    /// given, replaces it if the line would not fit the width (`into
+    /// _milked` for `into D:\long\path\_milked`).
     pub fn action_totals(
         &self,
         verb_past: &str,
         n: u64,
         bytes: u64,
         destination: &str,
+        short_destination: Option<&str>,
         journal_id: Option<&str>,
     ) {
         let t = &self.theme;
         self.rule();
+        let lead = format!(" {} {verb_past}   {} ", fmt_count(n), fmt_bytes(bytes));
+        let destination = match short_destination {
+            Some(short) if width(&lead) + width(destination) > t.width => short,
+            _ => destination,
+        };
         let counts = vec![
             format!("{} {verb_past}", t.paint_bold(Role::Info, &fmt_count(n))),
             format!(

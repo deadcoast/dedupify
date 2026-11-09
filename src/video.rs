@@ -705,6 +705,85 @@ impl VideoRelation {
             || matches!(self.pos, Some((d, p, q)) if d <= DHASH_MAX && p <= PHASH_MAX && q <= PDQ_MAX)
     }
 
+    /// What the member is, in words: `re-encoded`, `scaled 768→480`,
+    /// `trimmed 0:30 of 1:20`, `pillarboxed`, `letterboxed`, `mirrored`,
+    /// `similar, unconfirmed`; two words at most. [CLAUDE]
+    pub fn words(&self, keeper: &VideoSig, member: &VideoSig) -> String {
+        if !self.confirmed() {
+            return "similar, unconfirmed".to_string();
+        }
+        let mut parts: Vec<String> = Vec::new();
+        // bars one side has and the other has not
+        match (member.bars, keeper.bars) {
+            (Some(b), None) => parts.push(
+                if b.width < member.meta.width {
+                    "pillarboxed"
+                } else {
+                    "letterboxed"
+                }
+                .to_string(),
+            ),
+            (None, Some(_)) => parts.push("bars removed".to_string()),
+            _ => {}
+        }
+        // orientation, from the sampled frames
+        if self.positional_ok() {
+            let o = match self.variant {
+                Variant::Identity => "",
+                Variant::Rotate90 => "rotated 90°",
+                Variant::Rotate180 => "rotated 180°",
+                Variant::Rotate270 => "rotated 270°",
+                Variant::FlipH => "mirrored",
+                Variant::FlipV => "flipped",
+                Variant::Transpose | Variant::AntiTranspose => "rotated and mirrored",
+            };
+            if !o.is_empty() {
+                parts.push(o.to_string());
+            }
+        }
+        // length
+        let (kd, md) = (keeper.meta.duration, member.meta.duration);
+        if kd > 0.0 && (md - kd).abs() / kd > 0.02 {
+            parts.push(if md < kd {
+                format!(
+                    "trimmed {} of {}",
+                    crate::util::fmt_clock(md),
+                    crate::util::fmt_clock(kd)
+                )
+            } else {
+                format!(
+                    "longer, {} of {}",
+                    crate::util::fmt_clock(kd),
+                    crate::util::fmt_clock(md)
+                )
+            });
+        }
+        // picture size, inside any bars
+        let pic = |s: &VideoSig| s.bars.map_or(s.meta.width, |b| b.width);
+        let (kw, mw) = (pic(keeper), pic(member));
+        if kw != mw && (kw as f32 - mw as f32).abs() / kw.max(1) as f32 > 0.03 {
+            parts.push(format!("scaled {kw}\u{2192}{mw}"));
+        }
+        if parts.is_empty() {
+            parts.push("re-encoded".to_string());
+        }
+        parts.truncate(2);
+        parts.join(", ")
+    }
+
+    /// The evidence, for the dim trailing column.
+    pub fn numbers(&self) -> String {
+        let tmk = if self.level1 >= LEVEL1_MIN {
+            format!("tmk {:.2}", self.level2)
+        } else {
+            "tmk    -".to_string()
+        };
+        match self.pos {
+            Some((d, p, q)) => format!("d {d:>2} p {p:>2}  q {q:>3}  {tmk}"),
+            None => format!("frames     -  {tmk}"),
+        }
+    }
+
     pub fn unconfirmed_reason(&self) -> String {
         let tmk = format!("TMK {:.2} under {LEVEL2_CONFIRM:.1}", self.level2);
         match self.pos {
@@ -1051,6 +1130,20 @@ pub struct VideoGroup {
 }
 
 impl VideoGroup {
+    /// Make member `idx` the keeper and relate the others to it. [CLAUDE]
+    pub fn set_keeper(&mut self, idx: usize) {
+        if idx == 0 || idx >= self.members.len() {
+            return;
+        }
+        let chosen = self.members.remove(idx);
+        self.members.insert(0, chosen);
+        self.members[0].relation = None;
+        let keeper = self.members[0].hashed.sig.clone();
+        for m in self.members.iter_mut().skip(1) {
+            m.relation = Some(relate(&keeper, &m.hashed.sig));
+        }
+    }
+
     pub fn reclaimable(&self) -> u64 {
         self.members
             .iter()

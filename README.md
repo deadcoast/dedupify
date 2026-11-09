@@ -1,14 +1,17 @@
 # dedupe — the Dedupelifier
 
-A duplicate finder for the terminal. Exact duplicates everywhere;
+A duplicate finder for the terminal. One run finds exact duplicates,
 near-duplicate images (rescaled, re-encoded, mirrored, rotated, cropped,
-letterboxed) with the `img` token, near-duplicate videos (re-encoded,
-scaled, trimmed, mirrored, sped up, boxed in black bars) with the `vid`
-token — `ffmpeg` and `ffprobe` on PATH — and both on every `purge`. Nothing is moved or binned
-on one family of evidence: the two 64-bit hashes must be confirmed by PDQ
-or by the geometric fit, and two photographs with different capture
-moments are shown and left alone. `docs/COMPARISON.md` says what here is
-the standard pipeline and what is not.
+letterboxed) and near-duplicate videos (re-encoded, scaled, trimmed,
+mirrored, boxed in black bars; `ffmpeg` and `ffprobe` on PATH), says in
+words what each one is — `resized 50%`, `cropped 80%`, `another shot,
+05:06:08` — and then stays on the result: `m` moves them into `_milked`,
+`p` sends them to the Recycle Bin, `k` changes a keeper, `u` reverses the
+change. Nothing is moved or binned on one family of evidence: the two
+64-bit hashes must be confirmed by PDQ or by the geometric fit, and two
+photographs with different capture moments are shown and left alone.
+`docs/COMPARISON.md` says what here is the standard pipeline and what is
+not.
 
 ```
 cargo install --path .
@@ -16,15 +19,15 @@ cargo install --path .
 
 ```
 dedupe                      workflow menu
-dedupe find [PATH] [.]      see every duplicate group, change nothing
+dedupe find [PATH] [.]      list every duplicate group, then decide on it
 dedupe milk [PATH] [.]      move duplicates into PATH\_milked
 dedupe purge [PATH] [.]     verify bytes, then Recycle Bin
 dedupe --undo [PATH]        reverse the last milk or purge
 dedupe doctor [PATH]        checks, with a fix line for each
 ```
 
-`.` includes subfolders; `img` / `vid` restrict the kind and add that
-kind's near-duplicate pass; `-n` dry run; `-q` size + sample only; `-h` the
+`.` includes subfolders; `img` / `vid` restrict the kind; `-n` dry run;
+`-q` byte copies only (size and 64 KiB samples, no near pass); `-h` the
 help page.
 
 - `docs/PLAN.md` — the phases, what this build contains, what is next

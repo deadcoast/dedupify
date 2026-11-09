@@ -1,4 +1,3 @@
-<<<<<<< HEAD
     Finished `release` profile [optimized] target(s) in 0.18s
      Running tests\e2e.rs (target\release\deps\e2e-2362722771720996.exe)
 
@@ -33,39 +32,3 @@ test video_pass_off_for_plain_find_and_on_for_purge ... ok
 test result: ok. 23 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 5.27s
 
 exit 0  6 s
-=======
-    Finished `release` profile [optimized] target(s) in 0.18s
-     Running tests\e2e.rs (target\release\deps\e2e-2362722771720996.exe)
-
-running 26 tests
-test find_reports_groups_and_stages ... ok
-test milk_collision_gets_suffix ... ok
-test one_kind_at_a_time ... ok
-test purge_then_undo_through_the_bin ... ignored
-test find_top_level_only_without_dot ... ok
-test empty_scan_prints_no_empty_stages ... ok
-test quick_purge_still_verifies_bytes ... ok
-test quick_search_reports_sample_tier ... ok
-test error_paths_exit_one_with_help_hint ... ok
-test write_big_photo_fixture ... ignored
-test write_fixture ... ignored
-test undo_elsewhere_is_named ... ok
-test milk_then_undo_round_trip ... ok
-test image_filter_only_sees_images ... ok
-test help_and_doctor ... ok
-test purge_dry_run_verifies_and_changes_nothing ... ok
-test milk_img_moves_near_duplicates_and_undo_restores ... ok
-test near_pass_runs_for_img_and_groups_variants ... ok
-test purge_runs_only_the_pass_its_kind_can_use ... ok
-test near_pass_is_off_for_plain_find_and_on_for_purge ... ok
-test deep_tier_acts_only_with_the_fit ... ok
-test milk_leaves_unconfirmed_near_duplicates_in_place ... ok
-test different_capture_moments_are_kin ... ok
-test milk_vid_moves_and_undo_restores ... ok
-test video_pass_groups_derivatives_and_labels_them ... ok
-test video_pass_off_for_plain_find_and_on_for_purge ... ok
-
-test result: ok. 23 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 5.27s
-
-exit 0  6 s
->>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4

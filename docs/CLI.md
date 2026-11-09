@@ -66,24 +66,53 @@ complete).
 ## 2. Commands
 
 ### find **[SPEC]**
-Runs the exact-duplicate pipeline (size → sample → full hash), prints every
-group, then the **next** lines: the exact `milk` and `purge` invocations for
-this root, so the follow-up is a copy-paste. With the `img` token the
-near-duplicate image pass runs as well (DECODE → MATCH stages, NEAR
-groups); with `vid`, the video pass (FRAMES → MATCH, VIDEO groups; needs
-`ffmpeg` and `ffprobe` on PATH). Without them, an exact-only run that saw
-images or videos ends with a `near` / `video` line giving the token form of
-the same command **[CLAUDE]**: the default stays fast, the comprehensive
-form is one line away.
+Runs the full suite — the exact pipeline (size → sample → full hash), the
+near-duplicate image pass (DECODE → MATCH, NEAR groups) and the video
+pass (FRAMES → MATCH, VIDEO groups; needs `ffmpeg` and `ffprobe` on
+PATH) — prints every group, and then **stays on the result**: on a
+terminal a one-line bar offers the decisions a person makes at that point
+(§2a); piped, it prints the `next` lines instead, the exact `milk` and
+`purge` invocations for this root. `img` / `vid` scope what is scanned
+and nothing else; `--quick-search` is the fast byte-copy tier and skips
+the near passes, ending with a `full` line that names the full run.
+(Phase 8. Before it, `find` ran the near passes only with a kind token,
+so `find . img` could list fifteen near duplicates and `milk .` answer
+"no duplicates"; one rule for depth removed that.)
+
+### 2a. The result is the workspace **[CLAUDE, under FUOE]**
+
+```
+ ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  k keeper  q quit
+```
+
+The counts are the files that would move or bin: confirmed members only,
+never a `kept~`, a `kin` or a `deep`-only line. One key each:
+
+| key | what happens |
+|---|---|
+| `m` | confirm bar `milk 12 → _milked, 2.87 MB   enter go   esc back`; enter prints the native command, moves the files on screen (no second scan), the action lines, the totals, the `undo` line |
+| `p` | the same for the Recycle Bin, with the VERIFY stage first — bytes read against the keeper, as `purge` always does |
+| `n` | the `would` lines of `milk --dry-run`, then back to the bar |
+| `k` | `keeper of group (1-12)` — type the group's number as printed; the members are listed `1 keep …`, `2 …`; type the new keeper's number; the group is reprinted with the new keeper and every relation recomputed against it (the geometric fit included where the cheaper evidence leaves the question open) |
+| `u` | after a change: reverse it, right there (the same code as `--undo`) |
+| `q` / esc / Ctrl-C | leave; before a change, the `next` lines are printed so the typed forms sit in the scrollback |
+
+Raw mode is held only while a key is awaited; everything printed between
+keys goes through the ordinary renderer, so the listing above the bar is
+the listing a pipe would see. After `m` or `p` the bar offers `u undo` and
+`q quit` only — one change per sitting, reversed or kept. The bar never
+wraps: when it would, each part keeps its first two words
+(`milk 12 → _milked` → `milk 12`), then its first.
 
 ### milk **[SPEC]**
 `find`, then moves every confirmed duplicate into `<root>/_milked/`, created
-if absent. Confirmed means what it means for `purge` (two families of
-evidence agree, RESEARCH §2.7); a near duplicate the two hashes grouped
-and nothing confirmed prints as `kept~` with the reason and stays — on
-real photographs that was two pictures of one chessboard from different
-positions, which `milk` would otherwise have moved. A `kin` member
-(another capture moment) is never moved.
+if absent — the exact duplicates and the near duplicates `find` just
+listed, by the same full suite. Confirmed means what it means for
+`purge` (two families of evidence agree, RESEARCH §2.7); a near duplicate
+the two hashes grouped and nothing confirmed prints as `kept~` with the
+reason and stays — on real photographs that was two pictures of one
+chessboard from different positions, which `milk` would otherwise have
+moved. A `kin` member (another capture moment) is never moved.
 The relative path under the root is preserved inside `_milked`
 (`a/b/x.jpg` → `_milked/a/b/x.jpg`) so a milked tree can be inspected or
 restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
@@ -91,9 +120,9 @@ restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
 scanned, so running `milk` twice is idempotent.
 
 ### purge **[SPEC]**
-The full suite: exact pipeline with byte-for-byte verification of each
-duplicate against its keeper, **and** the near-duplicate image and video
-passes on every run, whatever the kind token. Near duplicates
+The full suite with byte-for-byte verification of each exact duplicate
+against its keeper before the bin call, and the near-duplicate image and
+video passes as `find` and `milk` run them. Near duplicates
 cannot be byte-verified; `purge` bins one only when a second family of
 evidence agrees with the two 64-bit hashes — PDQ (256-bit, Phase 2b) or
 the geometric fit (Phase 6) — or, for a member the deep descriptor
@@ -104,8 +133,8 @@ and stays. `purge` reports the OS bin it used and how
 to undo. `--quick-search` skips the full hash and the near passes, never
 the byte verification: a sample-level match whose bytes differ prints as
 `kept   bytes differ from keeper` and stays **[CLAUDE]**. With a kind
-token, `purge` runs only the pass that kind can feed (`img` → images,
-`vid` → videos; no token → both).
+token, only that kind is scanned (`img` → images and their pass, `vid` →
+videos and theirs; no token → both).
 
 ### doctor **[SPEC]**
 Checks and prints PASS / WARN / FAIL with a one-line fix for each:
@@ -181,74 +210,90 @@ Result layout (`find`):
 Groups are ordered by reclaimable bytes, largest first, and numbered. Paths
 are shown relative to the root. The keeper line carries its modification
 date; duplicate lines do not repeat the size (it is in the group header).
-The `next` lines carry the root as the user typed it (`.\_milked` when no
-PATH was given) and never the `--quick-search` flag: a quick search is for
-looking, the follow-up runs on full evidence. The `near` / `video` hint
-lines share the verb column. An empty scan prints SCAN and the totals
-only; a scan where nothing shares a size stops its stage lines at SIZE.
+On a terminal the `next` lines are replaced by the workspace bar (§2a);
+piped, they carry the root as the user typed it (`.\_milked` when no PATH
+was given) and never the `--quick-search` flag: a quick search is for
+looking, the follow-up runs on full evidence. After a quick search that
+saw images or videos, a `full` line names the full run. A hint's note is
+shown whole or not at all; its command is never cut. An empty scan prints
+SCAN and the totals only; a scan where nothing shares a size stops its
+stage lines at SIZE.
 
 Near groups follow the exact groups and continue the numbering:
 
 ```
- NEAR 003   4 similar   542 KB reclaimable
-   keep  photos\beach.png                        1000×750   436 KB   2019-06-12
-   near  photos\export\beach_mirror.png          1000×750   444 KB   d  0  p  0  q   8  mirror
-   near  photos\export\beach.jpg                 1000×750   45.9 KB  d  0  p  0  q   2  +GROUP 002
-   near  photos\export\beach_crop.jpg            950×712    41.7 KB  d 10  p  6  q  32  fit 1.00  crop 95%
-   near  photos\beach_small.jpg                   500×375    10.6 KB  d  0  p  0  q   4
+ NEAR 003   4 similar  +1 kin   542 KB reclaimable
+   keep  photos\beach.png                  1000×750   436 KB   2019-06-12
+   near  photos\export\beach_mirror.png    1000×750   444 KB   mirrored                d  0  p  0  q   8
+   near  photos\export\beach.jpg           1000×750   45.9 KB  same picture            d  0  p  0  q   2  +GROUP 002
+   near  photos\export\beach_crop.jpg      950×712    41.7 KB  cropped 95%             d 10  p  6  q  32  fit 1.00
+   near  photos\beach_small.jpg             500×375    10.6 KB  resized 50%             d  0  p  0  q   4
+   kin   photos\beach_next.jpg              1000×750   440 KB   another shot, 14:02:11  d  1  p  2  q   6
  ───────────────────────────────────────────────────────────────
  2 groups   3 duplicates   646 KB reclaimable   keep: oldest copy
+ 1 kin   taken at a different moment: another photograph, left alone
  1 near group   4 similar   542 KB reclaimable
    keep: shared moment, most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
 ```
 
 The header counts the members beside the keeper, as the totals line does
 (`+2 deep` when the deep tier added members, `+1 kin` for members taken
-at another moment). `d` and `p` are the dHash
-and pHash distances to the keeper (of 64 bits), `q` the PDQ distance (of
-256); `deep 0.83` appears when the optional model is installed
-(`docs/DEEP.md`) and is the SSCD cosine to the keeper; `mirror`, `rot 90`,
-`flip`, `transpose` name the orientation that matched; `+GROUP 002` says the member is itself the
-keeper of an exact group, whose copies are listed there. A distance over
-its threshold is lit in the warning colour: `d`/`p` when the member is
-linked only through another member, `q` when `purge` will keep it (`q 32`
-on the crop above). `fit 0.97  crop 80%` / `fit 0.95  rot +4°` / `fit 1.00`
-is the geometric fit (RESEARCH §2.7), shown where it was consulted: lit
-when it is what confirmed the member, in the warning colour when it fell
-short (`fit 0.45`). A member the deep tier alone brought in prints with
-the verb `deep`; one the fit then confirmed prints as `near` and acts. A
-member whose EXIF capture moment differs from the keeper's prints with the
-verb `kin` and `taken 2021-03-04 05:06:08`; `milk` and `purge` leave
-`deep` and `kin` members in place and the totals lines say how many of
-each there are.
+at another moment). Each member line says **what the member is**, in
+words, before any number **[CLAUDE, Phase 8]**: `same picture` (the same
+pixels in another file — an EXIF strip, a lossless re-save), `re-encoded`,
+`near copy` (the hashes agree, the pixels moved a little — a consecutive
+frame, a touch-up), `resized 50%`, `cropped 80%`, `letterboxed`, `with a
+border`, `rotated 90°`, `rotated +4°`, `mirrored`, `flipped`, `rotated
+and mirrored`, `edited` (in through the descriptor and the fit), `looks
+alike` (the descriptor's word alone — listed, left in place), `another
+shot, 14:02:11` (a different capture moment; the day instead of the time
+when the day differs), `similar, unconfirmed` (the two hashes grouped it,
+nothing confirmed it — listed, left in place). Two words at most. The
+words are plain when the member will act and in the info colour when it
+stays.
+
+The evidence follows, dim: `d` and `p` are the dHash and pHash distances
+to the keeper (of 64 bits), `q` the PDQ distance (of 256); `deep 0.83`
+appears when the optional model is installed (`docs/DEEP.md`) and is the
+SSCD cosine to the keeper; `fit 1.00` the geometric fit (RESEARCH §2.7)
+where it was consulted. The numbers are the first column to go when the
+width is short (the path keeps 32 cells before they do, 18 before the
+dimensions go); `+GROUP 002` says the member is itself the keeper of an
+exact group, whose copies are listed there. A member the deep tier alone
+brought in prints with the verb `deep`; one the fit then confirmed prints
+as `near` and acts. A member whose EXIF capture moment differs from the
+keeper's prints with the verb `kin`; `milk` and `purge` leave `deep` and
+`kin` members in place and the totals lines say how many of each there
+are.
 
 Video groups follow, numbered on:
 
 ```
- VIDEO 004   3 similar   6.14 MB reclaimable
+ VIDEO 004   4 similar   8.04 MB reclaimable
    keep  a.mp4              640×360   0:20   h264  4.63 MB  2026-11-08
-   near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  d  0 p  0  q   2  tmk    -  mirror
-   near  a_small.mp4        320×180   0:20   h264  95.3 KB  d  1 p  2  q   8  tmk 1.00
-   near  a_trim4.mp4        640×360   0:16   h264  2.81 MB  d 15 p 20  q 102  tmk 0.98  trim
-   near  a_sd_bars.mp4      480×360   0:20   h264  1.90 MB  d  8 p  8  q  74  tmk 1.00  bars
+   near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  mirrored               d  0 p  0  q   2  tmk    -
+   near  a_small.mp4        320×180   0:20   h264  95.3 KB  scaled 640→320         d  1 p  2  q   8  tmk 1.00
+   near  a_trim4.mp4        640×360   0:16   h264  2.81 MB  trimmed 0:16 of 0:20   d 15 p 20  q 102  tmk 0.98
+   near  a_sd_bars.mp4      800×360   0:20   h264  1.90 MB  pillarboxed            d  0 p  0  q   4  tmk 1.00
  ───────────────────────────────────────────────────────────────
  1 video group   4 similar   8.04 MB reclaimable
    keep: longest, then most pixels   tmk ≥0.8 groups, ≥0.9 bins, or frames q ≤31
 ```
 
-`d p q` are the medians over twelve sampled frames at fixed fractions of
-the duration; `tmk` is the TMK level-2 score, `-` when the mean features
-disagree so strongly that the offset search is skipped (a mirror, or
-different content — the frames carry those); `trim` marks a duration more
-than 2 % off the keeper's; `bars` marks a file with black bars around the
-picture (pillarbox or letterbox) when the keeper has none, or the
-reverse — the frames were compared inside the bars, which is why the
-dimensions in the two columns need not agree; the keeper's "most pixels"
-counts the picture inside the bars, and at a tie the file without bars
-stays. A `tmk` between 0.8 and
-0.9 is lit in the warning colour: grouped, not binned. The two DECODE and
-MATCH stage lines report images hashed, undecodable, flat-and-skipped,
-similar pairs and images grouped.
+The words first, as for images: `re-encoded`, `scaled 768→480` (picture
+widths, inside any bars), `trimmed 0:30 of 1:20`, `longer, 1:20 of 1:30`,
+`pillarboxed` / `letterboxed` (black bars around the member's picture the
+keeper has none of; the frames were compared inside them, which is why
+the dimensions in the two columns need not agree), `bars removed`,
+`mirrored`, `rotated 90°`, `similar, unconfirmed`. Then, dim, the
+evidence: `d p q` are the medians over twelve sampled frames at fixed
+fractions of the duration; `tmk` is the TMK level-2 score, `-` when the
+mean features disagree so strongly that the offset search is skipped (a
+mirror, or different content — the frames carry those). The keeper's
+"most pixels" counts the picture inside the bars, and at a tie the file
+without bars stays. The DECODE/MATCH and FRAMES/MATCH stage lines report
+images hashed, undecodable, flat-and-skipped, videos hashed, frames,
+similar pairs and files grouped.
 
 `milk` and `purge` print the same scan block, then one line per moved or
 binned file in condensed form, then a footer with the journal id and the
@@ -261,8 +306,8 @@ the NEAR and VIDEO blocks, so the details line up as a column; the path is
 shortened before the detail ever is. `--dry-run` prints the same lines prefixed
 `would` and writes no journal. A `LIKELY` header (quick search) says
 `files`, not `copies`, because the match is sample-level. A near duplicate
-being moved or binned gets `moved~` / `binned~` / `would~` with its
-distances; the footer states once what `~` means.
+being moved or binned gets `moved~` / `binned~` / `would~` with its words
+and distances; the footer states once what `~` means.
 
 ---
 
@@ -275,7 +320,7 @@ native command being run, so every menu session teaches the native form.
 ```
  ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
  ┃  WORKFLOW                                        ┃
- ┃  ▸ find    see duplicates, change nothing        ┃
+ ┃  ▸ find    list duplicates, then decide          ┃
  ┃    milk    move duplicates into _milked          ┃
  ┃    purge   send duplicates to the Recycle Bin    ┃
  ┃    undo    reverse the last change               ┃

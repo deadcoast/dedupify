@@ -46,6 +46,7 @@ pub struct Glyphs {
     pub bar_off: &'static str, // progress empty
     pub ellipsis: &'static str,
     pub pointer: &'static str, // menu cursor
+    pub arrow: &'static str,   // "into" on the workspace bar
     pub bullet: &'static str,
     pub tl: &'static str,
     pub tr: &'static str,
@@ -66,6 +67,7 @@ pub const UNICODE: Glyphs = Glyphs {
     bar_off: "╌",
     ellipsis: "…",
     pointer: "▸",
+    arrow: "→",
     bullet: "▪",
     tl: "┏",
     tr: "┓",
@@ -86,6 +88,7 @@ pub const ASCII: Glyphs = Glyphs {
     bar_off: "-",
     ellipsis: "...",
     pointer: ">",
+    arrow: "->",
     bullet: "*",
     tl: "+",
     tr: "+",

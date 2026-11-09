@@ -22,7 +22,7 @@ pub enum Workflow {
 }
 
 pub const WORKFLOWS: [(Workflow, &str, &str); 5] = [
-    (Workflow::Find, "find", "see duplicates, change nothing"),
+    (Workflow::Find, "find", "list duplicates, then decide"),
     (Workflow::Milk, "milk", "move duplicates into _milked"),
     (
         Workflow::Purge,

@@ -165,6 +165,39 @@ changed:
   23 tests, the suite with the model, the real Recycle Bin round trip,
   and every command on a sample tree with the same numbers as Linux
 
+## Phase 8 — the result is the workspace   ← delivered 2026-11-09
+
+What a person got before this phase: a listing whose primary content was
+`d 0 p 0 q 4`, then two text lines telling them to retype a command with a
+full path; `milk .` on a folder where `find . img` had just listed fifteen
+near duplicates answered "no duplicates". The brief's rule is the
+operational experience; this phase builds it.
+
+- **One rule for depth** (`actions::near_enabled`/`video_enabled`):
+  `find`, `milk`, `purge` run the full suite; `img`/`vid` scope the scan
+  and nothing else; `--quick-search` is the byte-copy tier and names the
+  full run in one `full` line. The `near`/`video` hint lines are gone.
+- **Words first** (`near::Relation::words`, `video::VideoRelation::
+  words`): each member line says what the member is — `same picture`,
+  `re-encoded`, `near copy`, `resized 50%`, `cropped 80%`, `letterboxed`,
+  `rotated 90°`, `mirrored`, `edited`, `looks alike`, `another shot,
+  05:06:08`, `similar, unconfirmed`; videos `scaled 768→480`, `trimmed
+  0:30 of 1:20`, `pillarboxed`, `bars removed`. The evidence follows,
+  dim, and is the first column dropped when the width is short; the path
+  keeps 32 cells before it goes. Action lines use the same words.
+- **The workspace** (`workspace.rs`): after `find` on a terminal the bar
+  `m milk N → _milked  p purge N → Recycle Bin  n preview  k keeper  u
+  undo  q quit`; every action works on the groups already on screen
+  (`actions::act_milk`, `act_purge`, `act_undo`, split out of the
+  commands); `k` re-elects a keeper and recomputes the group's relations
+  (`NearGroup::set_keeper`, `VideoGroup::set_keeper`); `q` before a change
+  prints the typed forms. Piped output is unchanged.
+- Tests: `words_for` unit tests; e2e `one_rule_for_depth_quick_is_the_
+  exception`, `video_pass_runs_for_plain_find_and_purge_alike`, and the
+  pseudo-terminal `find_on_a_terminal_acts_from_the_result` (Unix, through
+  `script(1)`).
+- Not changed: the matching engine, the thresholds, the journal.
+
 ## Standing rules
 
 - No cache, index or lock file is ever written on a scan.

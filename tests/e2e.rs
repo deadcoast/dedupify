@@ -290,6 +290,69 @@ fn run(fx: &Fx, args: &[&str]) -> (i32, String, String) {
     )
 }
 
+/// Run on a pseudo-terminal through `script(1)` with `keys` typed after
+/// `delay`, so the workspace bar appears and answers; Unix only, and only
+/// where `script` exists. Returns None when it cannot run.
+#[cfg(unix)]
+fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    if Command::new("script").arg("--version").output().is_err() {
+        return None;
+    }
+    let cmd = std::iter::once(bin().to_string_lossy().into_owned())
+        .chain(args.iter().map(|a| a.to_string()))
+        .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut child = Command::new("script")
+        .args(["-qfec", &cmd, "/dev/null"])
+        .current_dir(&fx.root)
+        .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("NO_COLOR", "1")
+        .env("TERM", "xterm")
+        .env("COLUMNS", columns.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let mut stdin = child.stdin.take()?;
+    let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+    std::thread::spawn(move || {
+        // the result takes a moment to print; each key a moment to act on
+        std::thread::sleep(std::time::Duration::from_millis(2500));
+        for k in keys {
+            let _ = stdin.write_all(k.as_bytes());
+            let _ = stdin.flush();
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        }
+    });
+    let out = child.wait_with_output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    // strip the terminal control sequences script passes through
+    let mut plain = String::new();
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&n) = chars.peek() {
+                    chars.next();
+                    if n.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        if c != '\r' {
+            plain.push(c);
+        }
+    }
+    Some(plain)
+}
+
 fn files(root: &Path) -> Vec<String> {
     let mut v: Vec<String> = walkdir::WalkDir::new(root)
         .into_iter()
@@ -644,7 +707,7 @@ fn near_pass_runs_for_img_and_groups_variants() {
         "the 5 % crop groups on the two 64-bit hashes\n{out}"
     );
     assert!(
-        out.contains("q  32  fit 1.00  crop 95%") || out.contains("q  32  deep"),
+        out.contains("cropped 95%") && out.contains("q  32"),
         "PDQ missed the crop by one bit; the geometric fit confirms it\n{out}"
     );
     assert!(
@@ -673,18 +736,37 @@ fn near_pass_runs_for_img_and_groups_variants() {
 }
 
 #[test]
-fn near_pass_is_off_for_plain_find_and_on_for_purge() {
+fn one_rule_for_depth_quick_is_the_exception() {
+    // find, milk and purge run the near pass alike; --quick-search skips it
+    // and names the full run (Phase 8)
     let fx = fixture_with_photos();
     let (code, out, _) = run(&fx, &["find", "."]);
     assert_eq!(code, 0);
+    assert!(out.contains("NEAR"), "plain find runs the near pass\n{out}");
+    assert!(
+        !out.contains("near   dedupe"),
+        "no hint when the pass ran\n{out}"
+    );
+    let (code, out, _) = run(&fx, &["find", ".", "-q"]);
+    assert_eq!(code, 0);
     assert!(!out.contains("NEAR"), "{out}");
-    assert!(out.contains("near   dedupe find . img"), "hint line\n{out}");
-    let (code, out, _) = run(&fx, &["purge", ".", "-n"]);
+    assert!(
+        out.contains("full   dedupe find ."),
+        "the full run is named\n{out}"
+    );
+    assert!(
+        out.contains("the full run matches near duplicates"),
+        "{out}"
+    );
+    let (code, out, _) = run(&fx, &["milk", ".", "-n"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("NEAR"),
-        "purge runs the comprehensive suite\n{out}"
+        out.contains("would~"),
+        "milk acts on what find lists\n{out}"
     );
+    let (code, out, _) = run(&fx, &["purge", ".", "-n"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("NEAR"), "{out}");
     assert!(out.contains("would~"), "{out}");
     assert!(out.contains("not a byte copy"), "{out}");
 }
@@ -702,7 +784,10 @@ fn milk_img_moves_near_duplicates_and_undo_restores() {
             || out.contains("moved~    photos\\export\\beach_crop.jpg"),
         "{out}"
     );
-    assert!(out.contains("fit 1.00  crop 95%"), "{out}");
+    assert!(
+        out.contains("cropped 95%") && out.contains("fit 1.00"),
+        "{out}"
+    );
     let after = files(&fx.root);
     assert!(after.contains(&"photos/beach.png".to_string()));
     assert!(
@@ -813,7 +898,7 @@ fn different_capture_moments_are_kin() {
         out.contains("kin   shots/a_next.jpg") || out.contains("kin   shots\\a_next.jpg"),
         "{out}"
     );
-    assert!(out.contains("taken 2021-03-04 05:06:08"), "{out}");
+    assert!(out.contains("another shot, 05:06:08"), "{out}");
     assert!(out.contains("+1 kin"), "{out}");
     assert!(out.contains("1 kin"), "{out}");
     assert!(
@@ -982,10 +1067,14 @@ fn video_pass_groups_derivatives_and_labels_them() {
         out.contains("keep  video/zoom.mp4") || out.contains("keep  video\\zoom.mp4"),
         "{out}"
     );
-    assert!(out.contains("mirror"), "{out}");
-    assert!(out.contains("trim"), "{out}");
+    assert!(out.contains("mirrored"), "{out}");
+    assert!(out.contains("trimmed 0:08 of 0:10"), "{out}");
+    assert!(
+        out.contains("scaled 640\u{2192}320"),
+        "the phone copy\n{out}"
+    );
     // the pillarboxed copy: 800×360 in the listing, frames compared inside
-    // the bars, TMK at 1.00 against the keeper, the `bars` mark on the line
+    // the bars, TMK at 1.00 against the keeper, `pillarboxed` on the line
     let pillars = out
         .lines()
         .find(|l| l.contains("zoom_pillars.mp4"))
@@ -998,7 +1087,7 @@ fn video_pass_groups_derivatives_and_labels_them() {
         pillars.contains("tmk 1.00") || pillars.contains("tmk 0.9"),
         "{pillars}"
     );
-    assert!(pillars.trim_end().ends_with("bars"), "{pillars}");
+    assert!(pillars.contains("pillarboxed"), "{pillars}");
     assert!(
         !out.contains("pattern.mp4"),
         "unrelated clip must stay out\n{out}"
@@ -1008,15 +1097,21 @@ fn video_pass_groups_derivatives_and_labels_them() {
 }
 
 #[test]
-fn video_pass_off_for_plain_find_and_on_for_purge() {
+fn video_pass_runs_for_plain_find_and_purge_alike() {
     if !ffmpeg_ok() {
         return;
     }
     let fx = fixture_with_videos();
     let (code, out, _) = run(&fx, &["find", "."]);
     assert_eq!(code, 0);
+    assert!(
+        out.contains("VIDEO"),
+        "plain find runs the video pass\n{out}"
+    );
+    let (code, out, _) = run(&fx, &["find", ".", "-q"]);
+    assert_eq!(code, 0);
     assert!(!out.contains("VIDEO"), "{out}");
-    assert!(out.contains("video  dedupe find . vid"), "hint line\n{out}");
+    assert!(out.contains("full   dedupe find ."), "{out}");
     let (code, out, _) = run(&fx, &["purge", ".", "-n"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("VIDEO"), "purge runs every pass\n{out}");
@@ -1133,4 +1228,35 @@ fn purge_then_undo_through_the_bin() {
     let a = fs::read(fx.root.join("2019/trip/IMG_0041.jpg")).unwrap();
     let b = fs::read(fx.root.join("backup/IMG_0041.jpg")).unwrap();
     assert_eq!(a, b);
+}
+
+/// The result is the workspace: `find` on a terminal ends in the bar; `n`
+/// previews, `m` + enter moves what is on screen without a second scan,
+/// `u` reverses it, `q` leaves. Piped, the `next` lines print instead.
+#[cfg(unix)]
+#[test]
+fn find_on_a_terminal_acts_from_the_result() {
+    let fx = fixture_with_photos();
+    let before = files(&fx.root);
+    let Some(out) = run_tty(&fx, &["find", ".", "img"], &["n", "m", "\r", "u", "q"], 160) else {
+        eprintln!("no script(1); skipped");
+        return;
+    };
+    assert!(out.contains("m milk"), "the bar\n{out}");
+    assert!(out.contains("p purge"), "{out}");
+    assert!(out.contains("k keeper"), "{out}");
+    // n: the preview, with the native dry-run command named
+    assert!(out.contains("dedupe milk . img --dry-run"), "{out}");
+    assert!(out.contains("would~"), "{out}");
+    // m, enter: the move, on the groups already listed (one SCAN line only)
+    assert_eq!(out.matches("SCAN ").count(), 1, "no second scan\n{out}");
+    assert!(out.contains("7 moved"), "{out}");
+    assert!(out.contains("u undo"), "{out}");
+    // u: reversed on the spot
+    assert!(out.contains("7 restored"), "{out}");
+    assert_eq!(files(&fx.root), before, "tree back as it was");
+    // piped, no bar, the typed forms instead
+    let (_, piped, _) = run(&fx, &["find", ".", "img"]);
+    assert!(!piped.contains("m milk"), "{piped}");
+    assert!(piped.contains("next   dedupe milk . img"), "{piped}");
 }

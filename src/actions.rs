@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime};
 
@@ -40,50 +41,124 @@ pub fn run(inv: &Invocation, r: &Renderer) -> i32 {
     }
 }
 
-struct Found {
-    groups: Vec<Group>,
-    near: Vec<NearGroup>,
-    scan: ScanStats,
-    pipe: PipelineStats,
-    near_stats: Option<NearStats>,
-    /// Decodable images seen when the near pass did not run (for the hint).
-    images_seen: u64,
-    video: Vec<VideoGroup>,
-    video_stats: Option<VideoStats>,
-    /// Videos seen when the video pass did not run (for the hint).
-    videos_seen: u64,
+/// What one scan found: the exact groups, the near groups, the video
+/// groups and the stage statistics. `find` shows it and then hands it to
+/// the workspace, which acts on it without scanning again.
+pub(crate) struct Found {
+    pub(crate) groups: Vec<Group>,
+    pub(crate) near: Vec<NearGroup>,
+    pub(crate) scan: ScanStats,
+    pub(crate) pipe: PipelineStats,
+    /// Decodable images seen when the near pass did not run (quick search).
+    pub(crate) images_seen: u64,
+    pub(crate) video: Vec<VideoGroup>,
+    /// Videos seen when the video pass did not run (quick search).
+    pub(crate) videos_seen: u64,
     /// ffmpeg/ffprobe missing when the video pass was wanted.
-    video_tools_missing: bool,
+    pub(crate) video_tools_missing: bool,
 }
 
 impl Found {
-    fn empty(&self) -> bool {
+    pub(crate) fn empty(&self) -> bool {
         self.groups.is_empty() && self.near.is_empty() && self.video.is_empty()
+    }
+
+    /// Groups as numbered on screen: exact, then near, then video.
+    pub(crate) fn group_count(&self) -> usize {
+        self.groups.len() + self.near.len() + self.video.len()
+    }
+
+    /// Make member `idx` of on-screen group `n` (1-based) the keeper.
+    /// Returns false when either number is out of range.
+    pub(crate) fn set_keeper(&mut self, n: usize, idx: usize) -> bool {
+        if n == 0 {
+            return false;
+        }
+        let mut i = n - 1;
+        if i < self.groups.len() {
+            let g = &mut self.groups[i];
+            if idx == 0 || idx >= g.members.len() {
+                return false;
+            }
+            let m = g.members.remove(idx);
+            g.members.insert(0, m);
+            return true;
+        }
+        i -= self.groups.len();
+        if i < self.near.len() {
+            let g = &mut self.near[i];
+            if idx == 0 || idx >= g.members.len() {
+                return false;
+            }
+            g.set_keeper(idx);
+            return true;
+        }
+        i -= self.near.len();
+        if i < self.video.len() {
+            let g = &mut self.video[i];
+            if idx == 0 || idx >= g.members.len() {
+                return false;
+            }
+            g.set_keeper(idx);
+            return true;
+        }
+        false
+    }
+
+    /// The paths of on-screen group `n`, keeper first; empty when out of range.
+    pub(crate) fn group_paths(&self, n: usize) -> Vec<PathBuf> {
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut i = n - 1;
+        if i < self.groups.len() {
+            return self.groups[i]
+                .members
+                .iter()
+                .map(|m| m.path.clone())
+                .collect();
+        }
+        i -= self.groups.len();
+        if i < self.near.len() {
+            return self.near[i]
+                .members
+                .iter()
+                .map(|m| m.hashed.rep.cand.path.clone())
+                .collect();
+        }
+        i -= self.near.len();
+        if i < self.video.len() {
+            return self.video[i]
+                .members
+                .iter()
+                .map(|m| m.hashed.rep.cand.path.clone())
+                .collect();
+        }
+        Vec::new()
     }
 }
 
-/// The near pass runs for `img` requests and for every `purge` whose scan
-/// can contain images (the comprehensive suite; `purge . vid` has none).
-/// Quick search is the obvious-duplicates tier and skips it.
+/// One rule for depth: `find`, `milk` and `purge` all run the full suite,
+/// so what `find` lists is what `milk` and `purge` act on; the kind token
+/// scopes what is scanned, nothing else. `--quick-search` is the fast
+/// byte-copy tier and skips the near passes. (Phase 8: before it, `find`
+/// and `milk` ran the near passes only with a kind token, and a folder
+/// `find . img` had just listed fifteen near duplicates in answered
+/// `milk .` with "no duplicates".)
 fn near_enabled(inv: &Invocation) -> bool {
-    !inv.quick
-        && inv.kind != Kind::Video
-        && (inv.kind == Kind::Image || inv.command == Command::Purge)
+    !inv.quick && inv.kind != Kind::Video
 }
 
-/// The video pass runs for `vid` requests and for every `purge` whose scan
-/// can contain videos.
+/// The video pass, by the same rule.
 fn video_enabled(inv: &Invocation) -> bool {
-    !inv.quick
-        && inv.kind != Kind::Image
-        && (inv.kind == Kind::Video || inv.command == Command::Purge)
+    !inv.quick && inv.kind != Kind::Image
 }
 
 fn is_video(p: &Path) -> bool {
     Kind::Video.matches(p)
 }
 
-fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
+pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
     let lp = LiveProgress::new(r.theme);
     let t0 = Instant::now();
     lp.begin(Stage::Scan);
@@ -122,7 +197,6 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
     keeper::order(&mut groups);
 
     let mut near_groups = Vec::new();
-    let mut near_stats = None;
     if near_on {
         // representatives: every decodable image that is not a non-keeper
         // member of an exact group; keepers carry their group index
@@ -170,8 +244,8 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
             near_groups = near::group(hashed, &mut stats, &lp);
             let e = lp.stage_elapsed(Stage::Match);
             lp.finish_stage(Stage::Match, lp.match_summary(&stats, e));
-            near_stats = Some(stats);
-        } else {
+        } else if !reps.is_empty() {
+            // one image: nothing to compare, said once; none: no stage line
             let stats = NearStats {
                 decoded: reps.len() as u64,
                 ..Default::default()
@@ -180,14 +254,13 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                 Stage::Decode,
                 lp.decode_summary(&stats, std::time::Duration::ZERO),
             );
-            near_stats = Some(stats);
         }
     }
 
     let mut video_groups = Vec::new();
-    let mut video_stats = None;
     let mut video_tools_missing = false;
-    if video_on {
+    let videos_present = all.iter().any(|c| is_video(&c.path));
+    if video_on && videos_present {
         let (ff, fp) = video::tools_present();
         if !(ff && fp) {
             video_tools_missing = true;
@@ -229,8 +302,7 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                 video_groups = video::group(hashed, &mut stats, &lp);
                 let e = lp.stage_elapsed(Stage::Match);
                 lp.finish_stage(Stage::Match, lp.video_match_summary(&stats, e));
-                video_stats = Some(stats);
-            } else {
+            } else if !reps.is_empty() {
                 let stats = VideoStats {
                     probed: reps.len() as u64,
                     hashed: reps.len() as u64,
@@ -240,7 +312,6 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                     Stage::Frames,
                     lp.frames_summary(&stats, std::time::Duration::ZERO),
                 );
-                video_stats = Some(stats);
             }
         }
     }
@@ -249,17 +320,15 @@ fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         groups,
         near: near_groups,
         video: video_groups,
-        video_stats,
         videos_seen,
         video_tools_missing,
         scan,
         pipe,
-        near_stats,
         images_seen,
     }
 }
 
-fn report(f: &Found, inv: &Invocation, r: &Renderer) {
+pub(crate) fn report(f: &Found, inv: &Invocation, r: &Renderer) {
     r.groups(&f.groups, &inv.root);
     r.near_groups(&f.near, &inv.root, f.groups.len());
     r.video_groups(&f.video, &inv.root, f.groups.len() + f.near.len());
@@ -283,38 +352,49 @@ fn report(f: &Found, inv: &Invocation, r: &Renderer) {
 
 fn find(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
-    let f = scan_and_group(inv, r);
+    let mut f = scan_and_group(inv, r);
     report(&f, inv, r);
-    if !f.empty() {
+    if inv.quick && (f.images_seen >= 2 || f.videos_seen >= 2) {
+        r.full_hint(inv, f.images_seen, f.videos_seen);
+    }
+    if f.empty() {
+        return EXIT_OK;
+    }
+    if r.theme.live && std::io::stdin().is_terminal() {
+        // the result is the workspace: act on what is on screen
+        crate::workspace::run(&mut f, inv, r)
+    } else {
         r.next_after_find(inv);
+        EXIT_OK
     }
-    if f.near_stats.is_none() && f.images_seen >= 2 {
-        r.near_hint(inv, f.images_seen);
-    }
-    if f.video_stats.is_none() && !f.video_tools_missing && f.videos_seen >= 2 {
-        r.video_hint(inv, f.videos_seen);
-    }
-    EXIT_OK
 }
 
 // ---------------------------------------------------------------------------
 
 /// One file to move or bin, with what justifies it.
-struct Item<'a> {
-    path: &'a Path,
-    size: u64,
-    keeper: &'a Path,
+pub(crate) struct Item<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) size: u64,
+    pub(crate) keeper: &'a Path,
     /// `None` for exact duplicates (verifiable byte for byte); the relation
     /// text for near duplicates.
-    near: Option<String>,
-    /// For near items: does PDQ confirm the relation to the keeper? `purge`
-    /// bins a near duplicate only when it does. `None` for exact items.
-    near_confirmed: Option<bool>,
-    near_reason: String,
-    hash: String,
+    pub(crate) near: Option<String>,
+    /// For near items: does a second family confirm the relation to the
+    /// keeper? `milk` and `purge` act on a near duplicate only when it
+    /// does. `None` for exact items.
+    pub(crate) near_confirmed: Option<bool>,
+    pub(crate) near_reason: String,
+    pub(crate) hash: String,
 }
 
-fn items(f: &Found) -> Vec<Item<'_>> {
+impl Item<'_> {
+    /// Would `milk` move it / `purge` bin it (before byte verification)?
+    pub(crate) fn actionable(&self) -> bool {
+        self.near_confirmed != Some(false)
+    }
+}
+
+pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
     let mut v = Vec::new();
     for g in &f.groups {
         for m in &g.members[1..] {
@@ -339,17 +419,8 @@ fn items(f: &Found) -> Vec<Item<'_>> {
                 // (docs/RESEARCH.md §2.6, §2.8)
                 continue;
             }
-            let mut txt = format!("d {:>2}  p {:>2}  q {:>3}", rel.d, rel.p, rel.q);
-            if let Some(fit) = rel.fit {
-                if rel.fit_ok() {
-                    txt.push_str("  ");
-                    txt.push_str(&fit.label());
-                }
-            }
-            if !rel.variant.label().is_empty() && !rel.deep_only() {
-                txt.push_str("  ");
-                txt.push_str(rel.variant.label());
-            }
+            // the words first, the evidence after, as on the listing
+            let txt = format!("{}  {}", rel.words(k, &m.hashed), rel.numbers());
             v.push(Item {
                 path: &m.hashed.rep.cand.path,
                 size: m.hashed.rep.cand.size,
@@ -373,19 +444,7 @@ fn items(f: &Found) -> Vec<Item<'_>> {
         let k = &g.members[0].hashed;
         for m in &g.members[1..] {
             let rel = m.relation.unwrap();
-            let tmk = if rel.level1 >= crate::video::LEVEL1_MIN {
-                format!("tmk {:.2}", rel.level2)
-            } else {
-                "tmk    -".to_string()
-            };
-            let mut txt = match rel.pos {
-                Some((d, p, q)) => format!("d {d:>2} p {p:>2}  q {q:>3}  {tmk}"),
-                None => format!("frames     -  {tmk}"),
-            };
-            if rel.positional_ok() && !rel.variant.label().is_empty() {
-                txt.push_str("  ");
-                txt.push_str(rel.variant.label());
-            }
+            let txt = format!("{}  {}", rel.words(&k.sig, &m.hashed.sig), rel.numbers());
             v.push(Item {
                 path: &m.hashed.rep.cand.path,
                 size: m.hashed.rep.cand.size,
@@ -467,22 +526,32 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         return EXIT_OK;
     }
     r.blank();
+    act_milk(&f, inv, r, inv.dry_run).0
+}
 
+/// Move every actionable item of `f` into `_milked` (or say what would
+/// move). Returns the exit code and the journal id when one was written.
+pub(crate) fn act_milk(
+    f: &Found,
+    inv: &Invocation,
+    r: &Renderer,
+    dry_run: bool,
+) -> (i32, Option<String>) {
     let milked = inv.root.join(MILKED_DIR);
     let milked_display = under_root(inv.root_display.as_deref(), MILKED_DIR);
-    let mut w = Writer::new(&inv.root, &inv.command_line());
+    let mut w = Writer::new(&inv.root, &inv.command_line_as(Command::Milk));
     let mut moved: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
     let mut stopped = false;
 
-    if !inv.dry_run {
+    if !dry_run {
         interrupt::install();
         interrupt::changing(true);
     }
     let mut kept: Vec<(String, String)> = Vec::new();
-    for it in items(&f) {
-        if !inv.dry_run && interrupt::requested() {
+    for it in items(f) {
+        if !dry_run && interrupt::requested() {
             stopped = true;
             break;
         }
@@ -519,7 +588,7 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         }
         let verb_dry = if it.near.is_some() { "would~" } else { "would" };
         let verb = if it.near.is_some() { "moved~" } else { "moved" };
-        if inv.dry_run {
+        if dry_run {
             r.action(verb_dry, Role::Warn, &rel, &detail);
             moved += 1;
             bytes += it.size;
@@ -555,17 +624,18 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         r.action("kept~", Role::Warn, path, why);
     }
 
-    let journal_id = if inv.dry_run {
+    let journal_id = if dry_run {
         None
     } else {
         close_journal(w, r, "moves done")
     };
-    let verb = if inv.dry_run { "would move" } else { "moved" };
+    let verb = if dry_run { "would move" } else { "moved" };
     r.action_totals(
         verb,
         moved,
         bytes,
         &format!("into {milked_display}"),
+        Some(&format!("into {MILKED_DIR}")),
         journal_id.as_deref(),
     );
     if !f.near.is_empty() || !f.video.is_empty() {
@@ -599,13 +669,14 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
     if journal_id.is_some() {
         r.undo_hint(inv);
     }
-    if stopped {
+    let code = if stopped {
         EXIT_INTERRUPTED
     } else if failed > 0 {
         EXIT_FAILED
     } else {
         EXIT_OK
-    }
+    };
+    (code, journal_id)
 }
 
 // ---------------------------------------------------------------------------
@@ -614,9 +685,20 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
     let f = scan_and_group(inv, r);
     let list = items(&f);
+    let verified = verify_items(&list, &f.pipe, r);
+    report(&f, inv, r);
+    if f.empty() {
+        return EXIT_OK;
+    }
+    r.blank();
+    act_purge(&f, &list, &verified, inv, r, inv.dry_run).0
+}
 
-    // VERIFY — exact items byte for byte against the keeper; near items are
-    // justified by two agreeing hashes and cannot be byte-verified
+/// VERIFY — exact items byte for byte against the keeper; near items are
+/// justified by two agreeing families and cannot be byte-verified, so
+/// their flag is their confirmation. `--quick-search` skips the full
+/// hash, never this: purge bins nothing it has not read against its keeper.
+pub(crate) fn verify_items(list: &[Item<'_>], pipe: &PipelineStats, r: &Renderer) -> Vec<bool> {
     let lp = LiveProgress::new(r.theme);
     let exact_idx: Vec<usize> = list
         .iter()
@@ -625,14 +707,10 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         .map(|(i, _)| i)
         .collect();
     let total = exact_idx.len() as u64;
-    // exact items are verified below byte for byte; near items are verified
-    // by PDQ agreeing with the two 64-bit hashes (Relation::confirmed)
     let mut verified: Vec<bool> = list
         .iter()
         .map(|it| it.near_confirmed.unwrap_or(false))
         .collect();
-    // --quick-search skips the full hash, never the byte verification:
-    // purge bins nothing it has not read against its keeper
     if total > 0 {
         lp.tick(Stage::Verify, 0, total);
         let counter = std::sync::atomic::AtomicU64::new(0);
@@ -653,17 +731,22 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
                 ok_n += 1;
             }
         }
-        let mut p = f.pipe;
+        let mut p = *pipe;
         p.confirmed = ok_n;
         lp.done(Stage::Verify, &p);
     }
+    verified
+}
 
-    report(&f, inv, r);
-    if f.empty() {
-        return EXIT_OK;
-    }
-    r.blank();
-
+/// Bin every verified item of `f` (or say what would be binned).
+pub(crate) fn act_purge(
+    f: &Found,
+    list: &[Item<'_>],
+    verified: &[bool],
+    inv: &Invocation,
+    r: &Renderer,
+    dry_run: bool,
+) -> (i32, Option<String>) {
     // exceptions are printed after the action lines, before the footer
     let mut to_bin: Vec<usize> = Vec::new();
     let mut kept: Vec<(&str, String, String)> = Vec::new();
@@ -689,13 +772,13 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         }
     }
 
-    let mut w = Writer::new(&inv.root, &inv.command_line());
+    let mut w = Writer::new(&inv.root, &inv.command_line_as(Command::Purge));
     let mut binned: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
     let mut stopped = false;
 
-    if inv.dry_run {
+    if dry_run {
         for &i in &to_bin {
             let it = &list[i];
             let detail = it.near.clone().unwrap_or_default();
@@ -763,17 +846,18 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         r.action(verb, Role::Warn, path, why);
     }
 
-    let journal_id = if inv.dry_run {
+    let journal_id = if dry_run {
         None
     } else {
         close_journal(w, r, "files are in the Recycle Bin")
     };
-    let verb = if inv.dry_run { "would bin" } else { "binned" };
+    let verb = if dry_run { "would bin" } else { "binned" };
     r.action_totals(
         verb,
         binned,
         bytes,
         "to the Recycle Bin",
+        None,
         journal_id.as_deref(),
     );
     if !f.near.is_empty() || !f.video.is_empty() {
@@ -816,19 +900,26 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
     if journal_id.is_some() {
         r.undo_hint(inv);
     }
-    if stopped {
+    let code = if stopped {
         EXIT_INTERRUPTED
     } else if failed > 0 {
         EXIT_FAILED
     } else {
         EXIT_OK
-    }
+    };
+    (code, journal_id)
 }
 
 // ---------------------------------------------------------------------------
 
-fn undo(inv: &Invocation, r: &Renderer) -> i32 {
+pub(crate) fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
+    act_undo(inv, r)
+}
+
+/// Reverse the latest pending journal under the root (the workspace's `u`
+/// and the `--undo` command after its header).
+pub(crate) fn act_undo(inv: &Invocation, r: &Renderer) -> i32 {
     let root_display = inv
         .root_display
         .clone()
@@ -998,7 +1089,7 @@ fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     } else {
         "restored"
     };
-    r.action_totals(verb, restored, bytes, "back in place", Some(&j.id));
+    r.action_totals(verb, restored, bytes, "back in place", None, Some(&j.id));
     if failed > 0 {
         r.note(
             Role::Danger,

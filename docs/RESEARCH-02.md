@@ -578,9 +578,9 @@ cos[period][coefficient] and sin[period][coefficient], all little-endian
   `float`), frame counts equal, level 1 and level 2 = 1.0000.
 - Fed our shipped frames (288-px area-scaled grey → Jarosz → 64), the same
   video scores level 2 0.982–0.9999 against its reference file, and the
-  pair scores between videos sit within 0.013 of the scores the reference
-  files give each other across the fifteen related and unrelated pairs
-  tried. The frame paths differ (ours filters before decimating; the
+  level-2 pair scores between videos sit within 0.013 of the scores the
+  reference files give each other across the fifteen related and
+  unrelated pairs tried. The frame paths differ (ours filters before decimating; the
   tool's `-s 64:64` is bicubic), and the frame counts by one or two
   (`fps=15` against `-r 15`); the descriptor is the same.
 
@@ -672,6 +672,13 @@ lexicographic path. The policy is printed in every result footer so it is
 never hidden. The date on a `keep` line is the local calendar date of that
 modification time (Phase 5), the same day Explorer shows; the comparison
 itself uses the full timestamp.
+
+The policy is a default, not a verdict: on the result workspace (Phase 8,
+CLI.md §2a) the `k` key re-elects a keeper by its number, and the group's
+relations are recomputed against the new keeper — for a near group that
+is `relation_of` plus the geometric fit where the cheaper evidence leaves
+the question open, for a video group `relate`; an exact group only
+reorders, every member being the same bytes.
 
 ---
 

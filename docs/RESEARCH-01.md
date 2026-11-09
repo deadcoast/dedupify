@@ -673,6 +673,13 @@ never hidden. The date on a `keep` line is the local calendar date of that
 modification time (Phase 5), the same day Explorer shows; the comparison
 itself uses the full timestamp.
 
+The policy is a default, not a verdict: on the result workspace (Phase 8,
+CLI.md §2a) the `k` key re-elects a keeper by its number, and the group's
+relations are recomputed against the new keeper — for a near group that
+is `relation_of` plus the geometric fit where the cheaper evidence leaves
+the question open, for a video group `relate`; an exact group only
+reorders, every member being the same bytes.
+
 ---
 
 ## 6. Sources

@@ -116,6 +116,142 @@ impl Relation {
         }
     }
 
+    /// What the member is, in words, for its line: the relation read off
+    /// the evidence rather than the evidence itself. `keeper`/`member`
+    /// supply the pixel sizes and the capture time. [CLAUDE]
+    ///
+    /// `mirrored`, `rotated 90°`, `resized 50%`, `cropped 80%`,
+    /// `letterboxed`, `re-encoded`, `same picture`, `another shot …`,
+    /// `looks alike`, `similar, unconfirmed`; two words at most, joined
+    /// with a comma.
+    pub fn words(&self, keeper: &Hashed, member: &Hashed) -> String {
+        self.words_for(
+            (keeper.sig.width, keeper.sig.height),
+            (member.sig.width, member.sig.height),
+            keeper.capture.as_ref().map(|c| c.datetime.as_str()),
+            member.capture.as_ref().map(|c| c.datetime.as_str()),
+        )
+    }
+
+    /// `words` on bare inputs: pixel sizes and `YYYY-MM-DD HH:MM:SS`
+    /// capture times.
+    pub fn words_for(
+        &self,
+        keeper: (u32, u32),
+        member: (u32, u32),
+        keeper_taken: Option<&str>,
+        member_taken: Option<&str>,
+    ) -> String {
+        if self.kin {
+            // the member's own moment: the time when the day is the
+            // keeper's, the day otherwise
+            return match (member_taken, keeper_taken) {
+                (Some(m), Some(k)) if m.get(..10) == k.get(..10) => {
+                    format!("another shot, {}", m.get(11..).unwrap_or(""))
+                }
+                (Some(m), _) => format!("another shot, {}", m.get(..10).unwrap_or("")),
+                (None, _) => "another shot".to_string(),
+            };
+        }
+        if self.deep_only() && !self.fit_ok() {
+            return "looks alike".to_string();
+        }
+        if !self.confirmed() {
+            return "similar, unconfirmed".to_string();
+        }
+        let mut parts: Vec<String> = Vec::new();
+        // orientation: a 64-bit finding, so only when the hashes agree
+        let orientation = if self.hash_pair() {
+            match self.variant {
+                Variant::Identity => "",
+                Variant::Rotate90 => "rotated 90°",
+                Variant::Rotate180 => "rotated 180°",
+                Variant::Rotate270 => "rotated 270°",
+                Variant::FlipH => "mirrored",
+                Variant::FlipV => "flipped",
+                Variant::Transpose | Variant::AntiTranspose => "rotated and mirrored",
+            }
+        } else {
+            ""
+        };
+        if !orientation.is_empty() {
+            parts.push(orientation.to_string());
+        }
+        // geometry: what the fit found, when it was the evidence
+        let mut geometric = false;
+        if let Some(f) = self.fit {
+            if f.ncc >= FIT_MIN {
+                if f.angle != 0.0 {
+                    parts.push(format!("rotated {:+.0}°", f.angle));
+                    geometric = true;
+                } else if f.scale < 0.995 {
+                    if f.inner_is_second {
+                        parts.push(format!("cropped {:.0}%", f.scale * 100.0));
+                    } else {
+                        // the member holds the keeper's picture inside a
+                        // frame: bars when the shape changed, a border otherwise
+                        let ka = keeper.0 as f32 / keeper.1.max(1) as f32;
+                        let ma = member.0 as f32 / member.1.max(1) as f32;
+                        parts.push(if (ka - ma).abs() / ka > 0.05 {
+                            "letterboxed".to_string()
+                        } else {
+                            "with a border".to_string()
+                        });
+                    }
+                    geometric = true;
+                }
+            }
+        }
+        // size: the member's pixels against the keeper's, on the member's
+        // own orientation
+        let (mw, mh) = match self.variant {
+            Variant::Rotate90
+            | Variant::Rotate270
+            | Variant::Transpose
+            | Variant::AntiTranspose => (member.1, member.0),
+            _ => (member.0, member.1),
+        };
+        let (kw, kh) = (keeper.0.max(1), keeper.1.max(1));
+        let rw = mw as f32 / kw as f32;
+        let rh = mh as f32 / kh as f32;
+        let same_size = (rw - 1.0).abs() <= 0.03 && (rh - 1.0).abs() <= 0.03;
+        if !geometric && !same_size {
+            if (rw - rh).abs() <= 0.03 {
+                parts.push(format!("resized {:.0}%", rw * 100.0));
+            } else {
+                parts.push(format!("{}×{}", mw, mh));
+            }
+        }
+        if parts.is_empty() {
+            parts.push(if !self.hash_pair() {
+                // in through the descriptor and the fit: the picture is
+                // there, the pixels were worked on
+                "edited".to_string()
+            } else if self.d == 0 && self.p == 0 && self.q == 0 {
+                "same picture".to_string()
+            } else if self.q <= 8 {
+                "re-encoded".to_string()
+            } else {
+                "near copy".to_string()
+            });
+        }
+        parts.truncate(2);
+        parts.join(", ")
+    }
+
+    /// The evidence behind the words, for the dim trailing column:
+    /// `d 0  p 0  q 4`, then `deep 0.80` and `fit 1.00` when they exist.
+    pub fn numbers(&self) -> String {
+        let mut s = format!("d {:>2}  p {:>2}  q {:>3}", self.d, self.p, self.q);
+        if let Some(c) = self.deep {
+            s.push_str(&format!("  deep {c:.2}"));
+        }
+        if let Some(f) = self.fit {
+            s.push_str(&format!("  fit {:.2}", f.ncc.max(0.0)));
+        }
+        s
+    }
+
     /// Why `confirmed()` is false, for the `kept~` line.
     pub fn unconfirmed_reason(&self) -> String {
         if self.kin {
@@ -155,6 +291,28 @@ pub struct NearGroup {
 }
 
 impl NearGroup {
+    /// Make member `idx` the keeper: it moves to the front and every other
+    /// member's relation is recomputed against it, the geometric fit
+    /// included where the cheaper evidence leaves the question open (the
+    /// same rule as `group`). The workspace's `k` key. [CLAUDE]
+    pub fn set_keeper(&mut self, idx: usize) {
+        if idx == 0 || idx >= self.members.len() {
+            return;
+        }
+        let chosen = self.members.remove(idx);
+        self.members.insert(0, chosen);
+        self.members[0].relation = None;
+        let keeper = self.members[0].hashed.clone();
+        for m in self.members.iter_mut().skip(1) {
+            let mut r = relation_of(&keeper, &m.hashed);
+            let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only());
+            if needs {
+                r.fit = geometry::fit_files(&keeper.rep.cand.path, &m.hashed.rep.cand.path);
+            }
+            m.relation = Some(r);
+        }
+    }
+
     /// Bytes `milk`/`purge` act on: confirmed members only.
     pub fn reclaimable(&self) -> u64 {
         self.members
@@ -637,5 +795,132 @@ mod tests {
         assert_ne!(uf.find(0), uf.find(3));
         assert_eq!(uf.find(4), uf.find(5));
         assert_ne!(uf.find(4), uf.find(2));
+    }
+}
+
+#[cfg(test)]
+mod words_tests {
+    use super::*;
+
+    fn rel(d: u32, p: u32, q: u32) -> Relation {
+        Relation {
+            variant: Variant::Identity,
+            d,
+            p,
+            q,
+            q_quality: 100,
+            deep: None,
+            fit: None,
+            kin: false,
+        }
+    }
+
+    #[test]
+    fn plain_words_for_plain_cases() {
+        let k = (1000, 750);
+        assert_eq!(rel(0, 0, 0).words_for(k, k, None, None), "same picture");
+        assert_eq!(rel(1, 0, 6).words_for(k, k, None, None), "re-encoded");
+        assert_eq!(rel(4, 2, 22).words_for(k, k, None, None), "near copy");
+        assert_eq!(
+            rel(0, 0, 4).words_for(k, (500, 375), None, None),
+            "resized 50%"
+        );
+        assert_eq!(
+            rel(0, 0, 4).words_for(k, (1500, 1125), None, None),
+            "resized 150%"
+        );
+        // an odd shape with no fit consulted: the size itself
+        assert_eq!(rel(0, 0, 4).words_for(k, (800, 750), None, None), "800×750");
+        let mut r = rel(0, 0, 6);
+        r.variant = Variant::Rotate90;
+        assert_eq!(r.words_for(k, (750, 1000), None, None), "rotated 90°");
+        r.variant = Variant::FlipH;
+        assert_eq!(r.words_for(k, k, None, None), "mirrored");
+        r.variant = Variant::FlipH;
+        assert_eq!(
+            r.words_for(k, (500, 375), None, None),
+            "mirrored, resized 50%"
+        );
+    }
+
+    #[test]
+    fn fit_words_and_the_frames() {
+        let k = (1000, 750);
+        let mut r = rel(10, 6, 32);
+        r.fit = Some(Fit {
+            ncc: 1.0,
+            scale: 0.95,
+            dx: 0,
+            dy: 0,
+            angle: 0.0,
+            inner_is_second: true,
+        });
+        assert_eq!(r.words_for(k, (950, 712), None, None), "cropped 95%");
+        r.fit = Some(Fit {
+            ncc: 0.97,
+            scale: 0.8,
+            dx: 0,
+            dy: 0,
+            angle: 0.0,
+            inner_is_second: false,
+        });
+        assert_eq!(r.words_for(k, (1000, 1000), None, None), "letterboxed");
+        assert_eq!(r.words_for(k, (1100, 825), None, None), "with a border");
+        r.fit = Some(Fit {
+            ncc: 0.95,
+            scale: 1.0,
+            dx: 0,
+            dy: 0,
+            angle: 4.0,
+            inner_is_second: true,
+        });
+        assert_eq!(r.words_for(k, k, None, None), "rotated +4°");
+        // the fit fell short: listed, not acted on
+        r.fit = Some(Fit {
+            ncc: 0.8,
+            scale: 1.0,
+            dx: 0,
+            dy: 0,
+            angle: 0.0,
+            inner_is_second: true,
+        });
+        assert_eq!(r.words_for(k, k, None, None), "similar, unconfirmed");
+    }
+
+    #[test]
+    fn moments_and_the_descriptor() {
+        let k = (1000, 750);
+        let mut r = rel(1, 2, 4);
+        r.kin = true;
+        assert_eq!(
+            r.words_for(
+                k,
+                k,
+                Some("2021-03-04 05:06:07"),
+                Some("2021-03-04 05:06:08")
+            ),
+            "another shot, 05:06:08"
+        );
+        assert_eq!(
+            r.words_for(
+                k,
+                k,
+                Some("2021-03-04 05:06:07"),
+                Some("2021-03-05 09:00:00")
+            ),
+            "another shot, 2021-03-05"
+        );
+        let mut d = rel(30, 28, 120);
+        d.deep = Some(0.8);
+        assert_eq!(d.words_for(k, k, None, None), "looks alike");
+        d.fit = Some(Fit {
+            ncc: 0.96,
+            scale: 1.0,
+            dx: 0,
+            dy: 0,
+            angle: 0.0,
+            inner_is_second: true,
+        });
+        assert_eq!(d.words_for(k, k, None, None), "edited");
     }
 }

@@ -37,7 +37,10 @@ pub fn page(r: &Renderer) {
             d("[flags]")
         ),
         String::new(),
-        c("find", "see every duplicate group, change nothing"),
+        c(
+            "find",
+            "list every duplicate group, then decide on it (m p n k u q)",
+        ),
         c(
             "milk",
             &format!(
@@ -59,14 +62,17 @@ pub fn page(r: &Renderer) {
             ".",
             "include subfolders                  default: this folder only",
         ),
-        tok("img", "images only; adds near-duplicate matching"),
-        tok("vid", "videos only; adds near-duplicate matching (ffmpeg)"),
+        tok(
+            "img",
+            "images only                         default: everything",
+        ),
+        tok("vid", "videos only (ffmpeg)"),
         String::new(),
         fl("-n", "--dry-run", "show what would change, change nothing"),
         fl(
             "-q",
             "--quick-search",
-            "size + 64 KiB samples only, no full hash",
+            "byte copies only, by size and 64 KiB samples; no near pass",
         ),
         fl("-u", "--undo", "reverse the last milk or purge under PATH"),
         fl("-dr", "--doctor", "same as the doctor command"),
@@ -75,6 +81,10 @@ pub fn page(r: &Renderer) {
         row(
             p(&fit("dedupe", 8)),
             "with nothing after it opens the workflow menu",
+        ),
+        row(
+            p(&fit("near", 8)),
+            "resized, cropped, rotated, re-encoded, boxed copies are found too",
         ),
         row(
             p(&fit("keep", 8)),
