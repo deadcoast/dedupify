@@ -115,11 +115,11 @@ Run 'err_missing' "`"$exe`" find C:\no\such\folder"
 $j = Join-Path $env:LOCALAPPDATA 'dedupe'
 @("app dir $j") + $(if (Test-Path $j) { Get-ChildItem $j -Recurse | ForEach-Object { "$($_.FullName)  $($_.Length)" } } else { 'absent' }) | Set-Content (Join-Path $log 'journal_dir.txt')
 
-Step 'done - a live find on the sample; the bar at the bottom is yours (m p n k u q)'
+Step 'done - a live find on the sample opens the workspace: space select, k keeper, v view, o reveal, m/p act, u undo, q quit'
 "DONE $(Get-Date -Format s)" | Set-Content (Join-Path $log 'DONE.txt')
 Start-Sleep -Seconds 2
 Clear-Host
-& $exe find $sample . img
+& $exe find $sample .
 Write-Host ""
 Write-Host "logs in runs\win\log - press a key to close" -ForegroundColor DarkGray
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
