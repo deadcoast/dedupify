@@ -47,6 +47,8 @@ $env_lines = @(
 $env_lines | Tee-Object -FilePath (Join-Path $log 'env.txt')
 
 Step 'git pull'
+# local edits under runs\win are this script's own earlier copies; the repo's version wins
+Run 'git_checkout' 'git checkout -- runs/win'
 Run 'git_pull' 'git pull --ff-only origin main'
 
 Step 'cargo build --release'
