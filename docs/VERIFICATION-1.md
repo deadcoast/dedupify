@@ -1197,3 +1197,119 @@ Binary: 25,911,008 bytes with the deep tier, 3,232,728 without.
   full decode at source resolution; measured here on 80-second AVI only.
 - The capture-moment rule on a camera roll (carried from Phase 6).
 - Windows execution (type-checked, with and without the deep feature).
+
+---
+
+# VERIFICATION — Phase 7, Windows execution, run on 2026-11-09
+
+The first run on Windows. Machine `homeone`: Windows 11 Home
+(10.0.26300), AMD Ryzen 7 9800X3D (16 threads), 61.6 GB, `rustc 1.99.0`,
+`cargo 1.99.0`, ffmpeg/ffprobe 9.0.2 (gyan.dev full build, found through
+the WinGet packages path), Windows PowerShell 5.1 in ConsoleHost at
+133 columns, code page 437. Repository at `C:\github\dedupify`, pulled to
+`f3f05f1` first (`runs/win/logs/git_pull.txt`). Driven by one
+double-click on `runs/win/RUN_VERIFY.cmd`, which runs
+`runs/win/win_verify.ps1`; every step's output is under `runs/win/logs/`
+(converted from PowerShell's UTF-16 to UTF-8 afterwards, otherwise
+untouched). The sample tree it ran on is not committed (`runs/win/
+.gitignore`): 23 real OpenCV pictures with derived copies (crop 80 %,
+letterbox, half size, 90° rotation, JPEG q60, mirror), three JPEGs of one
+exposure stamped `2021:03:04 05:06:07` (original, 75 % export, EXIF
+stripped) and the next frame stamped `05:06:08`, `vtest.avi` with an
+x264 re-encode, a pillarboxed export, a 30-second trim and the unrelated
+`tree.avi`, 39 files, 35.3 MB.
+
+## Build and suite
+
+`cargo build --release`: 4 m 17 s, `dedupe.exe` 28,013,056 bytes (deep
+tier in). `cargo test --release`: 79 unit tests and 23 end-to-end tests
+pass (the 24th, the Ctrl-C test, is `cfg(unix)`); the end-to-end suite
+again with `DEDUPE_MODEL` pointing at the SSCD model: 23 pass; the
+ignored `purge_then_undo_through_the_bin`, which goes through the real
+Recycle Bin: passes in 0.52 s. `runs/win/logs/test.txt`,
+`test_model.txt`, `test_recycle.txt`.
+
+## The binary on the sample tree
+
+`--doctor` (`doctor.txt`): every line PASS — folder writable, `_milked`
+absent, longest path 119 chars, journal dir
+`C:\Users\ryanf\AppData\Local\dedupe\journal\…`, Recycle Bin reachable
+with 267 items, deep model "expected at …\AppData\Local\dedupe\models\
+sscd_disc_mixup.onnx", ffmpeg found. No `\\?\` anywhere in any output.
+
+`find <sample> . img` (`find_img.txt`, and the live screen the person
+pasted back, at 133 columns): 33 images hashed in 0.1 s; 12 near
+groups, 15 similar, 1 kin. Every `d p q fit` value equals the Linux run
+on the same files: mirror `d 0 p 0 q 0 mirror`, the 75 % export `q 4`,
+the EXIF-stripped copy `q 0`, the next frame `kin … taken 2021-03-04
+05:06:08` with the original as keeper (shared moment), `board_rot90`
+`q 6 rot 90`, `basketball1~2` `d 4 p 2 q 22`, `Blender_Suzanne` `q 24
+mirror`, `lena~lena_tmpl` `q 44 fit 0.80`, the chessboard poses `q 76
+fit 0.45` and `q 102 fit 0.31`. The pasted screen shows the `━ ─ ×`
+glyphs rendered in a code-page-437 console: Rust's console path writes
+UTF-16 to a console handle, so the code page does not reach the glyphs.
+The colour was not confirmed (the person pasted text, not a picture).
+
+With the model (`find_img_model.txt`): `+deep` on the DECODE line,
+0.8 s for 33 embeddings, `2 added by deep` — the letterboxed baboon
+(`d 15 p 10 q 102 deep 0.80 fit 1.00`) and the 80 % crop of the fruit
+bowl (`d 24 p 22 q 142 deep 0.81 fit 1.00 crop 80%`), both missed by
+the hashes, both admitted by the descriptor and confirmed by the fit, so
+both act. `lena_tmpl` `deep 0.67` and the chessboard poses `deep 0.60 /
+0.69` stay below the descriptor's bar as on Linux.
+
+`find <sample> . vid` (`find_vid.txt`): 6 videos, 5,671 frames at 15 fps
+in 1.2 s; one group of five — re-encode `tmk 1.00`, pillarboxed export
+`tmk 1.00 bars`, trim `d 7 p 12 q 52 tmk 0.85 trim`, the byte copy; the
+unrelated clip alone. Same numbers as Linux.
+
+`purge <sample> .` (`purge.txt`, `purge_undo.txt`, `tree_before.txt`,
+`tree_after_purge.txt`, `tree_after_purge_undo.txt`, `purge_roundtrip
+.txt`): 15 `binned~` (12 images, 3 videos), 4 `kept~` with their
+reasons (`PDQ q 44 over 31; fit 0.80 under 0.92`, the two poses,
+`frames q 52 over 31; TMK 0.85 under 0.9` for the trim). `--undo
+<sample>`: `15 restored   19.3 MB back in place   journal
+20261109-101131`, each line `from Recycle Bin`. SHA-256 of all 39 files
+before and after: identical. A second `--undo`: `nothing to undo under
+C:\github\dedupify\runs\win\sample`. The journal lives at
+`…\AppData\Local\dedupe\journal\<root hash>\20261109-101131.json`
+(`journal_dir.txt`).
+
+`find <sample> img vid` → `one kind at a time  img  and  vid   (leave both
+out for everything)`, exit 1; `find C:\no\such\folder` → `folder not
+found`, exit 1 (`err_two_kinds.txt`, `err_missing.txt`). `--help` fits
+100 columns (`help.txt`).
+
+## What the exact tier found, and why
+
+Every exact-tier run reports `6 share a size   0 share a sample   no
+duplicates`, so `milk` moved nothing and its round trip is vacuous. The
+three pairs meant as byte copies were not byte copies when they reached
+the machine: the transfer path that carried the sample files embeds a
+C2PA content-credentials manifest (a JUMBF `c2pa` segment with a unique
+`urn:c2pa:` id, +5,771 bytes) into each media file it moves, so
+`starry_night.jpg` and `starry_night (1).jpg` arrived 302,901 → 308,672
+bytes and differing from byte 21 on; the `.ps1` beside them arrived
+byte-identical. `dedupe` reported the truth about the files it was given.
+The exact tier on Windows is covered by the end-to-end suite above (its
+fixtures are written on the machine) and by the Recycle Bin round trip;
+the sample's copies have since been replaced with true copies on the
+machine, so the next run shows the three `GROUP`s.
+
+## Closed and open
+
+Closed: Windows execution — build, suite, deep tier through tract,
+ffmpeg through `std::process::Command`, EXIF capture moments, the
+Recycle Bin round trip, the `_milked` and journal paths, `\\?\` stripping,
+glyphs in a code-page-437 console, exit codes.
+
+Not verified here:
+
+- Colour in the Windows console (`crossterm::ansi_support`): no picture
+  of the screen was taken.
+- The exact tier on this sample (see above); verified on Windows by the
+  suite's fixtures only.
+- Interrupt handling on Windows: the Ctrl-C test is `cfg(unix)`; the
+  `ctrlc` handler is installed but was not exercised.
+- Bars that are not black; long all-intra files; the capture-moment rule
+  on a camera roll (carried).

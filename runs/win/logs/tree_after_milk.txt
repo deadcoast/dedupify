@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 \clips\tree.avi  1256452
 \clips\vtest - Copy.avi  8137462
 \clips\vtest.avi  8137462
@@ -37,3 +38,44 @@
 \photos\shot_a.jpg  549068
 \photos\shot_b.jpg  662771
 \photos\starry_night.jpg  308672
+=======
+\clips\tree.avi  1256452
+\clips\vtest - Copy.avi  8137462
+\clips\vtest.avi  8137462
+\clips\vtest_pillars.mp4  4503872
+\clips\vtest_trim30.mp4  1696094
+\clips\vtest_x264.mp4  4542864
+\photos\aloeL.jpg  320840
+\photos\baboon.jpg  185691
+\photos\basketball1.png  138596
+\photos\basketball2.png  138533
+\photos\Blender_Suzanne1.jpg  31186
+\photos\Blender_Suzanne2.jpg  31188
+\photos\board.jpg  127368
+\photos\butterfly.jpg  50517
+\photos\castle.jpg  171440
+\photos\exports\baboon_letterbox.png  633362
+\photos\exports\board_rot90.jpg  172459
+\photos\exports\butterfly_small.jpg  24052
+\photos\exports\castle_q60.jpg  53941
+\photos\exports\fruits_crop80.jpg  48865
+\photos\exports\graf1_mirror.png  984133
+\photos\exports\home-copy.jpg  37968
+\photos\exports\shot_a_export.jpg  234568
+\photos\exports\shot_a_stripped.jpg  401657
+\photos\exports\starry_night (1).jpg  308672
+\photos\fruits.jpg  88200
+\photos\graf1.png  957210
+\photos\graf3.png  981862
+\photos\home.jpg  37968
+\photos\lena.jpg  97585
+\photos\lena_tmpl.jpg  85238
+\photos\right01.jpg  32843
+\photos\right06.jpg  33620
+\photos\right09.jpg  31686
+\photos\rubberwhale1.png  366683
+\photos\rubberwhale2.png  366855
+\photos\shot_a.jpg  549068
+\photos\shot_b.jpg  662771
+\photos\starry_night.jpg  308672
+>>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4

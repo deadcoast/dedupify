@@ -1,3 +1,4 @@
+<<<<<<< HEAD
  dedupe find  C:\github\dedupify\runs\win\sample\photos  this folder  all kinds
  --------------------------------------------------------------------------------------------------
  SCAN   ==============================  23 files   5.53 MB   0.0 s
@@ -6,3 +7,13 @@
  no duplicates   23 files   5.53 MB checked
  near   dedupe find C:\github\dedupify\runs\win\sample\photos img   
 exit 0  0 s
+=======
+ dedupe find  C:\github\dedupify\runs\win\sample\photos  this folder  all kinds
+ --------------------------------------------------------------------------------------------------
+ SCAN   ==============================  23 files   5.53 MB   0.0 s
+ SIZE   ==============================  0 share a size
+ --------------------------------------------------------------------------------------------------
+ no duplicates   23 files   5.53 MB checked
+ near   dedupe find C:\github\dedupify\runs\win\sample\photos img   
+exit 0  0 s
+>>>>>>> cffd9838069d4a0dd5b4b64a0a702830d89910c4
