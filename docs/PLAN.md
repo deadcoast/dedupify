@@ -198,6 +198,44 @@ operational experience; this phase builds it.
   `script(1)`).
 - Not changed: the matching engine, the thresholds, the journal.
 
+## Phase 9 — the workspace, deep   ← planned (from IDENTIFIED 2026-11-09)
+
+The result workspace becomes where all decisions happen: per-group and
+per-member selection, several changes per sitting, a look at the file
+before deciding, long results navigable; the doc set made coherent.
+Items: SHELVED.md § Phase 9.
+
+## Phase 10 — formats and filesystems   ← planned
+
+Phone and camera files decode (HEIC/HEIF/AVIF via ffmpeg, RAW previews);
+`milk` survives volume boundaries; Windows-only paths (Ctrl-C, colour)
+verified; doctor covers the new failure modes. Items: SHELVED.md § Phase 10.
+
+## Phase 11 — matching depth   ← planned
+
+The carried measurement debts and the engine's known misses: robust and
+mirrored fit, non-black bars, the deep threshold and the capture-moment
+rule on real labelled data, provenance-aware keepers. Items: SHELVED.md
+§ Phase 11.
+
+## Phase 12 — structure and CI   ← planned
+
+The code shaped for what it became: actions/render/video split, a shared
+group interface, typed action errors, a testable workspace state machine,
+CI on Linux and Windows. Items: SHELVED.md § Phase 12.
+
+## Docs chain
+
+```
+[IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
+```
+
+`IDENTIFIED.md` is the review; this plan holds the milestones;
+`SHELVED.md` orders the review's items under the milestones; `TODO.md` is
+the milestone in progress. When TODO is done, the next milestone comes
+from SHELVED; when every milestone here is delivered, a new IDENTIFIED
+pass runs.
+
 ## Standing rules
 
 - No cache, index or lock file is ever written on a scan.
