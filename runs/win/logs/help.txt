@@ -1,0 +1,27 @@
+ dedupe  the deduplifier
+ --------------------------------------------------------------------------------------------------
+ dedupe <command> [PATH] [.] [img|vid] [flags]
+
+ find    see every duplicate group, change nothing
+ milk    move duplicates into PATH\_milked
+ purge   verify bytes, then send duplicates to the Recycle Bin
+ doctor  check terminal, folder, journal, Recycle Bin, ffmpeg, model
+
+ PATH    root folder                         default: here
+ .       include subfolders                  default: this folder only
+ img     images only; adds near-duplicate matching
+ vid     videos only; adds near-duplicate matching (ffmpeg)
+
+ -n  --dry-run       show what would change, change nothing
+ -q  --quick-search  size + 64 KiB samples only, no full hash
+ -u  --undo          reverse the last milk or purge under PATH
+ -dr --doctor        same as the doctor command
+ -h  --help          this page
+
+ dedupe  with nothing after it opens the workflow menu
+ keep    oldest copy stays; shallower, then shorter name breaks ties
+ ctrl-c  during milk or purge stops after the file in hand; undo still works
+ journal written only when milk or purge changes something
+ --------------------------------------------------------------------------------------------------
+ * find and dry runs never write; purge never hard-deletes
+exit 0  0 s

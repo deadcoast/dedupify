@@ -123,7 +123,9 @@ first it scores 1.00.
 - The deep tier's threshold was set on procedural pictures; on real
   photographs it has been run (Phase 4 fixture, Phase 6 real set) but
   not measured against a labelled set of real copies.
-- Windows execution is type-checked only.
+- Colour in the Windows console and Ctrl-C on Windows: the Windows run
+  (Phase 7) covered build, suite, deep tier, Recycle Bin round trip and
+  the listings, not those two.
 - Bars that are not black: the bar pass sees luma under 24 only.
 
 Each of these is listed in `docs/VERIFICATION.md` under the phase that

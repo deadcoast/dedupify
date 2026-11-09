@@ -161,6 +161,9 @@ changed:
   at 0.738; with the bars found it scores 1.00 and the clip's nine
   exports are one group. The video keeper counts the picture's pixels,
   not the file's, and at a tie keeps the file without bars
+- Windows execution on the author's machine (`runs/win/`): build, 79 +
+  23 tests, the suite with the model, the real Recycle Bin round trip,
+  and every command on a sample tree with the same numbers as Linux
 
 ## Standing rules
 

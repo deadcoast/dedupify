@@ -1,0 +1,63 @@
+ dedupe find  C:\github\dedupify\runs\win\sample  recursive  images
+ --------------------------------------------------------------------------------------------------
+ SCAN   ==============================  33 files   8.29 MB   0.0 s
+ SIZE   ==============================  4 share a size
+ SAMPLE ==============================  0 share a sample   330 KB
+ HASH   ==============================  0 confirmed   0 B   0.0 s
+ DECODE ==============================  33 images hashed   +deep   0.8 s
+ MATCH  ==============================  22 similar pairs   2 added by deep   32 images grouped
+
+ NEAR 001   1 similar   935 KB reclaimable
+   keep  photos\ex...f1_mirror.png  961 KB   2026-11-09
+   near  photos\graf1.png           935 KB   d  0  p  0  q   0  deep 0.94  mirror
+ NEAR 002   3 similar  +1 kin   935 KB reclaimable
+   keep  photos\shot_a.jpg          536 KB   2026-11-09
+   near  photos\ex..._a_export.jpg  229 KB   d  0  p  0  q   4  deep 1.00
+   near  photos\aloeL.jpg           313 KB   d  0  p  0  q   0  deep 1.00
+   near  photos\ex..._stripped.jpg  392 KB   d  0  p  0  q   0  deep 1.00
+   kin   photos\shot_b.jpg          647 KB   d  1  p  2  q   4  deep 0.95  taken 2021-03-04 05:06:08
+ NEAR 003   1 similar   358 KB reclaimable
+   keep  photos\rubberwhale1.png    358 KB   2026-11-09
+   near  photos\rubberwhale2.png    358 KB   d  1  p  0  q   8  deep 0.99
+ NEAR 004   1 similar   301 KB reclaimable
+   keep  photos\ex...night (1).jpg  301 KB   2026-11-09
+   near  photos\starry_night.jpg    301 KB   d  0  p  0  q   0  deep 1.00
+ NEAR 005   1 similar   181 KB reclaimable
+   keep  photos\ex...letterbox.png  619 KB   2026-11-09
+   near  photos\baboon.jpg          181 KB   d 15  p 10  q 102  deep 0.80  fit 1.00
+ NEAR 006   1 similar   168 KB reclaimable
+   keep  photos\board.jpg           124 KB   2026-11-09
+   near  photos\ex...ard_rot90.jpg  168 KB   d  0  p  0  q   6  deep 0.80  rot 90
+ NEAR 007   1 similar   135 KB reclaimable
+   keep  photos\basketball1.png     135 KB   2026-11-09
+   near  photos\basketball2.png     135 KB   d  4  p  2  q  22  deep 0.95
+ NEAR 008   1 similar   52.7 KB reclaimable
+   keep  photos\castle.jpg          167 KB   2026-11-09
+   near  photos\ex...astle_q60.jpg  52.7 KB  d  0  p  0  q   0  deep 0.98
+ NEAR 009   1 similar   47.7 KB reclaimable
+   keep  photos\fruits.jpg          86.1 KB  2026-11-09
+   near  photos\ex...ts_crop80.jpg  47.7 KB  d 24  p 22  q 142  deep 0.81  fit 1.00  crop 80%
+ NEAR 010   1 similar   37.1 KB reclaimable
+   keep  photos\ex...home-copy.jpg  37.1 KB  2026-11-09
+   near  photos\home.jpg            37.1 KB  d  0  p  0  q   0  deep 1.00
+ NEAR 011   1 similar   30.5 KB reclaimable
+   keep  photos\Bl..._Suzanne1.jpg  30.5 KB  2026-11-09
+   near  photos\Bl..._Suzanne2.jpg  30.5 KB  d  1  p  0  q  24  deep 0.88  mirror
+ NEAR 012   1 similar   23.5 KB reclaimable
+   keep  photos\butterfly.jpg       49.3 KB  2026-11-09
+   near  photos\ex...fly_small.jpg  23.5 KB  d  0  p  0  q   4  deep 0.98
+ NEAR 013   1 similar   0 B reclaimable
+   keep  photos\lena.jpg            95.3 KB  2026-11-09
+   near  photos\lena_tmpl.jpg       83.2 KB  d  3  p 12  q  44  deep 0.67  fit 0.80
+ NEAR 014   2 similar   0 B reclaimable
+   keep  photos\right01.jpg         32.1 KB  2026-11-09
+   near  photos\right06.jpg         32.8 KB  d 10  p 12  q  76  deep 0.60  fit 0.45
+   near  photos\right09.jpg         30.9 KB  d 10  p 12  q 102  deep 0.69  fit 0.31
+ --------------------------------------------------------------------------------------------------
+ no exact duplicates   33 files   8.29 MB checked
+ 1 kin   taken at a different moment: another photograph, left alone
+ 14 near groups   17 similar   3.13 MB reclaimable
+   keep: shared moment, most matched, then most pixels
+ next   dedupe milk C:\github\dedupify\runs\win\sample . img   move duplicates into _milked
+        dedupe purge C:\github\dedupify\runs\win\sample . img  send duplicates to the Recycle Bin
+exit 0  1 s
