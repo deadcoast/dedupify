@@ -59,7 +59,7 @@ impl Kind {
     }
 }
 
-fn has_ext(path: &Path, set: &[&str]) -> bool {
+pub(crate) fn has_ext(path: &Path, set: &[&str]) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
         Some(e) => {
             let e = e.to_ascii_lowercase();

@@ -1523,3 +1523,323 @@ feature. Binary 25,943,800 bytes.
   swap; driven here on a near group only.
 - Colour of the words column (info for members that stay, plain for
   members that act): judged from the plain output.
+
+---
+
+# VERIFICATION — Phase 9 (the workspace, deep), run on 2026-11-09
+
+Same environment (Linux 6.18, rustc 1.97.0, ffmpeg 6.1.1). The sample
+tree of the Windows run (39 files; see Phase 8), copied fresh before each
+sitting, its SHA-256 list taken first. Every terminal session below ran
+through a pseudo-terminal and was rendered by a small VT renderer written
+for this (cursor moves, line and screen clears, the alternate screen;
+colour ignored, `NO_COLOR=1`), because installing a terminal emulator
+library was refused in this environment. The screens are its dumps,
+unedited except for cutting.
+
+## 1. One doc set (SC-01, SC-04)
+
+`docs/` holds one `RESEARCH.md` and one `VERIFICATION.md` again (the
+copies were byte-identical, or a prefix); `docs/README.md` indexes the
+set and the IDENTIFIED → SHELVED → TODO chain. A search of every `.md`,
+`.rs`, `.ps1` and `.cmd` file for the numbered names finds one hit:
+IDENTIFIED's own description of the finding. The menu's Find caption
+reads `lists groups, then m milk  p purge  q` (it said `prints groups,
+changes nothing`, untrue since Phase 8).
+
+## 2. The state machine (TECH-03)
+
+`src/workspace/state.rs` holds the cursor, scroll, selection, modes and
+key effects, and composes the screen; it has no terminal in it. Its 8
+unit tests:
+
+- `defaults_select_what_the_program_would_act_on` — the opening
+  selection is exactly what `milk`/`purge` act on; header marks `■ ◧ □`,
+  no mark on the keeper, `·` on kin; the cursor starts on the first file
+  that would be acted on.
+- `a_file_in_two_groups_counts_once` — the keeper of an exact group that
+  stands for it in a near group is counted once (this caught `8
+  selected` over 7 acted on, during the build).
+- `space_toggles_members_groups_and_refuses_the_keeper_and_kin` — per
+  file, per header (anything chosen → nothing; nothing → the confirmed
+  members, or with none the rest by hand), `a`; the keeper and kin refuse
+  with a word; by-hand choices counted.
+- `act_needs_a_selection_and_a_confirmation` — `m`/`p` open a confirm
+  bar, enter acts, any other key backs out; nothing selected → a word,
+  no bar; `u` only after a change.
+- `keeper_view_reveal_target_the_cursor`
+- `relayout_keeps_choices_resets_changed_roles_follows_the_file` — after
+  a keeper change or an action, choices on members whose role did not
+  change survive, changed roles take their default, the cursor stays on
+  its file.
+- `go_to_and_scrolling_keep_the_cursor_visible` — PgDn, `g 25`, `g 99`
+  (`no group 99`), End, Home over 30 groups in a 10-row window.
+- `the_screen_is_exactly_the_terminal_and_fits_its_width` — 20 lines at
+  60, 80 and 120 columns, none wider.
+
+## 3. The workspace on the sample (QOL-01, QOL-02, QOL-04)
+
+`dedupe find <sample> .` at 110 × 30, as it opens:
+
+```
+ dedupe find  /tmp/claude-0/-home-claude/0e…5a47-929e-c4f931c0b548/scratchpad/p9/sample  recursive  all kinds
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ ■ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
+   keep  clips/vtest.avi                                                                         2026-11-09
+▸■ dupe  clips/vtest - Copy.avi
+ ■ GROUP 002   2 copies   296 KB each   296 KB reclaimable
+   keep  photos/starry_night.jpg                                                                 2026-11-09
+ ■ dupe  photos/exports/starry_night (1).jpg
+ ■ GROUP 003   2 copies   31.4 KB each   31.4 KB reclaimable
+   keep  photos/home.jpg                                                                         2026-11-09
+ ■ dupe  photos/exports/home-copy.jpg
+ ■ NEAR 004   1 similar   955 KB reclaimable
+   keep  photos/graf1.png                                       800×640      929 KB   2026-11-09
+ ■ near  photos/exports/graf1_mirror.png                        800×640      955 KB   mirrored
+ ■ NEAR 005   3 similar  +1 kin   918 KB reclaimable
+   keep  photos/shot_a.jpg                                      1282×1110    531 KB   2026-11-09
+ ■ near  photos/exports/shot_a_export.jpg                       961×832      223 KB   resized 75%
+ ■ near  photos/aloeL.jpg                                       1282×1110    308 KB   same picture
+ ■ near  photos/exports/shot_a_stripped.jpg                     1282×1110    387 KB   same picture
+ · kin   photos/shot_b.jpg                                      1282×1110    642 KB   another shot, 05:06:08
+ ■ NEAR 006   1 similar   353 KB reclaimable
+   keep  photos/rubberwhale1.png                                584×388      352 KB   2026-11-09
+ ■ near  photos/rubberwhale2.png                                584×388      353 KB   re-encoded
+ ■ NEAR 007   1 similar   163 KB reclaimable
+   keep  photos/board.jpg                                       640×480      119 KB   2026-11-09
+ ■ near  photos/exports/board_rot90.jpg                         480×640      163 KB   rotated 90°
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 15 selected  19.2 MB                                                                              group 1/14
+   ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to
+ ▸  m milk 15 → _milked  p purge 15 → Recycle Bin  n preview  q quit
+```
+
+15 selected, 19.2 MB: the 15 files and bytes `milk <sample> . --dry-run`
+lists (`15 would move   19.2 MB into _milked`). At 110 columns the
+evidence column (`d 0 p 0 q 0`) has gone, as it does on the listing at
+this width (Phase 8 §2); the words stay.
+
+`g 1 2` shows `▸  go to group 12_  (1-14)  enter go  esc back`; enter
+moves the cursor to `NEAR 012`, the window as far down as the rows allow
+(`group 12/14`):
+
+```
+▸□ NEAR 012   1 similar   0 B reclaimable
+   keep  photos/lena.jpg                                        512×512      89.7 KB  2026-11-09
+ □ near  photos/lena_tmpl.jpg                                   512×512      77.6 KB  similar, unconfirmed
+ □ NEAR 013   2 similar   0 B reclaimable
+   keep  photos/right01.jpg                                     640×480      26.4 KB  2026-11-09
+ □ near  photos/right06.jpg                                     640×480      27.2 KB  similar, unconfirmed
+ □ near  photos/right09.jpg                                     640×480      25.3 KB  similar, unconfirmed
+ ◧ VIDEO 014   3 similar   8.62 MB reclaimable   keeper of GROUP 001
+   keep  clips/vtest.avi                           768×576      1:20    msmpe  7.75 MB  2026-11-09
+ ■ near  clips/vtest_x264.mp4                      768×576      1:20    h264   4.33 MB  re-encoded
+ ■ near  clips/vtest_pillars.mp4                   960×576      1:20    h264   4.29 MB  pillarboxed
+ □ near  clips/vtest_trim30.mp4                    768×576      0:30    h264   1.61 MB  similar, unconfirmed
+```
+
+Space on `lena_tmpl.jpg` (unconfirmed: PDQ q 44, fit 0.80):
+
+```
+▸■ near  photos/lena_tmpl.jpg                                   512×512      77.6 KB  similar, unconfirmed
+ ...
+ 16 selected  19.3 MB  1 by hand                             by hand: nothing but your look confirms this one
+ ▸  m milk 16 → _milked  p purge 16 → Recycle Bin  n preview  q quit
+```
+
+Space on the kin line says `another shot: a different photograph, never
+moved` and changes nothing; `k` on a keeper says `already the keeper`.
+`p` shows `▸  purge 16 → Recycle Bin, 19.3 MB, 1 by hand  enter go  esc
+back`; enter leaves the groups screen and acts on the main screen:
+
+```
+ dedupe purge /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample .
+
+ VERIFY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  3 verified byte for byte
+ binned    clips/vtest - Copy.avi
+ binned    photos/exports/starry_night (1).jpg
+ binned    photos/exports/home-copy.jpg
+ binned~   photos/exports/graf1_mirror.png                                        mirrored  d  0  p  0  q   0
+ ...
+ binned~   photos/exports/butterfly_small.jpg                                  resized 50%  d  0  p  0  q   4
+ binned~   photos/lena_tmpl.jpg                    similar, unconfirmed  d  3  p 12  q  44  fit 0.80  by hand
+ binned~   clips/vtest_x264.mp4                                        re-encoded  d  0 p  0  q   0  tmk 1.00
+ binned~   clips/vtest_pillars.mp4                                    pillarboxed  d  0 p  0  q   0  tmk 1.00
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ 16 binned   19.3 MB to the Recycle Bin   journal 20261109-173329
+ ~ confirmed near duplicate, not a byte copy
+   (images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)
+ 1 by hand: chosen in the workspace, confirmed by your look, not by a second family
+ undo   dedupe --undo /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample
+
+ ▸  enter back to the groups (3 left)  u undo it  q quit
+```
+
+`u` printed `dedupe --undo <sample>`, the journal line and 16 `restored …
+from Recycle Bin`, `16 restored   19.3 MB back in place`, then `▸  enter
+back to the groups  q quit`; enter showed all 14 groups again, the cursor
+on the file it was on. The SHA-256 list of the tree after the sitting
+equals the one before (39 files).
+
+**Two changes in one sitting**, at 100 × 24 on a fresh copy. `g 5`, down
+twice, `k` on `shot_a_export.jpg`:
+
+```
+ ■ NEAR 005   3 similar  +1 kin   1.20 MB reclaimable
+▸  keep  photos/exports/shot_a_export.jpg             961×832      223 KB   2026-11-09
+ ■ near  photos/shot_a.jpg                            1282×1110    531 KB   resized 133%
+ ■ near  photos/aloeL.jpg                             1282×1110    308 KB   resized 133%
+ ■ near  photos/exports/shot_a_stripped.jpg           1282×1110    387 KB   resized 133%
+ · kin   photos/shot_b.jpg                            1282×1110    642 KB   another shot, 05:06:08
+ ...
+ 15 selected  19.5 MB                                        new keeper; the group re-related to it
+```
+
+`n` printed the fifteen `would` lines under `dedupe milk <sample> .
+--dry-run` (now `shot_a.jpg  resized 133%` among them) and `▸  enter back
+to the groups  q quit`. Space on the `NEAR 004` header cleared the group
+(`□`, `14 selected  18.6 MB`). `m`, enter: `14 moved   18.6 MB into
+_milked`, bar `enter back to the groups (5 left)`. Back, the five groups
+left were renumbered from 1, nothing selected, and the bar read `▸  u
+undo  q quit`. Space on the header of the group holding only
+`lena_tmpl.jpg` chose it by hand (`1 selected  77.6 KB  1 by hand`); `p`,
+enter: `1 binned   77.6 KB` with `by hand` on its line and the by-hand
+footer. Then:
+
+- `u` reversed the purge only: `journal 20261109-173830   dedupe purge
+  /tmp/claude-…e-c4f931c0b548/scratchpad/p9/sample .   1 entry`, `1
+  restored`; back, 5 groups, `lena_tmpl.jpg` listed again and not
+  chosen.
+- `u` again reversed the milk: `14 restored   18.6 MB back in place`;
+  back, 14 groups as they stood before it — `shot_a_export.jpg` still the
+  keeper, `NEAR 004` still cleared, `14 selected  18.6 MB`.
+- `q`: nothing left changed, so the `next` lines were printed.
+
+The tree's SHA-256 list after equals the one before; `_milked` is gone.
+A by-hand choice is not re-armed when the change it went into is undone
+(its member comes back as a new line, off); every other choice survives.
+
+## 4. View and reveal (NF-03, NF-04)
+
+`DEDUPE_GRAPHICS=sixel`, 110 × 30, `g 4`, down twice, `v` on
+`graf1_mirror.png`. The raw bytes hold two sixel images; decoded back to
+pixels they are the keeper and the mirror, 477 × 382 each (85 and 84
+palette colours): 800 × 640 fitted into half the width less 2 cells (53
+cells × 9 px) by the rows less 7 (23 × 18 px). The pseudo-terminal
+reports no pixel size, so the 9 × 18 cell was used. After the pictures:
+`keep  photos/graf1.png` at row 27 column 2, `near
+photos/exports/graf1_mirror.png` at column 57, `mirrored` under it, and
+`▸  any key back  o reveal the member` on the last row; a key redrew the
+groups.
+
+With `DEDUPE_GRAPHICS=none`, `v` started the system viewer (`xdg-open`
+here) for both files and the status line said `opening both in the
+system viewer (no inline graphics here)`; `o` said `opening in the file
+manager`. The program can only know that the viewer or file manager
+started, and the words say only that; whether a window appeared is not
+visible here (no display).
+
+## 5. Again and the undo picker (QOL-03, QOL-05)
+
+After the sittings, the app directory (`DEDUPE_JOURNAL_DIR` here) holds
+`recent.json`:
+
+```
+{
+  "root": "/tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample",
+  "recurse": true,
+  "kind": ""
+}
+```
+
+and the bare `dedupe` menu opens on it:
+
+```
+ ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+ ┃  WORKFLOW                                                    ┃
+ ┃  ▸ again   /tmp/claude-0/-home-…b548/scratchpad/p9/sample  . ┃
+ ┃    find    list duplicates, then decide                      ┃
+ ┃    milk    move duplicates into _milked                      ┃
+ ┃    purge   send duplicates to the Recycle Bin                ┃
+ ┃    undo    reverse the last change                           ┃
+ ┃    doctor  check this terminal, folder and tools             ┃
+ ┃                                                              ┃
+ ┃  ↑↓ move   enter select   q quit                             ┃
+ ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```
+
+Enter ran `find <sample> .` and opened the workspace on its 14 groups.
+The end-to-end test `find_reports_groups_and_stages` now also reads
+`recent.json` after a plain `find .` (root, `recurse`, kind).
+
+Two pending changes under one root (`milk <sample> . vid`, then `milk
+<sample> . img`, piped), then `dedupe --undo <sample>` at 100 × 24:
+
+```
+ dedupe --undo  /tmp/claude-0/-home-claude/0e0fc6…-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample
+ ──────────────────────────────────────────────────────────────────────────────────────────────────
+ 2 changes to reverse under /tmp/claude-0/-home-cla…c4f931c0b548/scratchpad/p9/sample, newest first
+
+   1  2026-11-09 09:40  dedupe milk /tmp/claude-0…931c0b548/scratchpad/p9/sample . img   12 entries
+   2  2026-11-09 09:40  dedupe milk /tmp/claude-0…f931c0b548/scratchpad/p9/sample . vid   3 entries
+
+ ▸  2_  1-2  enter the newest  esc leave
+```
+
+`2`, enter reversed the older change: its journal is consumed, the img
+journal still pending, the three clips back out of `_milked`. A plain
+`--undo` then reversed the img milk (`12 restored   2.87 MB back in
+place`); the SHA-256 list equals the start. The picker's output after
+enter was read from the raw bytes (journal line, `restored` lines, `3
+restored   16.4 MB back in place` on a repeat run); the renderer's own dump
+lost it to the pseudo-terminal closing as the program exited.
+
+## 6. Found while verifying, fixed
+
+- **VIDEO reclaimable counted unconfirmed members.** `VIDEO 014` read
+  `10.2 MB reclaimable` while `milk` moves 8.62 MB from it — the 1.61 MB
+  trim is `similar, unconfirmed` and stays. The video header summed
+  every member since the video pass was written; NEAR headers always
+  counted confirmed members only. Now the same rule: `8.62 MB` (screen in §3). The Phase 8
+  screen above (`10.2 MB`) is the old behaviour.
+- **The `--undo` journal line overflowed** under a long root (110
+  columns: `…/scratc` / `hpad/p9/sample .   16 entries` on two lines). The
+  recorded command now shortens in the middle (§3); the `undo` hint,
+  which is meant to be copied, stays whole.
+- **Three end-to-end tests asserted the journal folder did not exist**
+  after `find` and dry runs; `recent.json` is now written there by
+  design. They assert no journal file instead, and the `find` test checks
+  the record.
+- The viewer and reveal notes said `opened` / `shown in`; they say
+  `opening` now (above).
+
+## Suite
+
+`cargo test --release`: 97 unit tests (15 new: 8 for the state machine,
+4 for the preview — protocol from the environment, base64 against RFC
+4648, sixel bands and runs, fit — 1 for `recent`, 1 for the menu's
+`again`, 1 for the date arithmetic behind the picker's local times) and
+25 end-to-end tests pass (the pseudo-terminal session rewritten for the
+workspace: keys `n ⏎ m ⏎ u q`, the dry run, the move, the undo, the tree
+restored); with `DEDUPE_MODEL` set the 25 pass; with
+`--no-default-features` 95 + 25. `cargo clippy --all-targets --release`
+clean in both feature sets, `cargo fmt --check` clean. Windows
+(`x86_64-pc-windows-msvc`): `cargo check --all-targets` with and without
+the deep feature and `cargo clippy --all-targets` pass, so the
+`cfg(windows)` paths (`explorer.exe` with a raw `/select,"…"` argument)
+compile. Binary 26,510,992 bytes.
+
+## Not verified here
+
+- Any of it on Windows: the key loop (crossterm, as the menu), sixel in
+  Windows Terminal, `explorer.exe /select,"…"` for `o`, `explorer.exe`
+  opening a file for `v` without graphics. `RUN_VERIFY.cmd` ends on a
+  live `find` whose workspace is the person's to press.
+- kitty and iTerm2 pictures: never displayed; the shared base64 is
+  unit-tested against the RFC 4648 vectors, the escape framing is not.
+- The cell size: Windows Terminal may report no pixel size, in which case
+  pictures are sized for a 9 × 18 cell and can come out larger or smaller
+  than half the screen.
+- `v` on a video (the frame a third of the way in) and on an exact pair:
+  code paths present, not driven here.
+- A resize during a sitting (handled as an event; not driven).

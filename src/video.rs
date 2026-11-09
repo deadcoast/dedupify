@@ -1144,10 +1144,14 @@ impl VideoGroup {
         }
     }
 
+    /// Bytes `milk`/`purge` act on: confirmed members only, as for near
+    /// groups. (Through Phase 8 this summed every member, so a trim the
+    /// rule leaves in place was counted as reclaimable.)
     pub fn reclaimable(&self) -> u64 {
         self.members
             .iter()
             .skip(1)
+            .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
             .map(|m| m.hashed.rep.cand.size)
             .sum()
     }

@@ -64,6 +64,8 @@ pub mod menu;
 pub mod near;
 pub mod pdq;
 pub mod perceptual;
+pub mod preview;
+pub mod recent;
 pub mod render;
 pub mod theme;
 pub mod util;

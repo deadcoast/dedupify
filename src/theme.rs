@@ -59,6 +59,11 @@ pub struct Glyphs {
     pub le: &'static str,    // ≤
     pub ge: &'static str,    // ≥
     pub times: &'static str, // ×
+    // workspace selection marks, one cell each
+    pub sel_on: &'static str,   // acted on
+    pub sel_off: &'static str,  // could be, is not
+    pub sel_part: &'static str, // a group with some members chosen
+    pub sel_lock: &'static str, // never (another capture moment)
 }
 
 pub const UNICODE: Glyphs = Glyphs {
@@ -80,6 +85,10 @@ pub const UNICODE: Glyphs = Glyphs {
     le: "≤",
     ge: "≥",
     times: "×",
+    sel_on: "■",
+    sel_off: "□",
+    sel_part: "◧",
+    sel_lock: "·",
 };
 
 pub const ASCII: Glyphs = Glyphs {
@@ -101,6 +110,10 @@ pub const ASCII: Glyphs = Glyphs {
     le: "<=",
     ge: ">=",
     times: "x",
+    sel_on: "x",
+    sel_off: ".",
+    sel_part: "~",
+    sel_lock: "-",
 };
 
 #[derive(Debug, Clone, Copy)]

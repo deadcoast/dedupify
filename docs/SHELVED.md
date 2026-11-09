@@ -18,7 +18,7 @@ Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
 
 ---
 
-## Phase 9 — the workspace, deep   `[todo]`
+## Phase 9 — the workspace, deep   `[done]` 2026-11-09 — see PLAN.md § Phase 9, VERIFICATION.md § Phase 9
 
 Order inside the milestone is build order: each item relies on the ones
 above it.
@@ -36,7 +36,7 @@ above it.
 9. **QOL-03** remembered last folder and kind on the bare menu
 10. **QOL-05** undo history: pick which journal to reverse
 
-## Phase 10 — formats and filesystems   `[shelved]`
+## Phase 10 — formats and filesystems   `[todo]`
 
 1. **TECH-01** `decode.rs` owning every decoder
 2. **NF-01** HEIC / HEIF / AVIF through ffmpeg, EXIF from the container

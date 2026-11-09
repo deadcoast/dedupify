@@ -388,14 +388,34 @@ impl Progress for LiveProgress {
 
 pub struct Renderer {
     pub theme: Theme,
+    /// When set, lines go here instead of to stdout (the workspace
+    /// captures the listing to show it in its own screen).
+    sink: Option<std::cell::RefCell<Vec<String>>>,
 }
 
 impl Renderer {
     pub fn new(theme: Theme) -> Renderer {
-        Renderer { theme }
+        Renderer { theme, sink: None }
+    }
+
+    /// Run `f` against a renderer `width` cells wide whose lines are
+    /// collected instead of printed.
+    pub fn capture(&self, width: usize, f: impl FnOnce(&Renderer)) -> Vec<String> {
+        let mut theme = self.theme;
+        theme.width = width;
+        let r = Renderer {
+            theme,
+            sink: Some(std::cell::RefCell::new(Vec::new())),
+        };
+        f(&r);
+        r.sink.map(|s| s.into_inner()).unwrap_or_default()
     }
 
     pub fn line(&self, s: &str) {
+        if let Some(sink) = &self.sink {
+            sink.borrow_mut().push(s.to_string());
+            return;
+        }
         let mut out = io::stdout().lock();
         let _ = writeln!(out, "{s}");
     }

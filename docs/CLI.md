@@ -10,7 +10,7 @@ design is silent or in conflict; each one is reversible.
 ```
 dedupe                                   interactive workflow menu
 dedupe <command> [PATH] [.] [img|vid]    native command
-dedupe --undo | -u  [PATH]               reverse the last change under PATH
+dedupe --undo | -u  [PATH]               reverse a change under PATH (several pending: choose)
 dedupe doctor | --doctor | -dr [PATH]    troubleshooting suite
 dedupe --help | -h                       help page
 ```
@@ -81,28 +81,74 @@ so `find . img` could list fifteen near duplicates and `milk .` answer
 
 ### 2a. The result is the workspace **[CLAUDE, under FUOE]**
 
+On a terminal, after `find` prints its stages, groups and totals, the
+same groups open in a screen of their own (the alternate screen; the
+printed listing stays in the scrollback underneath). Phase 8 put a
+one-line bar under the listing; Phase 9 made it this:
+
 ```
- ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  k keeper  q quit
+ dedupe find  C:\Photos  recursive  all kinds
+ ──────────────────────────────────────────────────────────────────────
+ ■ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
+   keep  clips\vtest.avi                                     2026-11-09
+▸■ dupe  clips\vtest - Copy.avi
+ ◧ NEAR 005   3 similar  +1 kin   918 KB reclaimable
+   keep  photos\shot_a.jpg                1282×1110   531 KB   2026-11-09
+ ■ near  photos\exports\shot_a_export.jpg  961×832     223 KB   resized 75%
+ □ near  photos\exports\shot_a_crop.jpg    1100×950    301 KB   similar, unconfirmed
+ · kin   photos\shot_b.jpg                1282×1110   642 KB   another shot, 05:06:08
+ ──────────────────────────────────────────────────────────────────────
+ 15 selected  19.2 MB                                         group 1/14
+   ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to
+ ▸  m milk 15 → _milked  p purge 15 → Recycle Bin  n preview  q quit
 ```
 
-The counts are the files that would move or bin: confirmed members only,
-never a `kept~`, a `kin` or a `deep`-only line. One key each:
+Each line is the listing's own line (words first, evidence dim), two
+cells narrower, with the cursor `▸` and a mark before it:
+
+| mark | meaning |
+|---|---|
+| `■` | will be acted on |
+| `□` | could be, is not: deselected, or grouped and not confirmed (off until chosen) |
+| `◧` | a group with some of its members chosen |
+| `·` | another capture moment: never acted on, not even by hand |
+| (none) | the keeper |
+
+By default the selection is exactly what `milk` and `purge` act on from
+the command line. A person may add an unconfirmed member (`similar,
+unconfirmed`, `looks alike`) by hand: the status line counts it (`2 by
+hand`), its action line says `by hand`, and the action's footer says
+those were confirmed by a look, not by a second family of evidence. The
+standing rule — two families before the program acts — is unchanged; a
+person's look at the two files (`v`) is the second family for the files
+they choose. A file listed in two groups (the keeper of an exact group
+that stands for it in a near group, `+GROUP` on its line) counts once.
 
 | key | what happens |
 |---|---|
-| `m` | confirm bar `milk 12 → _milked, 2.87 MB   enter go   esc back`; enter prints the native command, moves the files on screen (no second scan), the action lines, the totals, the `undo` line |
-| `p` | the same for the Recycle Bin, with the VERIFY stage first — bytes read against the keeper, as `purge` always does |
-| `n` | the `would` lines of `milk --dry-run`, then back to the bar |
-| `k` | `keeper of group (1-12)` — type the group's number as printed; the members are listed `1 keep …`, `2 …`; type the new keeper's number; the group is reprinted with the new keeper and every relation recomputed against it (the geometric fit included where the cheaper evidence leaves the question open) |
-| `u` | after a change: reverse it, right there (the same code as `--undo`) |
-| `q` / esc / Ctrl-C | leave; before a change, the `next` lines are printed so the typed forms sit in the scrollback |
+| `↑` `↓`, PgUp PgDn, Home End | move the cursor; the window scrolls, and a group's header comes into view with its first member |
+| `space` | on a file: choose it or not; on a header: anything chosen → nothing, nothing chosen → the group's confirmed members (or, when it has none, the rest, by hand) |
+| `a` | anything chosen → nothing; nothing chosen → the program's own choice |
+| `k` | on a file: it becomes the group's keeper; the group is re-related to it (the geometric fit included where the cheaper evidence leaves the question open) and reprinted; choices on members whose role did not change are kept |
+| `v` | the keeper beside the file under the cursor, drawn in the terminal (sixel, kitty or iTerm2 graphics; a video shows the frame a third of the way in), with both paths and the file's words; any key back, `o` reveals the member. Where the terminal draws no pictures, both files open in the system viewer |
+| `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
+| `g` | type a group's number, enter: the group at the top of the window |
+| `n` | the `would` lines of `milk --dry-run` for the selection, on the main screen, under the native command; enter comes back |
+| `m` / `p` | a confirm bar, `milk 12 → _milked, 2.87 MB, 2 by hand   enter go   esc back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit` |
+| `u` | reverse the newest change of this sitting (its own journal, by id), restore its groups, and come back; changes stack, so `u` again reverses the one before |
+| `q` / esc / Ctrl-C | leave; when nothing was changed, the `next` lines are printed so the typed forms sit in the scrollback |
 
-Raw mode is held only while a key is awaited; everything printed between
-keys goes through the ordinary renderer, so the listing above the bar is
-the listing a pipe would see. After `m` or `p` the bar offers `u undo` and
-`q quit` only — one change per sitting, reversed or kept. The bar never
-wraps: when it would, each part keeps its first two words
-(`milk 12 → _milked` → `milk 12`), then its first.
+Graphics: the protocol comes from the environment — kitty and Ghostty →
+kitty graphics; iTerm2 and WezTerm → iTerm2 inline images; Windows
+Terminal (`WT_SESSION`), foot and mlterm → sixel; otherwise none.
+`DEDUPE_GRAPHICS=sixel|kitty|iterm|none` overrides it. The terminal is
+not queried: a reply would arrive on the same input the keys come from,
+and on Windows crossterm reads console input records, not the reply.
+Sixel pictures use the 216-colour cube with 4 × 4 ordered dithering; the
+cell is taken as the terminal reports it (Unix) or 9 × 18 pixels.
+
+Piped, or with stdin not a terminal, none of this runs: `find` prints
+the `next` lines, as it always has.
 
 ### milk **[SPEC]**
 `find`, then moves every confirmed duplicate into `<root>/_milked/`, created
@@ -320,7 +366,8 @@ native command being run, so every menu session teaches the native form.
 ```
  ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
  ┃  WORKFLOW                                        ┃
- ┃  ▸ find    list duplicates, then decide          ┃
+ ┃  ▸ again   D:\pics  .  img                       ┃
+ ┃    find    list duplicates, then decide          ┃
  ┃    milk    move duplicates into _milked          ┃
  ┃    purge   send duplicates to the Recycle Bin    ┃
  ┃    undo    reverse the last change               ┃
@@ -329,6 +376,12 @@ native command being run, so every menu session teaches the native form.
  ┃  ↑↓ move   enter select   q quit                 ┃
  ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 ```
+
+`again` (Phase 9) **[CLAUDE]**: `find`, `milk` and `purge` record their
+root, scope and kind in `recent.json` beside the journals (never in the
+scanned folder); the menu's first line offers it and enter runs `find`
+there at once — the workspace follows. It is not offered when there is
+no record or its folder is gone.
 
 Steps after a workflow is chosen (undo and doctor skip to confirm):
 
@@ -341,8 +394,14 @@ Steps after a workflow is chosen (undo and doctor skip to confirm):
 step (in FOLDER it is a typed character). When the folder is left as the
 current directory it is omitted from the composed command, so the menu
 runs `dedupe find . img`, not `dedupe find C:\Users\…\Pictures . img`, and
-the `next` lines it prints stay short. The menu never offers more than
-five choices on one screen **[SPEC: no bloat]**.
+the `next` lines it prints stay short. The menu offers five workflows,
+plus `again` when there is a last folder **[SPEC: no bloat]**.
+
+`--undo` with several changes pending under the folder, on a terminal,
+lists them newest first — `1  2026-11-09 08:57  dedupe purge … . vid   3
+entries` — and reverses the one whose number is typed (enter alone: the
+newest; esc: none). Piped, or with one change pending, it reverses the
+newest, as before.
 
 ---
 

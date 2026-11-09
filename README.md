@@ -5,11 +5,14 @@ near-duplicate images (rescaled, re-encoded, mirrored, rotated, cropped,
 letterboxed) and near-duplicate videos (re-encoded, scaled, trimmed,
 mirrored, boxed in black bars; `ffmpeg` and `ffprobe` on PATH), says in
 words what each one is — `resized 50%`, `cropped 80%`, `another shot,
-05:06:08` — and then stays on the result: `m` moves them into `_milked`,
-`p` sends them to the Recycle Bin, `k` changes a keeper, `u` reverses the
-change. Nothing is moved or binned on one family of evidence: the two
-64-bit hashes must be confirmed by PDQ or by the geometric fit, and two
-photographs with different capture moments are shown and left alone.
+05:06:08` — and then opens the result as a workspace: every file marked,
+`space` to choose, `v` to see the keeper beside it in the terminal, `k`
+to change a keeper, `m` to move the chosen into `_milked`, `p` to send
+them to the Recycle Bin, `u` to reverse the last change. Nothing is moved
+or binned on one family of evidence: the two 64-bit hashes must be
+confirmed by PDQ or by the geometric fit (or, in the workspace, by your
+own look, labelled as such), and two photographs with different capture
+moments are shown and left alone.
 `docs/COMPARISON.md` says what here is the standard pipeline and what is
 not.
 

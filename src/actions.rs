@@ -12,14 +12,14 @@ use rayon::prelude::*;
 use crate::cli::{Command, Invocation};
 use crate::exact::{self, Group, PipelineStats, Progress, Stage};
 use crate::interrupt;
-use crate::journal::{self, Entry, Op, Writer};
+use crate::journal::{self, Entry, Journal, Op, Writer};
 use crate::keeper;
 use crate::kind::Kind;
 use crate::near::{self, NearGroup, NearStats, Rep};
 use crate::perceptual;
 use crate::render::{LiveProgress, Renderer};
 use crate::theme::Role;
-use crate::util::{counted, fmt_count, rel_display, under_root, unix_secs};
+use crate::util::{counted, fmt_count, rel_display, shorten_middle, under_root, unix_secs, width};
 use crate::video::{self, VRep, VideoGroup, VideoStats};
 use crate::walk::{self, Candidate, ScanStats};
 use crate::MILKED_DIR;
@@ -32,6 +32,9 @@ pub const EXIT_INTERRUPTED: i32 = interrupt::EXIT_INTERRUPTED;
 
 /// Dispatch. Returns the process exit code.
 pub fn run(inv: &Invocation, r: &Renderer) -> i32 {
+    if matches!(inv.command, Command::Find | Command::Milk | Command::Purge) {
+        crate::recent::record(inv);
+    }
     match inv.command {
         Command::Find => find(inv, r),
         Command::Milk => milk(inv, r),
@@ -43,7 +46,9 @@ pub fn run(inv: &Invocation, r: &Renderer) -> i32 {
 
 /// What one scan found: the exact groups, the near groups, the video
 /// groups and the stage statistics. `find` shows it and then hands it to
-/// the workspace, which acts on it without scanning again.
+/// the workspace, which acts on it without scanning again (and keeps a
+/// copy from before each change, so `u` can put the groups back).
+#[derive(Clone)]
 pub(crate) struct Found {
     pub(crate) groups: Vec<Group>,
     pub(crate) near: Vec<NearGroup>,
@@ -105,36 +110,39 @@ impl Found {
         false
     }
 
-    /// The paths of on-screen group `n`, keeper first; empty when out of range.
-    pub(crate) fn group_paths(&self, n: usize) -> Vec<PathBuf> {
-        if n == 0 {
-            return Vec::new();
+    /// After a change: drop every member no longer on disk, then every
+    /// group left with fewer than two, and renumber the `+GROUP` links the
+    /// near and video members carry to the exact groups that remain.
+    pub(crate) fn prune_missing(&mut self) {
+        let mut renumber: Vec<Option<usize>> = Vec::with_capacity(self.groups.len());
+        let mut next = 0usize;
+        for g in &mut self.groups {
+            g.members.retain(|m| m.path.exists());
+            if g.members.len() >= 2 {
+                renumber.push(Some(next));
+                next += 1;
+            } else {
+                renumber.push(None);
+            }
         }
-        let mut i = n - 1;
-        if i < self.groups.len() {
-            return self.groups[i]
-                .members
-                .iter()
-                .map(|m| m.path.clone())
-                .collect();
+        self.groups.retain(|g| g.members.len() >= 2);
+        let remap = |eg: &mut Option<usize>| {
+            *eg = eg.and_then(|i| renumber.get(i).copied().flatten());
+        };
+        for g in &mut self.near {
+            g.members.retain(|m| m.hashed.rep.cand.path.exists());
+            for m in &mut g.members {
+                remap(&mut m.hashed.rep.exact_group);
+            }
         }
-        i -= self.groups.len();
-        if i < self.near.len() {
-            return self.near[i]
-                .members
-                .iter()
-                .map(|m| m.hashed.rep.cand.path.clone())
-                .collect();
+        self.near.retain(|g| g.members.len() >= 2);
+        for g in &mut self.video {
+            g.members.retain(|m| m.hashed.rep.cand.path.exists());
+            for m in &mut g.members {
+                remap(&mut m.hashed.rep.exact_group);
+            }
         }
-        i -= self.near.len();
-        if i < self.video.len() {
-            return self.video[i]
-                .members
-                .iter()
-                .map(|m| m.hashed.rep.cand.path.clone())
-                .collect();
-        }
-        Vec::new()
+        self.video.retain(|g| g.members.len() >= 2);
     }
 }
 
@@ -385,15 +393,31 @@ pub(crate) struct Item<'a> {
     pub(crate) near_confirmed: Option<bool>,
     pub(crate) near_reason: String,
     pub(crate) hash: String,
+    /// Listed by the report but never acted on by the program's own rule:
+    /// the learned descriptor's word alone. Only a person's choice in the
+    /// workspace can include it (`by_hand`).
+    pub(crate) listed: bool,
+    /// Chosen in the workspace although the program's evidence did not
+    /// confirm it: the person's look is the second family. [CLAUDE]
+    pub(crate) by_hand: bool,
 }
 
 impl Item<'_> {
-    /// Would `milk` move it / `purge` bin it (before byte verification)?
+    /// Would `milk` move it / `purge` bin it on the program's own rule
+    /// (before byte verification)?
     pub(crate) fn actionable(&self) -> bool {
-        self.near_confirmed != Some(false)
+        !self.listed && self.near_confirmed != Some(false)
+    }
+
+    /// Will the action take it: the program's rule, or a person's choice.
+    pub(crate) fn taken(&self) -> bool {
+        self.actionable() || self.by_hand
     }
 }
 
+/// Every member that could be acted on, keepers and other capture moments
+/// excluded. The commands take `default_items` (the program's rule); the
+/// workspace takes the person's selection out of this list.
 pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
     let mut v = Vec::new();
     for g in &f.groups {
@@ -406,6 +430,8 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                 near_confirmed: None,
                 near_reason: String::new(),
                 hash: exact::hex(&g.hash),
+                listed: false,
+                by_hand: false,
             });
         }
     }
@@ -413,10 +439,9 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
         let k = &g.members[0].hashed;
         for m in &g.members[1..] {
             let rel = m.relation.unwrap();
-            if rel.listed_only() {
-                // the learned descriptor's word alone, or another capture
-                // moment: listed by the report, never moved or binned
-                // (docs/RESEARCH.md §2.6, §2.8)
+            if rel.kin {
+                // another capture moment: another photograph, never moved
+                // or binned, by the program or by hand (RESEARCH §2.8)
                 continue;
             }
             // the words first, the evidence after, as on the listing
@@ -437,6 +462,10 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                     m.hashed.sig.dhash[0],
                     crate::pdq::hex(&m.hashed.sig.pdq[0])
                 ),
+                // the descriptor's word alone: listed, acted on only by hand
+                // (RESEARCH §2.6)
+                listed: rel.listed_only(),
+                by_hand: false,
             });
         }
     }
@@ -457,10 +486,34 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                     rel.unconfirmed_reason()
                 },
                 hash: format!("video:{}f:{:.3}", m.hashed.sig.frames, rel.level2),
+                listed: false,
+                by_hand: false,
             });
         }
     }
     v
+}
+
+/// The footer line for items a person chose although the program's own
+/// evidence did not confirm them.
+fn by_hand_note(r: &Renderer, n: u64) {
+    if n > 0 {
+        r.note(
+            Role::Warn,
+            &format!(
+                "{} by hand: chosen in the workspace, confirmed by your look, not by a second family",
+                fmt_count(n)
+            ),
+        );
+    }
+}
+
+/// The items the commands act on without a person in the loop: everything
+/// but the descriptor-only listings (shown on the report, never acted on).
+/// Unconfirmed near duplicates stay in the list so the action prints them
+/// as `kept~` with their reason.
+pub(crate) fn default_items(f: &Found) -> Vec<Item<'_>> {
+    items(f).into_iter().filter(|it| !it.listed).collect()
 }
 
 /// `dst` with ` (2)`, ` (3)` … inserted before the extension until free.
@@ -526,13 +579,15 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
         return EXIT_OK;
     }
     r.blank();
-    act_milk(&f, inv, r, inv.dry_run).0
+    let list = default_items(&f);
+    act_milk(&f, &list, inv, r, inv.dry_run).0
 }
 
 /// Move every actionable item of `f` into `_milked` (or say what would
 /// move). Returns the exit code and the journal id when one was written.
 pub(crate) fn act_milk(
     f: &Found,
+    list: &[Item<'_>],
     inv: &Invocation,
     r: &Renderer,
     dry_run: bool,
@@ -550,15 +605,17 @@ pub(crate) fn act_milk(
         interrupt::changing(true);
     }
     let mut kept: Vec<(String, String)> = Vec::new();
-    for it in items(f) {
+    let mut by_hand: u64 = 0;
+    for it in list {
         if !dry_run && interrupt::requested() {
             stopped = true;
             break;
         }
         let rel = rel_display(it.path, &inv.root);
         // a near duplicate nothing confirmed is shown, not moved — the
-        // same evidence rule as purge, reversible or not (RESEARCH §2.7)
-        if it.near_confirmed == Some(false) {
+        // same evidence rule as purge, reversible or not (RESEARCH §2.7) —
+        // unless a person chose it in the workspace
+        if !it.taken() {
             kept.push((rel, it.near_reason.clone()));
             continue;
         }
@@ -586,12 +643,18 @@ pub(crate) fn act_milk(
             }
             detail.push_str(n);
         }
+        if it.by_hand && !it.actionable() {
+            detail.push_str("  by hand");
+        }
         let verb_dry = if it.near.is_some() { "would~" } else { "would" };
         let verb = if it.near.is_some() { "moved~" } else { "moved" };
         if dry_run {
             r.action(verb_dry, Role::Warn, &rel, &detail);
             moved += 1;
             bytes += it.size;
+            if it.by_hand && !it.actionable() {
+                by_hand += 1;
+            }
             continue;
         }
         let res = dst
@@ -604,6 +667,9 @@ pub(crate) fn act_milk(
                 r.action(verb, Role::Ok, &rel, &detail);
                 moved += 1;
                 bytes += it.size;
+                if it.by_hand && !it.actionable() {
+                    by_hand += 1;
+                }
                 w.record(Entry {
                     op: Op::Move {
                         from: it.path.to_path_buf(),
@@ -654,6 +720,7 @@ pub(crate) fn act_milk(
             ),
         );
     }
+    by_hand_note(r, by_hand);
     if failed > 0 {
         r.note(
             Role::Danger,
@@ -684,7 +751,7 @@ pub(crate) fn act_milk(
 fn purge(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
     let f = scan_and_group(inv, r);
-    let list = items(&f);
+    let list = default_items(&f);
     let verified = verify_items(&list, &f.pipe, r);
     report(&f, inv, r);
     if f.empty() {
@@ -707,9 +774,10 @@ pub(crate) fn verify_items(list: &[Item<'_>], pipe: &PipelineStats, r: &Renderer
         .map(|(i, _)| i)
         .collect();
     let total = exact_idx.len() as u64;
+    // a near item is verified by its evidence or by a person's choice
     let mut verified: Vec<bool> = list
         .iter()
-        .map(|it| it.near_confirmed.unwrap_or(false))
+        .map(|it| it.near.is_some() && it.taken())
         .collect();
     if total > 0 {
         lp.tick(Stage::Verify, 0, total);
@@ -778,10 +846,21 @@ pub(crate) fn act_purge(
     let mut failed: u64 = 0;
     let mut stopped = false;
 
+    let detail_of = |it: &Item<'_>| -> String {
+        let mut d = it.near.clone().unwrap_or_default();
+        if it.by_hand && !it.actionable() {
+            d.push_str("  by hand");
+        }
+        d
+    };
+    let by_hand = to_bin
+        .iter()
+        .filter(|&&i| list[i].by_hand && !list[i].actionable())
+        .count() as u64;
     if dry_run {
         for &i in &to_bin {
             let it = &list[i];
-            let detail = it.near.clone().unwrap_or_default();
+            let detail = detail_of(it);
             r.action(
                 if it.near.is_some() { "would~" } else { "would" },
                 Role::Warn,
@@ -808,7 +887,7 @@ pub(crate) fn act_purge(
                 let it = &list[i];
                 let rel = rel_display(it.path, &inv.root);
                 if !it.path.exists() {
-                    let detail = it.near.clone().unwrap_or_default();
+                    let detail = detail_of(it);
                     r.action(
                         if it.near.is_some() {
                             "binned~"
@@ -885,6 +964,7 @@ pub(crate) fn act_purge(
             ),
         );
     }
+    by_hand_note(r, by_hand);
     if failed > 0 {
         r.note(
             Role::Danger,
@@ -914,17 +994,89 @@ pub(crate) fn act_purge(
 
 pub(crate) fn undo(inv: &Invocation, r: &Renderer) -> i32 {
     r.header(inv);
+    // several changes pending under this folder, and a person at the
+    // keyboard: list them and let them choose (QOL-05); otherwise the
+    // newest, as always
+    let pending: Vec<Journal> = journal::list(&inv.root)
+        .map(|v| {
+            v.into_iter()
+                .filter(|(_, j)| !j.consumed)
+                .map(|(_, j)| j)
+                .collect()
+        })
+        .unwrap_or_default();
+    if pending.len() > 1 && r.theme.live && std::io::stdin().is_terminal() {
+        let root_display = inv
+            .root_display
+            .clone()
+            .unwrap_or_else(|| "this folder".to_string());
+        let t = &r.theme;
+        let lead = format!(
+            "{} changes to reverse under ",
+            fmt_count(pending.len() as u64)
+        );
+        let tail = ", newest first";
+        let shown_root = shorten_middle(
+            &root_display,
+            t.width
+                .saturating_sub(width(&lead) + tail.len() + 2)
+                .max(12),
+            t.glyphs.ellipsis,
+        );
+        r.note(Role::Plate, &format!("{lead}{shown_root}{tail}"));
+        r.blank();
+        let digits = pending.len().to_string().len();
+        for (i, j) in pending.iter().enumerate() {
+            let when = crate::util::fmt_stamp_local(&j.created_utc);
+            let n_entries = counted(j.entries.len() as u64, "entry", "entries");
+            // the command is the one thing that can be long: its middle goes
+            let room = t
+                .width
+                .saturating_sub(3 + digits + 2 + width(&when) + 2 + 3 + width(&n_entries) + 1)
+                .max(16);
+            let cmd = shorten_middle(&j.command, room, t.glyphs.ellipsis);
+            r.line(&format!(
+                "   {}  {}  {}   {}",
+                t.paint_bold(Role::Keep, &format!("{:>digits$}", i + 1)),
+                t.paint(Role::Dupe, &when),
+                t.paint(Role::Plate, &cmd),
+                t.paint(Role::Dupe, &n_entries),
+            ));
+        }
+        r.blank();
+        let Some(n) = crate::workspace::pick_number(
+            r,
+            &format!("1-{}  enter the newest  esc leave", pending.len()),
+            pending.len(),
+        ) else {
+            return EXIT_OK;
+        };
+        r.blank();
+        return act_undo_which(inv, r, Some(&pending[n - 1].id));
+    }
     act_undo(inv, r)
 }
 
 /// Reverse the latest pending journal under the root (the workspace's `u`
 /// and the `--undo` command after its header).
 pub(crate) fn act_undo(inv: &Invocation, r: &Renderer) -> i32 {
+    act_undo_which(inv, r, None)
+}
+
+/// Reverse the pending journal `id` under the root, or the newest when
+/// `id` is None (the workspace passes the journal its own change wrote).
+pub(crate) fn act_undo_which(inv: &Invocation, r: &Renderer, id: Option<&str>) -> i32 {
     let root_display = inv
         .root_display
         .clone()
         .unwrap_or_else(|| "this folder".to_string());
-    let (jpath, mut j) = match journal::latest_pending(&inv.root) {
+    let found = match id {
+        None => journal::latest_pending(&inv.root),
+        Some(id) => {
+            journal::list(&inv.root).map(|v| v.into_iter().find(|(_, j)| !j.consumed && j.id == id))
+        }
+    };
+    let (jpath, mut j) = match found {
         Ok(Some(x)) => x,
         Ok(None) => {
             r.note(Role::Dupe, &format!("nothing to undo under {root_display}"));
@@ -949,13 +1101,21 @@ pub(crate) fn act_undo(inv: &Invocation, r: &Renderer) -> i32 {
             return EXIT_FAILED;
         }
     };
+    // what the journal recorded, on one line: a long root shortens the
+    // command in the middle (it describes the change; the line to copy is
+    // the `undo` hint, which stays whole)
+    let lead = format!("journal {}   ", j.id);
+    let tail = format!("   {}", counted(j.entries.len() as u64, "entry", "entries"));
+    let room = r
+        .theme
+        .width
+        .saturating_sub(1 + width(&lead) + width(&tail))
+        .max(16);
     r.note(
         Role::Plate,
         &format!(
-            "journal {}   {}   {}",
-            j.id,
-            j.command,
-            counted(j.entries.len() as u64, "entry", "entries")
+            "{lead}{}{tail}",
+            shorten_middle(&j.command, room, r.theme.glyphs.ellipsis)
         ),
     );
     r.blank();

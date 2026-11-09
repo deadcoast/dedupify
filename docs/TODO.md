@@ -1,34 +1,34 @@
-# TODO — Phase 9: the workspace, deep
+# TODO — Phase 10: formats and filesystems
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 9 · items: `SHELVED.md` § Phase 9 · source:
-`IDENTIFIED.md` (IDs below). Build order top to bottom.
+Milestone: `PLAN.md` § Phase 10 · items: `SHELVED.md` § Phase 10 · source:
+`IDENTIFIED.md` (IDs below). Build order top to bottom. Previous
+milestone: Phase 9, delivered 2026-11-09 (`SHELVED.md` § Phase 9 `[done]`).
 
-- [ ] **SC-01** one coherent doc set — RESEARCH/VERIFICATION layout
-      decided, duplicate removed, 47 stale references fixed
-- [ ] **SC-04** stale strings — menu Find step (`menu.rs:339`) and any
-      other pre-Phase-8 copy
-- [ ] **TECH-03** workspace state machine, unit tests without a pty
-- [ ] **QOL-01** per-group / per-member selection; bar counts follow
-- [ ] **QOL-02** several changes per sitting; `u` reverses the last
-- [ ] **QOL-04** cursor, scroll, `g` jump on long results
-- [ ] **NF-04** `o` reveal in Explorer
-- [ ] **NF-03** in-terminal preview (sixel / kitty), OS-viewer fallback
-- [ ] **QOL-03** remembered last folder and kind on the bare menu
-- [ ] **QOL-05** undo history: choose the journal to reverse
+- [ ] **TECH-01** `decode.rs` owning every decoder
+- [ ] **NF-01** HEIC / HEIF / AVIF through ffmpeg, EXIF from the container
+- [ ] **NF-02** RAW stills through their embedded previews; RAW + JPEG pairs
+- [ ] **CORE-05** cross-volume `milk` (copy, verify, delete; journaled)
+- [ ] **SC-07** typed action errors (the workspace offers retry / fallback)
+- [ ] **QOL-06** `--skip` exclusions, remembered in the app dir
+- [ ] **QOL-08** `--min` size floor
+- [ ] **QOL-09** doctor: HEIC decode, `_milked` volume, model SHA-256
+- [ ] **QOL-10** Windows console colour verified (screenshot in VERIFICATION)
+- [ ] **TECH-07** Ctrl-C e2e on Windows
+- [ ] **SC-08** UTF-8 Windows logs, no log churn in commits
 
 Done when: every box ticked, the suite green on Linux and in
-`runs/win/RUN_VERIFY.cmd`, `VERIFICATION` has the Phase 9 section, and
-`PLAN.md` marks Phase 9 delivered.
+`runs/win/RUN_VERIFY.cmd`, `VERIFICATION` has the Phase 10 section, and
+`PLAN.md` marks Phase 10 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 9 `[done]`, then
+When this list is complete: mark `SHELVED.md` § Phase 10 `[done]`, then
 rewrite this file from the next `[shelved]` section of `SHELVED.md`
-(Phase 10 — formats and filesystems). If SHELVED has no `[shelved]`
-section left, run the IDENTIFIED workflow instead.
+(Phase 11 — matching depth). If SHELVED has no `[shelved]` section left,
+run the IDENTIFIED workflow instead.

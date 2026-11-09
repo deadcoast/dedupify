@@ -245,6 +245,41 @@ pub fn civil_from_unix(secs: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Days since 1970-01-01 for a civil date (Hinnant's `days_from_civil`,
+/// the inverse of `civil_from_unix`).
+pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400; // [0, 399]
+    let m = m as i64;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as i64 - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
+/// `YYYY-MM-DD HH:MM` in the local calendar for a journal stamp
+/// (`YYYYMMDD-HHMMSS`, UTC). The stamp itself when it does not parse.
+pub fn fmt_stamp_local(stamp: &str) -> String {
+    let digits: String = stamp.chars().filter(|c| c.is_ascii_digit()).collect();
+    if digits.len() < 14 {
+        return stamp.to_string();
+    }
+    let n = |a: usize, b: usize| digits[a..b].parse::<i64>().unwrap_or(0);
+    let (y, mo, d, h, mi, se) = (n(0, 4), n(4, 6), n(6, 8), n(8, 10), n(10, 12), n(12, 14));
+    let secs = days_from_civil(y, mo as u32, d as u32) * 86_400
+        + h * 3600
+        + mi * 60
+        + se
+        + local_offset_secs();
+    let (ly, lm, ld) = civil_from_unix(secs);
+    let tod = secs.rem_euclid(86_400);
+    format!(
+        "{ly:04}-{lm:02}-{ld:02} {:02}:{:02}",
+        tod / 3600,
+        (tod % 3600) / 60
+    )
+}
+
 /// The machine's UTC offset in seconds, read once at start-up (before any
 /// worker thread exists — `time` refuses the lookup in a multi-threaded
 /// process on Unix). Zero when it cannot be determined.
@@ -299,6 +334,17 @@ pub fn unix_secs(t: SystemTime) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn days_from_civil_inverts_civil_from_unix() {
+        for days in [-1_000_000i64, -1, 0, 1, 10_957, 20_401, 2_932_896] {
+            let (y, m, d) = civil_from_unix(days * 86_400);
+            assert_eq!(days_from_civil(y, m, d), days, "{y}-{m}-{d}");
+        }
+        // a journal stamp, at UTC (no offset initialised in tests)
+        assert_eq!(fmt_stamp_local("20261109-101131"), "2026-11-09 10:11");
+        assert_eq!(fmt_stamp_local("garbage"), "garbage");
+    }
+
     use super::*;
 
     #[test]

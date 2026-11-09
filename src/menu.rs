@@ -76,10 +76,17 @@ pub struct Menu {
     pub kind: usize,
     /// Where the user is; left out of the command when it is the folder.
     cwd: String,
+    /// The last folder looked at, offered as the first line (`again`).
+    again: Option<crate::recent::Recent>,
 }
 
 impl Menu {
     pub fn new(cwd: &str) -> Menu {
+        Menu::with_recent(cwd, None)
+    }
+
+    /// The menu with the last run offered as its first line (QOL-03).
+    pub fn with_recent(cwd: &str, again: Option<crate::recent::Recent>) -> Menu {
         Menu {
             step: Step::Workflow,
             workflow: 0,
@@ -88,11 +95,27 @@ impl Menu {
             scope: 0,
             kind: 0,
             cwd: cwd.to_string(),
+            again,
         }
     }
 
+    /// Rows on the first step: `again` (when there is a last run), then
+    /// the workflows.
+    fn rows(&self) -> usize {
+        WORKFLOWS.len() + usize::from(self.again.is_some())
+    }
+
+    fn on_again(&self) -> bool {
+        self.again.is_some() && self.workflow == 0
+    }
+
     fn selected(&self) -> Workflow {
-        WORKFLOWS[self.workflow].0
+        let offset = usize::from(self.again.is_some());
+        WORKFLOWS[self
+            .workflow
+            .saturating_sub(offset)
+            .min(WORKFLOWS.len() - 1)]
+        .0
     }
 
     fn needs_scope(&self) -> bool {
@@ -145,8 +168,13 @@ impl Menu {
     pub fn handle(&mut self, key: Key) -> Outcome {
         match self.step {
             Step::Workflow => match key {
-                Key::Up => self.workflow = (self.workflow + WORKFLOWS.len() - 1) % WORKFLOWS.len(),
-                Key::Down => self.workflow = (self.workflow + 1) % WORKFLOWS.len(),
+                Key::Up => self.workflow = (self.workflow + self.rows() - 1) % self.rows(),
+                Key::Down => self.workflow = (self.workflow + 1) % self.rows(),
+                Key::Enter if self.on_again() => {
+                    if let Some(a) = &self.again {
+                        return Outcome::Run(a.args());
+                    }
+                }
                 Key::Enter => self.step = Step::Folder,
                 Key::Esc | Key::Char('q') => return Outcome::Quit,
                 _ => {}
@@ -245,8 +273,27 @@ impl Menu {
 
         match self.step {
             Step::Workflow => {
+                let offset = usize::from(self.again.is_some());
+                if let Some(a) = &self.again {
+                    let sel = self.workflow == 0;
+                    let ptr = if sel { g.pointer } else { " " };
+                    let avail = inner.saturating_sub(4 + 8 + 1);
+                    let label = shorten_middle(&a.label(), avail, g.ellipsis);
+                    push(
+                        &mut body,
+                        vec![
+                            (format!("  {ptr} "), Role::Keep, true),
+                            if sel {
+                                lit(&fit("again", 8))
+                            } else {
+                                plain(&fit("again", 8))
+                            },
+                            dim(&label),
+                        ],
+                    );
+                }
                 for (i, (_, name, desc)) in WORKFLOWS.iter().enumerate() {
-                    let sel = i == self.workflow;
+                    let sel = i + offset == self.workflow;
                     let ptr = if sel { g.pointer } else { " " };
                     let mut segs = vec![(format!("  {ptr} "), Role::Keep, true)];
                     segs.push(if sel {
@@ -398,7 +445,7 @@ impl Menu {
 
 /// Run the menu in raw mode. Returns the argv to execute, or `None` on quit.
 pub fn run(theme: Theme, cwd: &str) -> io::Result<Option<Vec<String>>> {
-    let mut menu = Menu::new(cwd);
+    let mut menu = Menu::with_recent(cwd, crate::recent::load());
     let mut out = io::stdout();
     terminal::enable_raw_mode()?;
     execute!(out, terminal::EnterAlternateScreen, cursor::Hide)?;
@@ -459,6 +506,29 @@ mod tests {
             last = m.handle(*k);
         }
         last
+    }
+
+    #[test]
+    fn again_runs_the_last_folder_and_shifts_the_workflows() {
+        let d = tempfile::tempdir().unwrap();
+        let cwd = d.path().to_str().unwrap();
+        let photos = tempfile::tempdir().unwrap();
+        let again = crate::recent::Recent {
+            root: photos.path().to_path_buf(),
+            recurse: true,
+            kind: "img".into(),
+        };
+        let mut m = Menu::with_recent(cwd, Some(again.clone()));
+        assert_eq!(press(&mut m, &[Key::Enter]), Outcome::Run(again.args()));
+        // down once: the first workflow (find), as without `again`
+        let mut m = Menu::with_recent(cwd, Some(again));
+        press(&mut m, &[Key::Down, Key::Enter]);
+        assert_eq!(m.step, Step::Folder);
+        assert_eq!(m.selected(), Workflow::Find);
+        // up from the top wraps to the last workflow (doctor)
+        let mut m = Menu::with_recent(cwd, None);
+        press(&mut m, &[Key::Up]);
+        assert_eq!(m.selected(), Workflow::Doctor);
     }
 
     #[test]

@@ -116,11 +116,14 @@ first it scores 1.00.
 - The output as a designed record rather than a log: every line says
   what the file is in words (`cropped 80%`, `another shot, 05:06:08`),
   then the evidence that produced the verdict, dim, every line fitted.
-- The result as the workspace (Phase 8): `find` ends on a keyed bar —
-  move these, bin these, preview, change a keeper, undo — acting on the
-  groups already listed. fclones prints a report and expects `fclones
-  dedupe`/`move` to be run over it; czkawka has a GUI for this; the
-  other CLIs print and stop.
+- The result as the workspace (Phases 8–9): `find` opens its groups in a
+  terminal screen — a mark per file, choice per file or per group, the
+  keeper changeable with the group re-related on the spot, the two files
+  drawn side by side (sixel, kitty, iTerm2) or opened, several changes
+  per sitting each undoable — acting on the groups already listed, with
+  an unconfirmed file movable only by an explicit, labelled choice.
+  fclones prints a report and expects `fclones dedupe`/`move` to be run
+  over it; czkawka has a GUI for this; the other CLIs print and stop.
 
 ## 6. Where "it does nothing" would be a fair verdict today
 

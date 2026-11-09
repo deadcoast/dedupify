@@ -370,6 +370,18 @@ fn files(root: &Path) -> Vec<String> {
     v
 }
 
+/// Journals written under `dir` (one subfolder per root). `recent.json`,
+/// the last folder looked at (QOL-03), sits beside the subfolders and is
+/// not one.
+fn journals(dir: &Path) -> usize {
+    walkdir::WalkDir::new(dir)
+        .min_depth(2)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file() && e.path().extension().is_some_and(|x| x == "json"))
+        .count()
+}
+
 #[test]
 fn find_reports_groups_and_stages() {
     let fx = fixture();
@@ -390,9 +402,20 @@ fn find_reports_groups_and_stages() {
         "sample-equal, content-different file must not be a duplicate\n{out}"
     );
     assert!(out.contains("next   dedupe milk . "), "{out}");
-    // nothing written
-    assert!(!fx.journal.exists());
+    // nothing written to the tree, no journal
+    assert_eq!(journals(&fx.journal), 0, "find journals nothing");
     assert!(!fx.root.join("_milked").exists());
+    // the one thing find keeps: the folder it looked at, in the app
+    // directory, for the bare menu's `again` line (QOL-03)
+    let recent: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(fx.journal.join("recent.json")).unwrap()).unwrap();
+    assert_eq!(
+        Path::new(recent["root"].as_str().unwrap()).file_name(),
+        fx.root.file_name(),
+        "{recent}"
+    );
+    assert_eq!(recent["recurse"], serde_json::Value::Bool(true), "{recent}");
+    assert_eq!(recent["kind"], "", "{recent}");
 }
 
 #[test]
@@ -588,7 +611,7 @@ fn milk_then_undo_round_trip() {
     let (code, out, _) = run(&fx, &["milk", ".", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(files(&fx.root), before, "dry run must not touch the tree");
-    assert!(!fx.journal.exists(), "dry run must not journal");
+    assert_eq!(journals(&fx.journal), 0, "dry run must not journal");
 
     let (code, out, _) = run(&fx, &["milk", "."]);
     assert_eq!(code, 0, "{out}");
@@ -643,7 +666,7 @@ fn purge_dry_run_verifies_and_changes_nothing() {
     assert!(out.contains("4 verified byte for byte"), "{out}");
     assert!(out.contains("4 would bin"), "{out}");
     assert_eq!(files(&fx.root), before);
-    assert!(!fx.journal.exists());
+    assert_eq!(journals(&fx.journal), 0, "a dry run journals nothing");
 }
 
 #[test]
@@ -1230,20 +1253,30 @@ fn purge_then_undo_through_the_bin() {
     assert_eq!(a, b);
 }
 
-/// The result is the workspace: `find` on a terminal ends in the bar; `n`
-/// previews, `m` + enter moves what is on screen without a second scan,
-/// `u` reverses it, `q` leaves. Piped, the `next` lines print instead.
+/// The result is the workspace: `find` on a terminal opens its groups in a
+/// screen of their own; `n` previews on the main screen and enter comes
+/// back; `m` + enter moves what is selected without a second scan; `u` on
+/// the bar under the action reverses it; `q` leaves. Piped, the `next`
+/// lines print instead.
 #[cfg(unix)]
 #[test]
 fn find_on_a_terminal_acts_from_the_result() {
     let fx = fixture_with_photos();
     let before = files(&fx.root);
-    let Some(out) = run_tty(&fx, &["find", ".", "img"], &["n", "m", "\r", "u", "q"], 160) else {
+    let Some(out) = run_tty(
+        &fx,
+        &["find", ".", "img"],
+        &["n", "\r", "m", "\r", "u", "q"],
+        160,
+    ) else {
         eprintln!("no script(1); skipped");
         return;
     };
+    // the groups screen: marks, the selection count, the keys
+    assert!(out.contains("selected"), "the status line\n{out}");
     assert!(out.contains("m milk"), "the bar\n{out}");
     assert!(out.contains("p purge"), "{out}");
+    assert!(out.contains("space select"), "{out}");
     assert!(out.contains("k keeper"), "{out}");
     // n: the preview, with the native dry-run command named
     assert!(out.contains("dedupe milk . img --dry-run"), "{out}");
@@ -1251,11 +1284,11 @@ fn find_on_a_terminal_acts_from_the_result() {
     // m, enter: the move, on the groups already listed (one SCAN line only)
     assert_eq!(out.matches("SCAN ").count(), 1, "no second scan\n{out}");
     assert!(out.contains("7 moved"), "{out}");
-    assert!(out.contains("u undo"), "{out}");
+    assert!(out.contains("u undo it"), "{out}");
     // u: reversed on the spot
     assert!(out.contains("7 restored"), "{out}");
     assert_eq!(files(&fx.root), before, "tree back as it was");
-    // piped, no bar, the typed forms instead
+    // piped, no workspace, the typed forms instead
     let (_, piped, _) = run(&fx, &["find", ".", "img"]);
     assert!(!piped.contains("m milk"), "{piped}");
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");

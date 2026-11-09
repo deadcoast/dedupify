@@ -198,12 +198,43 @@ operational experience; this phase builds it.
   `script(1)`).
 - Not changed: the matching engine, the thresholds, the journal.
 
-## Phase 9 — the workspace, deep   ← planned (from IDENTIFIED 2026-11-09)
+## Phase 9 — the workspace, deep   ← delivered 2026-11-09 (from IDENTIFIED 2026-11-09)
 
 The result workspace becomes where all decisions happen: per-group and
 per-member selection, several changes per sitting, a look at the file
 before deciding, long results navigable; the doc set made coherent.
-Items: SHELVED.md § Phase 9.
+Items: SHELVED.md § Phase 9. What it became:
+
+- **SC-01, SC-04** one doc set (`RESEARCH.md`, `VERIFICATION.md` restored,
+  the byte-identical copies dropped, `docs/README.md` the index); the
+  menu's Find caption current.
+- **TECH-03** `workspace/state.rs`: the cursor, scroll, selection, modes
+  (browse, go-to, confirm) and the effects a key asks for, with the screen
+  composed from captured listing lines — 8 unit tests, no terminal.
+  `workspace/mod.rs` is the shell: alternate screen, raw keys, effects.
+- **QOL-01** a mark on every line (`■ □ ◧ ·`); space per file or per
+  group, `a` all/none; unconfirmed members choosable by hand, counted and
+  labelled `by hand` through to the action's footer.
+- **QOL-02** changes stack: each action keeps the groups from before it;
+  `u` reverses the newest by its journal id and restores its groups; the
+  bar under an action offers back, undo, quit.
+- **QOL-04** arrows, PgUp/PgDn, Home/End, `g` + number; a header comes
+  into view with its first member.
+- **NF-04** `o` reveals in Explorer (`/select,`), Finder, or the folder.
+- **NF-03** `v` draws keeper and member side by side — sixel (own encoder,
+  216-colour cube, ordered dither), kitty, iTerm2 — chosen from the
+  environment, `DEDUPE_GRAPHICS` overriding; the system viewer otherwise.
+- **QOL-03** `recent.json` beside the journals; the menu's `again` line.
+- **QOL-05** `--undo` with several pending changes on a terminal: a
+  numbered list, newest first, local times.
+- Act layer: `act_milk`/`act_purge` take an item list (`default_items`
+  for the commands, the selection for the workspace), `act_undo_which`
+  takes a journal id, `Found::prune_missing` renumbers `+GROUP` links.
+- Found while verifying, fixed: a VIDEO header counted unconfirmed
+  members as reclaimable (`10.2 MB` on the sample where `milk` moves
+  8.62 MB; now confirmed members only, as NEAR groups always were); the
+  `--undo` journal line ran past the width under a long root (its command
+  now shortens in the middle).
 
 ## Phase 10 — formats and filesystems   ← planned
 
@@ -221,8 +252,8 @@ rule on real labelled data, provenance-aware keepers. Items: SHELVED.md
 ## Phase 12 — structure and CI   ← planned
 
 The code shaped for what it became: actions/render/video split, a shared
-group interface, typed action errors, a testable workspace state machine,
-CI on Linux and Windows. Items: SHELVED.md § Phase 12.
+group interface, the `unwrap()` audit, in-tree benchmarks, pseudo-terminal
+tests on Windows, CI on Linux and Windows. Items: SHELVED.md § Phase 12.
 
 ## Docs chain
 
@@ -245,6 +276,9 @@ pass runs.
 - A tier acts (moves or bins) only when two independent families of
   evidence agree: the two 64-bit hashes with PDQ or the geometric fit, or
   the learned descriptor with the fit. A single family lists. Two files
-  that state different capture moments are never acted on.
+  that state different capture moments are never acted on. In the
+  workspace a person may choose a listed file by hand — their look is the
+  second family for that file, and every line and footer says so; another
+  capture moment cannot be chosen.
 - New flags need a reason stronger than convenience; the menu stays at five
-  choices per screen.
+  workflows (plus `again`, the last folder) per screen.
