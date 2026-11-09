@@ -1179,7 +1179,11 @@ impl Renderer {
             ""
         };
         let purge_note = "send duplicates to the Recycle Bin";
-        let purge_note = if width(purge_note) <= room { purge_note } else { "" };
+        let purge_note = if width(purge_note) <= room {
+            purge_note
+        } else {
+            ""
+        };
         self.line(&format!(
             " {}  {}{}",
             t.paint_bold(Role::Keep, &fit("next", HINT_VERB)),
