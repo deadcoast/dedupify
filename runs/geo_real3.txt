@@ -1,0 +1,30 @@
+    Blocking waiting for file lock on build directory
+geometry on real photographs: 98 sources, positives from the first 60
+perturbation      min     p5 median  rec>=min
+scale 50%       0.575  0.999  1.000     98.3%
+scale 25%       0.569  0.996  1.000     98.3%
+upscale 150%    0.834  1.000  1.000     98.3%
+jpeg q90        0.445  1.000  1.000     98.3%
+jpeg q60        0.119  0.999  1.000     98.3%
+jpeg q30        0.170  0.999  1.000     98.3%
+crop 90%        0.207  0.963  0.988     96.7%
+crop 80%        0.158  0.929  0.979     95.0%
+crop 60%        0.385  0.861  0.980     93.3%
+rotate 2°       0.672  0.993  0.999     98.3%
+rotate 5°       0.792  0.921  0.969     95.0%
+rotate 90°      0.123  0.295  0.499      0.0%
+mirror          0.084  0.271  0.398      1.7%
+bright +20%     0.220  0.986  0.998     98.3%
+bright -20%     0.731  1.000  1.000     98.3%
+gamma 1.5       0.410  0.985  0.995     98.3%
+watermark       0.506  0.927  0.984     95.0%
+blur            0.820  0.997  1.000     98.3%
+noise ±10       0.231  1.000  1.000     98.3%
+letterbox       0.218  0.950  0.979     95.0%
+squeeze 75%     0.216  0.995  1.000     98.3%
+negatives: 4753 source pairs   max 0.995   p99.9 0.913   p99 0.779   median 0.410
+worst five negatives (fit, source i, source j): [(0.99527955, 87, 88), (0.9309986, 12, 13), (0.9180984, 25, 60), (0.913773, 35, 66), (0.9127662, 35, 97)]
+sweep (false positives | recall over all perturbations | over crops+rotations+letterbox):  T=0.80: 34 | 88.9% | 96.9%  T=0.85: 14 | 88.7% | 96.7%  T=0.88: 9 | 88.4% | 96.1%  T=0.90: 7 | 88.3% | 96.1%  T=0.92: 2 | 88.1% | 95.6%  T=0.95: 1 | 86.6% | 91.9%
+shipped FIT_MIN = 0.92   114s
+test measure_geometry_real ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 114.77s

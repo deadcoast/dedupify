@@ -1,0 +1,71 @@
+real corpus: 98 pictures from /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/realdata/real   decoded + hashed in 2.7s
+all 4753 pairs of distinct pictures; the 24 closest by d+p (shipped rule: d <=10 and p <=14; PDQ confirms at q <=31):
+  d   p    q   pair
+  1   0   24   Blender_Suzanne1.jpg  ~  Blender_Suzanne2.jpg   GROUP + CONFIRM
+  1   0    8   rubberwhale1.png  ~  rubberwhale2.png   GROUP + CONFIRM
+  4   2   22   basketball1.png  ~  basketball2.png   GROUP + CONFIRM
+  3  12   44   lena.jpg  ~  lena_tmpl.jpg   GROUP (q over)
+  7   8   80   opencv-logo-white.png  ~  opencv-logo.png   GROUP (q over)
+ 13   6   64   left11.jpg  ~  left14.jpg   
+ 10  12   76   right01.jpg  ~  right06.jpg   GROUP (q over)
+ 10  12  102   right01.jpg  ~  right09.jpg   GROUP (q over)
+ 14   8  110   right05.jpg  ~  right12.jpg   
+ 17   6  100   right03.jpg  ~  right04.jpg   
+ 16   8   96   left01.jpg  ~  left05.jpg   
+ 13  12   82   left01.jpg  ~  left07.jpg   
+ 11  14   72   right11.jpg  ~  right14.jpg   
+ 14  12   98   right06.jpg  ~  right09.jpg   
+ 15  12   76   left02.jpg  ~  left03.jpg   
+ 17  10   86   left09.jpg  ~  left11.jpg   
+ 16  12  106   right05.jpg  ~  right08.jpg   
+ 16  12  108   right08.jpg  ~  right12.jpg   
+ 18  10   96   right12.jpg  ~  right14.jpg   
+ 13  16   96   left04.jpg  ~  left11.jpg   
+ 17  12   78   left07.jpg  ~  left11.jpg   
+ 15  14   94   left08.jpg  ~  left11.jpg   
+ 18  12   88   left02.jpg  ~  left04.jpg   
+ 20  10   82   left04.jpg  ~  left09.jpg   
+pairs the shipped rule groups: 7   of which PDQ confirms: 3
+d+p histogram: <=24 11  25-28 8  29-32 23  33-36 28  37-40 72  41-48 773  49-56 2749  >56 1089
+derivatives: 60 sources x 21 perturbations in 33s
+perturbation   d max p max q max         d&p     d&p&q
+scale 50%          2    18    92       98.3%     98.3%
+scale 25%          5    14   108      100.0%     98.3%
+upscale 150%       2    14    80      100.0%     98.3%
+jpeg q90           2    22    92       98.3%     98.3%
+jpeg q60           4    24   138       98.3%     98.3%
+jpeg q30           5    28   150       98.3%     98.3%
+crop 90%          34    22   138       35.0%      0.0%
+crop 80%          32    29   150        0.0%      0.0%
+crop 60%          35    34   140        0.0%      0.0%
+rotate 2°         20    24   118       91.7%     30.0%
+rotate 5°         22    24   120       43.3%      0.0%
+rotate 90°         0     0    30      100.0%    100.0%
+mirror             0     0    26      100.0%    100.0%
+bright +20%        5    20   118       98.3%     98.3%
+bright -20%        1    10    50      100.0%     98.3%
+gamma 1.5          5    14    64      100.0%     98.3%
+watermark          2    32   128       95.0%     53.3%
+blur               2    14    54      100.0%     98.3%
+noise ±10         20    24   128       96.7%     96.7%
+letterbox         18    24   122       40.0%      0.0%
+squeeze 75%        1    10    64      100.0%     98.3%
+negatives (variant vs other source): 122220 pairs   grouped by the rule: 107   PDQ-confirmed: 58
+  1   0   24   Blender_Suzanne1.jpg [scale 50%]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [scale 25%]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [upscale 150%]  ~  Blender_Suzanne2.jpg
+  1   0   22   Blender_Suzanne1.jpg [jpeg q90]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [jpeg q60]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [rotate 90°]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [mirror]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [bright -20%]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [blur]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne1.jpg [squeeze 75%]  ~  Blender_Suzanne2.jpg
+  1   0   24   Blender_Suzanne2.jpg [scale 50%]  ~  Blender_Suzanne1.jpg
+  1   0   24   Blender_Suzanne2.jpg [scale 25%]  ~  Blender_Suzanne1.jpg
+  1   0   22   Blender_Suzanne2.jpg [upscale 150%]  ~  Blender_Suzanne1.jpg
+  1   0   24   Blender_Suzanne2.jpg [jpeg q90]  ~  Blender_Suzanne1.jpg
+  1   0   22   Blender_Suzanne2.jpg [jpeg q60]  ~  Blender_Suzanne1.jpg
+  1   0   26   Blender_Suzanne2.jpg [bright +20%]  ~  Blender_Suzanne1.jpg
+test measure_real ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 35.28s

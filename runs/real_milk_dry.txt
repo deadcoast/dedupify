@@ -1,0 +1,43 @@
+ dedupe milk  /tmp/claude-0/-home-claude/0e0fc6...4-5a47-929e-c4f931c0b548/scratchpad/realdata/real  this folder  images  dry run
+ --------------------------------------------------------------------------------------------------------------------------------
+ SCAN   ==============================  98 files   9.94 MB   0.0 s
+ SIZE   ==============================  0 share a size
+ DECODE ==============================  98 images hashed   0.9 s
+ MATCH  ==============================  7 similar pairs   13 images grouped   4 fits, 0 confirmed   0.1 s
+
+ NEAR 001   1 similar   353 KB reclaimable
+   keep  rubberwhale1.png                                                        584x388      352 KB   2026-11-07
+   near  rubberwhale2.png                                                        584x388      353 KB   d  1  p  0  q   8
+ NEAR 002   1 similar   130 KB reclaimable
+   keep  basketball1.png                                                         640x480      130 KB   2026-11-07
+   near  basketball2.png                                                         640x480      130 KB   d  4  p  2  q  22
+ NEAR 003   1 similar   24.8 KB reclaimable
+   keep  Blender_Suzanne1.jpg                                                    640x480      24.8 KB  2026-11-07
+   near  Blender_Suzanne2.jpg                                                    640x480      24.8 KB  d  1  p  0  q  24  mirror
+ NEAR 004   1 similar   0 B reclaimable
+   keep  lena.jpg                                                                512x512      89.7 KB  2026-11-07
+   near  lena_tmpl.jpg                                                           512x512      77.6 KB  d  3  p 12  q  44  fit 0.80
+ NEAR 005   1 similar   0 B reclaimable
+   keep  opencv-logo.png                                                         600x794      39.2 KB  2026-11-07
+   near  opencv-logo-white.png                                                   180x238      9.53 KB  d  7  p  8  q  80  fit 0.68
+ NEAR 006   2 similar   0 B reclaimable
+   keep  right01.jpg                                                             640x480      26.4 KB  2026-11-07
+   near  right06.jpg                                                             640x480      27.2 KB  d 10  p 12  q  76  fit 0.45
+   near  right09.jpg                                                             640x480      25.3 KB  d 10  p 12  q 102  fit 0.31
+ --------------------------------------------------------------------------------------------------------------------------------
+ no exact duplicates   98 files   9.94 MB checked
+ 6 near groups   7 similar   507 KB reclaimable
+   keep: shared moment, most matched, then most pixels   dHash <=10  pHash <=14  PDQ <=31 or fit >=0.92 to act
+
+ would~    rubberwhale2.png                                                                                     d  1  p  0  q   8
+ would~    basketball2.png                                                                                      d  4  p  2  q  22
+ would~    Blender_Suzanne2.jpg                                                                         d  1  p  0  q  24  mirror
+ kept~     lena_tmpl.jpg                                                                    PDQ q 44 over 31; fit 0.80 under 0.92
+ kept~     opencv-logo-white.png                                                            PDQ q 80 over 31; fit 0.68 under 0.92
+ kept~     right06.jpg                                                                      PDQ q 76 over 31; fit 0.45 under 0.92
+ kept~     right09.jpg                                                                     PDQ q 102 over 31; fit 0.31 under 0.92
+ --------------------------------------------------------------------------------------------------------------------------------
+ 3 would move   507 KB into ./_milked
+ ~ confirmed near duplicate, not a byte copy
+   (images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)
+ 4 kept~: similar on two hashes, confirmed by nothing else; shown, left in place

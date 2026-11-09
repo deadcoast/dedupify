@@ -1,0 +1,31 @@
+    Blocking waiting for file lock on build directory
+hash-grouped pairs and their fit:
+  d  1 p  0 q  24   fit 0.32  crop 50%   Blender_Suzanne1.jpg  ~  Blender_Suzanne2.jpg
+  d  4 p  2 q  22   fit 0.93   basketball1.png  ~  basketball2.png
+  d  3 p 12 q  44   fit 0.80   lena.jpg  ~  lena_tmpl.jpg
+  d  7 p  8 q  80   fit 0.68  crop 95%   opencv-logo-white.png  ~  opencv-logo.png
+  d 10 p 12 q  76   fit 0.45   right01.jpg  ~  right06.jpg
+  d 10 p 12 q 102   fit 0.31  crop 55%   right01.jpg  ~  right09.jpg
+  d  1 p  0 q   8   fit 1.00   rubberwhale1.png  ~  rubberwhale2.png
+the twelve best-fitting pairs of distinct files (whatever the hashes said):
+  fit 0.995   d  1 p  0 q   8   rubberwhale1.png  ~  rubberwhale2.png
+  fit 0.931   d  4 p  2 q  22   basketball1.png  ~  basketball2.png
+  fit 0.918   d 29 p 26 q 132   digits.png  ~  notes.png
+  fit 0.914   d 24 p 22 q 134   imageTextN.png  ~  pic2.png
+  fit 0.913   d 33 p 30 q 124   imageTextN.png  ~  tmpl.png
+  fit 0.912   d 28 p 22 q 114   imageTextN.png  ~  pic4.png
+  fit 0.911   d 27 p 26 q 116   notes.png  ~  tmpl.png
+  fit 0.882   d 26 p 20 q 130   licenseplate_motion.jpg  ~  notes.png
+  fit 0.880   d 32 p 28 q 120   mask.png  ~  notes.png
+  fit 0.874   d 24 p 26 q 142   digits.png  ~  imageTextN.png
+  fit 0.867   d 30 p 26 q 132   imageTextN.png  ~  sudoku.png
+  fit 0.867   d 29 p 26 q 132   digits.png  ~  mask.png
+sources whose plain 50 % rescale fits worst:
+  fit 0.575   gradient.png   300x300
+  fit 0.994   imageTextR.png   556x323
+  fit 0.995   tmpl.png   128x128
+  fit 0.996   mask.png   128x128
+  fit 0.997   templ.png   100x130
+test geometry_real_named ... ok
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 85.46s
+DONE

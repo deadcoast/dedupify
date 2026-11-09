@@ -1,0 +1,21 @@
+ dedupe find  /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/realdata/realvid  this folder  videos
+ --------------------------------------------------------------------------------------------------------------------------------
+ SCAN   ==============================  7 files   14.0 MB   0.0 s
+ SIZE   ==============================  0 share a size
+ FRAMES ==============================  7 videos hashed   3,905 frames at 15 fps   3.9 s
+ MATCH  ==============================  6 similar pairs   6 videos grouped   0.0 s
+
+ VIDEO 001   2 similar   2.72 MB reclaimable
+   keep  vtest.avi                                           768x576      1:20    msmpe  7.75 MB  2026-11-07
+   near  vtest_small.mp4                                     384x288      1:20    h264   621 KB   d  0 p  2  q   2  tmk 1.00
+   near  vtest_trim.mp4                                      768x576      0:40    h264   2.12 MB  d  6 p 12  q  58  tmk 0.84  trim
+ VIDEO 002   2 similar   1.22 MB reclaimable
+   keep  Megamind.avi                                        720x528      0:11    mpeg4  1.13 MB  2026-11-07
+   near  megamind_x264.mp4                                   720x528      0:11    h264   408 KB   d  0 p  2  q   4  tmk 1.00
+   near  Megamind_bugy.avi                                   720x528      0:09    mpeg4  841 KB   d  2 p  2  q  12  tmk 1.00  trim
+ --------------------------------------------------------------------------------------------------------------------------------
+ no exact duplicates   7 files   14.0 MB checked
+ 2 video groups   4 similar   3.94 MB reclaimable
+   keep: longest, then most pixels   tmk >=0.8 groups, >=0.9 bins, or frames q <=31
+ next   dedupe milk vid   move duplicates into ./_milked
+        dedupe purge vid  send duplicates to the Recycle Bin

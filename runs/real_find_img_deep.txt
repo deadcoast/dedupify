@@ -1,0 +1,58 @@
+ dedupe find  /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/realdata/real  this folder  images
+ --------------------------------------------------------------------------------------------------------------------------------
+ SCAN   ==============================  98 files   9.94 MB   0.0 s
+ SIZE   ==============================  0 share a size
+ DECODE ==============================  98 images hashed   +deep   18 s
+ MATCH  ==============================  7 similar pairs   11 added by deep   31 images grouped   15 fits, 0 confirmed   0.2 s
+
+ NEAR 001   1 similar   353 KB reclaimable
+   keep  rubberwhale1.png                                             584x388      352 KB   2026-11-07
+   near  rubberwhale2.png                                             584x388      353 KB   d  1  p  0  q   8  deep 0.99
+ NEAR 002   1 similar   130 KB reclaimable
+   keep  basketball1.png                                              640x480      130 KB   2026-11-07
+   near  basketball2.png                                              640x480      130 KB   d  4  p  2  q  22  deep 0.95
+ NEAR 003   1 similar   24.8 KB reclaimable
+   keep  Blender_Suzanne1.jpg                                         640x480      24.8 KB  2026-11-07
+   near  Blender_Suzanne2.jpg                                         640x480      24.8 KB  d  1  p  0  q  24  deep 0.88  mirror
+ NEAR 004   0 similar  +1 deep   0 B reclaimable
+   keep  aloeL.jpg                                                    1282x1110    308 KB   2026-11-07
+   deep  aloeR.jpg                                                    1282x1110    308 KB   d 18  p 16  q 148  deep 0.91  fit 0.74
+ NEAR 005   0 similar  +1 deep   0 B reclaimable
+   keep  ela_original.jpg                                             902x770      185 KB   2026-11-07
+   deep  ela_modified.jpg                                             897x708      180 KB   d 24  p 26  q 122  deep 0.78  fit 0.77
+ NEAR 006   0 similar  +2 deep   0 B reclaimable
+   keep  left05.jpg                                                   640x480      28.1 KB  2026-11-07
+   deep  left08.jpg                                                   640x480      28.0 KB  d 23  p 16  q  96  deep 0.82  fit 0.28
+   deep  left03.jpg                                                   640x480      28.9 KB  d 14  p 18  q  96  deep 0.78  fit 0.29
+ NEAR 007   0 similar  +1 deep   0 B reclaimable
+   keep  left07.jpg                                                   640x480      29.2 KB  2026-11-07
+   deep  right07.jpg                                                  640x480      27.8 KB  d 25  p 26  q 126  deep 0.75  fit 0.41
+ NEAR 008   0 similar  +3 deep   0 B reclaimable
+   keep  left11.jpg                                                   640x480      27.1 KB  2026-11-07
+   deep  left14.jpg                                                   640x480      27.2 KB  d 13  p  6  q  64  deep 0.88  fit 0.62
+   deep  left02.jpg                                                   640x480      27.9 KB  d 21  p 18  q  98  deep 0.74  fit 0.32
+   deep  left13.jpg                                                   640x480      27.5 KB  d 18  p 22  q  82  deep 0.73  fit 0.49
+ NEAR 009   1 similar   0 B reclaimable
+   keep  lena.jpg                                                     512x512      89.7 KB  2026-11-07
+   near  lena_tmpl.jpg                                                512x512      77.6 KB  d  3  p 12  q  44  deep 0.67  fit 0.80
+ NEAR 010   1 similar   0 B reclaimable
+   keep  opencv-logo.png                                              600x794      39.2 KB  2026-11-07
+   near  opencv-logo-white.png                                        180x238      9.53 KB  d  7  p  8  q  80  deep 0.68  fit 0.68
+ NEAR 011   2 similar  +1 deep   0 B reclaimable
+   keep  right01.jpg                                                  640x480      26.4 KB  2026-11-07
+   near  right06.jpg                                                  640x480      27.2 KB  d 10  p 12  q  76  deep 0.60  fit 0.45
+   near  right09.jpg                                                  640x480      25.3 KB  d 10  p 12  q 102  deep 0.69  fit 0.31
+   deep  left01.jpg                                                   640x480      27.3 KB  d 22  p 24  q 138  deep 0.72  fit 0.48
+ NEAR 012   0 similar  +1 deep   0 B reclaimable
+   keep  right05.jpg                                                  640x480      25.7 KB  2026-11-07
+   deep  right08.jpg                                                  640x480      27.6 KB  d 16  p 12  q 106  deep 0.81  fit 0.33
+ NEAR 013   0 similar  +1 deep   0 B reclaimable
+   keep  right11.jpg                                                  640x480      25.1 KB  2026-11-07
+   deep  right14.jpg                                                  640x480      25.1 KB  d 11  p 14  q  72  deep 0.88  fit 0.78
+ --------------------------------------------------------------------------------------------------------------------------------
+ no exact duplicates   98 files   9.94 MB checked
+ 11 images by deep only   listed for review; milk and purge leave them
+ 13 near groups   7 similar   507 KB reclaimable
+   keep: shared moment, most matched, then most pixels   dHash <=10  pHash <=14  deep >=0.70 lists  PDQ <=31 or fit >=0.92 to act
+ next   dedupe milk img   move duplicates into ./_milked
+        dedupe purge img  send duplicates to the Recycle Bin
