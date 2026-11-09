@@ -524,12 +524,51 @@ fn undo_elsewhere_is_named() {
 }
 
 /// Ctrl-C in the middle of a milk: the moves made so far are journaled
-/// and undo restores every one of them. Unix only (SIGINT by `kill`).
+/// and undo restores every one of them. Unix: SIGINT by `kill`.
 #[cfg(unix)]
 #[test]
 fn interrupted_milk_leaves_a_journal_undo_can_use() {
+    interrupted_milk_case(
+        |c| c,
+        |child| {
+            // SAFETY: the pid is our own child's, still running (we hold its stdout)
+            unsafe { libc::kill(child.id() as i32, libc::SIGINT) == 0 }
+        },
+    );
+}
+
+/// The same on Windows (TECH-07): the child runs in a process group of
+/// its own and gets CTRL_BREAK from `GenerateConsoleCtrlEvent` (a
+/// CTRL_C cannot be aimed at one process group). The handler treats it
+/// as Ctrl-C. Skipped when this test has no console to send it through.
+#[cfg(windows)]
+#[test]
+fn interrupted_milk_leaves_a_journal_undo_can_use() {
+    use std::os::windows::process::CommandExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GenerateConsoleCtrlEvent(event: u32, group: u32) -> i32;
+    }
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CTRL_BREAK_EVENT: u32 = 1;
+    interrupted_milk_case(
+        |c| {
+            c.creation_flags(CREATE_NEW_PROCESS_GROUP);
+            c
+        },
+        |child| {
+            // SAFETY: a plain Win32 call with our own child's group id
+            unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) != 0 }
+        },
+    );
+}
+
+fn interrupted_milk_case(
+    spawn: impl Fn(&mut Command) -> &mut Command,
+    interrupt: impl Fn(&std::process::Child) -> bool,
+) {
     use std::io::Read as _;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
     use std::time::{Duration, Instant};
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("fx");
@@ -543,15 +582,14 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
         put(&root, &format!("b/f{i:04}.bin"), &data);
     }
     let before = files(&root);
-    let mut child = Command::new(bin())
-        .args(["milk", "."])
+    let mut cmd = Command::new(bin());
+    cmd.args(["milk", "."])
         .current_dir(&root)
         .env("DEDUPE_JOURNAL_DIR", &journal)
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .stderr(Stdio::piped());
+    let mut child = spawn(&mut cmd).spawn().unwrap();
     // wait until the first move is reported, then interrupt
     let mut out = child.stdout.take().unwrap();
     let mut seen = String::new();
@@ -568,8 +606,12 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
         seen.contains(" moved     "),
         "no move seen before the deadline\n{seen}"
     );
-    // SAFETY: the pid is our own child's, still running (we hold its stdout)
-    assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGINT) }, 0);
+    if !interrupt(&child) {
+        let _ = child.kill();
+        let _ = child.wait();
+        eprintln!("the interrupt could not be sent (no console); skipped");
+        return;
+    }
     let mut rest = String::new();
     out.read_to_string(&mut rest).unwrap();
     seen.push_str(&rest);
@@ -1292,4 +1334,545 @@ fn find_on_a_terminal_acts_from_the_result() {
     let (_, piped, _) = run(&fx, &["find", ".", "img"]);
     assert!(!piped.contains("m milk"), "{piped}");
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
+}
+
+// ---------------------------------------------------------------------------
+// formats (Phase 10): a camera RAW and its JPEG; a tiled, rotated HEIC
+// ---------------------------------------------------------------------------
+
+/// A little-endian TIFF the way a camera writes a RAW: IFD0 with the
+/// orientation, the embedded preview's offset and length, and an Exif IFD
+/// with the capture moment; then bytes standing for sensor data; then the
+/// preview JPEG.
+fn raw_file(preview: &[u8], datetime: &str, orientation: u16) -> Vec<u8> {
+    let le16 = |v: u16| v.to_le_bytes();
+    let le32 = |v: u32| v.to_le_bytes();
+    let entry = |t: &mut Vec<u8>, tag: u16, typ: u16, count: u32, value: [u8; 4]| {
+        t.extend_from_slice(&le16(tag));
+        t.extend_from_slice(&le16(typ));
+        t.extend_from_slice(&le32(count));
+        t.extend_from_slice(&value);
+    };
+    let ifd0 = 8u32;
+    let ifd0_len = 2 + 4 * 12 + 4;
+    let exif = ifd0 + ifd0_len;
+    let exif_len = 2 + 12 + 4;
+    let dt = format!("{datetime}\0");
+    let dt_off = exif + exif_len;
+    let sensor_off = dt_off + dt.len() as u32;
+    let sensor = blob(77, 40_000);
+    let preview_off = sensor_off + sensor.len() as u32;
+    let mut t = b"II*\0".to_vec();
+    t.extend_from_slice(&le32(ifd0));
+    t.extend_from_slice(&le16(4));
+    let mut short = [0u8; 4];
+    short[..2].copy_from_slice(&le16(orientation));
+    entry(&mut t, 0x0112, 3, 1, short);
+    entry(&mut t, 0x0201, 4, 1, le32(preview_off));
+    entry(&mut t, 0x0202, 4, 1, le32(preview.len() as u32));
+    entry(&mut t, 0x8769, 4, 1, le32(exif));
+    t.extend_from_slice(&le32(0));
+    t.extend_from_slice(&le16(1));
+    entry(&mut t, 0x9003, 2, dt.len() as u32, le32(dt_off));
+    t.extend_from_slice(&le32(0));
+    t.extend_from_slice(dt.as_bytes());
+    t.extend_from_slice(&sensor);
+    t.extend_from_slice(preview);
+    t
+}
+
+/// A RAW keeps its group; the camera's JPEG beside it is a pair, left in
+/// place unless chosen by hand; an export elsewhere is a near duplicate
+/// of the RAW and moves; the RAW itself never moves.
+#[test]
+fn a_raw_keeps_its_group_and_its_camera_jpeg() {
+    let fx = fixture();
+    let shot = photo(41, 1200, 800);
+    let preview = jpeg_bytes(&shot, 92);
+    put_at(
+        &fx.root,
+        "dcim/IMG_0041.CR2",
+        &raw_file(&preview, "2022:06:10 18:17:40", 1),
+        1_600_000_000,
+    );
+    // the camera's own JPEG of the same exposure, beside it
+    put(
+        &fx.root,
+        "dcim/IMG_0041.JPG",
+        &with_capture_time(&jpeg_bytes(&shot, 95), "2022:06:10 18:17:40"),
+    );
+    // an export elsewhere, half size, the capture time kept
+    let half = image::imageops::resize(&shot, 600, 400, image::imageops::FilterType::Triangle);
+    put(
+        &fx.root,
+        "web/holiday.jpg",
+        &with_capture_time(&jpeg_bytes(&half, 80), "2022:06:10 18:17:40"),
+    );
+
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("1 RAW"),
+        "the DECODE line counts the route\n{out}"
+    );
+    let line = |name: &str| {
+        out.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("{name} not listed\n{out}"))
+            .to_string()
+    };
+    let raw = line("IMG_0041.CR2");
+    assert!(raw.contains("keep") && raw.contains("RAW"), "{raw}");
+    let twin = line("IMG_0041.JPG");
+    assert!(
+        twin.contains("pair") && twin.contains("RAW + JPEG"),
+        "{twin}"
+    );
+    let web = line("holiday.jpg");
+    assert!(
+        web.contains("near") && web.contains("from the RAW"),
+        "{web}"
+    );
+    assert!(out.contains("+1 pair"), "{out}");
+
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        fx.root.join("dcim/IMG_0041.CR2").exists(),
+        "the RAW never moves\n{out}"
+    );
+    assert!(
+        fx.root.join("dcim/IMG_0041.JPG").exists(),
+        "the pair stays\n{out}"
+    );
+    assert!(
+        !fx.root.join("web/holiday.jpg").exists(),
+        "the export moves\n{out}"
+    );
+    assert!(
+        out.contains("the camera's JPEG beside its RAW stays with it"),
+        "{out}"
+    );
+}
+
+/// The 23 bytes of an `hvcC` before its arrays, from the SPS's
+/// profile_tier_level (12 bytes after the NAL header and one byte), for
+/// 4:2:0 8-bit pictures with 4-byte NAL lengths.
+fn hvcc(vps: &[u8], sps: &[u8], pps: &[u8]) -> Vec<u8> {
+    // remove emulation prevention (00 00 03) from the SPS payload
+    let mut rbsp = Vec::new();
+    let mut zeros = 0;
+    for &b in &sps[2..] {
+        if zeros >= 2 && b == 3 {
+            zeros = 0;
+            continue;
+        }
+        zeros = if b == 0 { zeros + 1 } else { 0 };
+        rbsp.push(b);
+    }
+    let ptl = &rbsp[1..13];
+    let mut c = vec![1u8];
+    c.extend_from_slice(ptl);
+    c.extend_from_slice(&[0xF0, 0x00, 0xFC, 0xFD, 0xF8, 0xF8, 0x00, 0x00, 0x0F, 3]);
+    for (typ, nal) in [(32u8, vps), (33, sps), (34, pps)] {
+        c.push(0x80 | typ);
+        c.extend_from_slice(&1u16.to_be_bytes());
+        c.extend_from_slice(&(nal.len() as u16).to_be_bytes());
+        c.extend_from_slice(nal);
+    }
+    c
+}
+
+/// NAL units of an Annex B stream.
+fn nals(b: &[u8]) -> Vec<&[u8]> {
+    let mut starts = Vec::new();
+    let mut i = 0;
+    while i + 3 <= b.len() {
+        if b[i] == 0 && b[i + 1] == 0 && b[i + 2] == 1 {
+            starts.push(i + 3);
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    let mut out = Vec::new();
+    for (k, &s) in starts.iter().enumerate() {
+        let mut e = starts.get(k + 1).map(|&n| n - 3).unwrap_or(b.len());
+        while e > s && b[e - 1] == 0 {
+            e -= 1; // the zero of a 4-byte start code
+        }
+        out.push(&b[s..e]);
+    }
+    out
+}
+
+fn has_encoder(name: &str) -> bool {
+    Command::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(name))
+        .unwrap_or(false)
+}
+
+/// A HEIC the way a phone writes one: the picture cut into a 2 × 2 grid
+/// of HEVC tiles (x265, each tile its own IDR picture), a `grid` item as
+/// the primary, `irot` turning it a quarter anticlockwise for display,
+/// and an `Exif` item with the capture moment. `img` is the picture as
+/// stored (before the turn).
+fn heic_file(dir: &Path, img: &image::RgbImage, datetime: &str) -> Vec<u8> {
+    let (tw, th) = (128u32, 128u32);
+    let (w, h) = (img.width(), img.height());
+    let tiles_dir = dir.join("tiles");
+    fs::create_dir_all(&tiles_dir).unwrap();
+    let mut n = 0;
+    for r in 0..2 {
+        for c in 0..2 {
+            let mut t = image::RgbImage::new(tw, th);
+            for y in 0..th {
+                for x in 0..tw {
+                    let sx = (c * tw + x).min(w - 1);
+                    let sy = (r * th + y).min(h - 1);
+                    t.put_pixel(x, y, *img.get_pixel(sx, sy));
+                }
+            }
+            t.save(tiles_dir.join(format!("t{n}.png"))).unwrap();
+            n += 1;
+        }
+    }
+    let hevc = dir.join("tiles.hevc");
+    ffm(&[
+        "-framerate",
+        "1",
+        "-i",
+        tiles_dir.join("t%d.png").to_str().unwrap(),
+        "-c:v",
+        "libx265",
+        "-preset",
+        "ultrafast",
+        "-x265-params",
+        "keyint=1:min-keyint=1:scenecut=0:log-level=none",
+        "-pix_fmt",
+        "yuv420p",
+        "-f",
+        "hevc",
+        hevc.to_str().unwrap(),
+    ]);
+    let stream = fs::read(&hevc).unwrap();
+    let units = nals(&stream);
+    let typ = |n: &[u8]| (n[0] >> 1) & 0x3F;
+    let vps = *units.iter().find(|n| typ(n) == 32).unwrap();
+    let sps = *units.iter().find(|n| typ(n) == 33).unwrap();
+    let pps = *units.iter().find(|n| typ(n) == 34).unwrap();
+    // one picture per tile: the VCL units, length-prefixed
+    let mut tiles: Vec<Vec<u8>> = Vec::new();
+    for u in units.iter().filter(|n| typ(n) < 32) {
+        let first_slice = u[2] & 0x80 != 0;
+        if first_slice || tiles.is_empty() {
+            tiles.push(Vec::new());
+        }
+        let t = tiles.last_mut().unwrap();
+        t.extend_from_slice(&(u.len() as u32).to_be_bytes());
+        t.extend_from_slice(u);
+    }
+    assert_eq!(tiles.len(), 4, "x265 wrote one picture per tile");
+
+    // the Exif item: a 4-byte offset, then a TIFF with DateTimeOriginal
+    let app1 = with_capture_time(&[0xFF, 0xD8], datetime);
+    let tiff = &app1[4 + 2 + 6..app1.len()];
+    let mut exif = 0u32.to_be_bytes().to_vec();
+    exif.extend_from_slice(tiff);
+
+    let bx = |t: &[u8; 4], body: &[u8]| {
+        let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+        v.extend_from_slice(t);
+        v.extend_from_slice(body);
+        v
+    };
+    let full = |t: &[u8; 4], ver: u8, body: &[u8]| {
+        let mut b = vec![ver, 0, 0, 0];
+        b.extend_from_slice(body);
+        bx(t, &b)
+    };
+    // items 1–4 tiles, 5 grid, 6 Exif
+    let grid = [0u8, 0, 1, 1]
+        .iter()
+        .copied()
+        .chain((w as u16).to_be_bytes())
+        .chain((h as u16).to_be_bytes())
+        .collect::<Vec<u8>>();
+    let datas: Vec<Vec<u8>> = tiles.iter().cloned().chain([grid, exif]).collect();
+    let infe = |id: u16, t: &[u8; 4], hidden: bool| {
+        let mut b = id.to_be_bytes().to_vec();
+        b.extend_from_slice(&[0, 0]);
+        b.extend_from_slice(t);
+        b.push(0);
+        let mut f = vec![2u8, 0, 0, hidden as u8];
+        f.extend_from_slice(&b);
+        bx(b"infe", &f)
+    };
+    let mut iinf = 6u16.to_be_bytes().to_vec();
+    for id in 1..=4 {
+        iinf.extend(infe(id, b"hvc1", true));
+    }
+    iinf.extend(infe(5, b"grid", false));
+    iinf.extend(infe(6, b"Exif", false));
+    let iinf = full(b"iinf", 0, &iinf);
+    let mut dimg = 5u16.to_be_bytes().to_vec();
+    dimg.extend_from_slice(&4u16.to_be_bytes());
+    for id in 1..=4u16 {
+        dimg.extend_from_slice(&id.to_be_bytes());
+    }
+    let mut cdsc = 6u16.to_be_bytes().to_vec();
+    cdsc.extend_from_slice(&1u16.to_be_bytes());
+    cdsc.extend_from_slice(&5u16.to_be_bytes());
+    let mut iref = bx(b"dimg", &dimg);
+    iref.extend(bx(b"cdsc", &cdsc));
+    let iref = full(b"iref", 0, &iref);
+    let ispe = |w: u32, h: u32| {
+        let mut b = w.to_be_bytes().to_vec();
+        b.extend_from_slice(&h.to_be_bytes());
+        full(b"ispe", 0, &b)
+    };
+    // properties: 1 hvcC, 2 tile ispe, 3 grid ispe, 4 irot 1
+    let mut ipco = bx(b"hvcC", &hvcc(vps, sps, pps));
+    ipco.extend(ispe(tw, th));
+    ipco.extend(ispe(w, h));
+    ipco.extend(bx(b"irot", &[1]));
+    let ipco = bx(b"ipco", &ipco);
+    let mut ipma = 5u32.to_be_bytes().to_vec();
+    for id in 1..=4u16 {
+        ipma.extend_from_slice(&id.to_be_bytes());
+        ipma.extend_from_slice(&[2, 0x81, 0x02]);
+    }
+    ipma.extend_from_slice(&5u16.to_be_bytes());
+    ipma.extend_from_slice(&[2, 0x03, 0x84]);
+    let ipma = full(b"ipma", 0, &ipma);
+    let mut iprp = ipco;
+    iprp.extend(ipma);
+    let iprp = bx(b"iprp", &iprp);
+    let hdlr = full(b"hdlr", 0, b"\0\0\0\0pict\0\0\0\0\0\0\0\0\0\0\0\0\0");
+    let pitm = full(b"pitm", 0, &5u16.to_be_bytes());
+    let ftyp = bx(b"ftyp", b"heic\0\0\0\0mif1heic");
+    // iloc v0, 4-byte offsets and lengths; offsets known once the meta
+    // box size is: its size does not depend on the offset values
+    let iloc = |base: u32| {
+        let mut b = vec![0x44, 0x00];
+        b.extend_from_slice(&(datas.len() as u16).to_be_bytes());
+        let mut off = base;
+        for (i, d) in datas.iter().enumerate() {
+            b.extend_from_slice(&((i + 1) as u16).to_be_bytes());
+            b.extend_from_slice(&[0, 0]);
+            b.extend_from_slice(&1u16.to_be_bytes());
+            b.extend_from_slice(&off.to_be_bytes());
+            b.extend_from_slice(&(d.len() as u32).to_be_bytes());
+            off += d.len() as u32;
+        }
+        full(b"iloc", 0, &b)
+    };
+    let meta = |base: u32| {
+        let mut m = hdlr.clone();
+        m.extend(pitm.clone());
+        m.extend(iloc(base));
+        m.extend(iinf.clone());
+        m.extend(iref.clone());
+        m.extend(iprp.clone());
+        full(b"meta", 0, &m)
+    };
+    let base = (ftyp.len() + meta(0).len() + 8) as u32;
+    let mut out = ftyp;
+    out.extend(meta(base));
+    out.extend(bx(b"mdat", &datas.concat()));
+    out
+}
+
+/// A phone's HEIC (tiled, turned by `irot`, its capture moment in an Exif
+/// item) decodes upright and groups with its JPEG export; the export
+/// moves, the HEIC stays.
+#[test]
+fn a_tiled_rotated_heic_decodes_and_groups_with_its_jpeg() {
+    if !ffmpeg_ok() || !has_encoder("libx265") {
+        eprintln!("ffmpeg with libx265 missing; skipped");
+        return;
+    }
+    let fx = fixture();
+    let work = fx.root.parent().unwrap().join("heic_work");
+    // stored 240×200; displayed a quarter turn anticlockwise: 200×240
+    let stored = photo(51, 240, 200);
+    let heic = heic_file(&work, &stored, "2020:05:04 18:39:11");
+    put_at(&fx.root, "phone/IMG_2927.HEIC", &heic, 1_588_000_000);
+    let upright = image::imageops::rotate270(&stored);
+    put(
+        &fx.root,
+        "phone/exports/IMG_2927.jpg",
+        &with_capture_time(&jpeg_bytes(&upright, 90), "2020:05:04 18:39:11"),
+    );
+    // the same picture left unturned in a JPEG: only the dihedral
+    // search finds it, and it says so
+    put(
+        &fx.root,
+        "phone/exports/IMG_2927_sideways.jpg",
+        &jpeg_bytes(&stored, 90),
+    );
+
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("1 HEIC"),
+        "the DECODE line counts the route\n{out}"
+    );
+    let line = |name: &str| {
+        out.lines()
+            .find(|l| l.contains(name))
+            .unwrap_or_else(|| panic!("{name} not listed\n{out}"))
+            .to_string()
+    };
+    let heic_line = line("IMG_2927.HEIC");
+    assert!(heic_line.contains("keep"), "{heic_line}");
+    assert!(
+        heic_line.contains("200×240") || heic_line.contains("200x240"),
+        "upright size\n{heic_line}"
+    );
+    let export = line("IMG_2927.jpg");
+    assert!(export.contains("near"), "{export}");
+    assert!(
+        !export.contains("rotated"),
+        "upright HEIC and upright JPEG: no turn between them\n{export}"
+    );
+    let sideways = line("IMG_2927_sideways.jpg");
+    assert!(sideways.contains("rotated"), "{sideways}");
+
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(fx.root.join("phone/IMG_2927.HEIC").exists(), "{out}");
+    assert!(
+        !fx.root.join("phone/exports/IMG_2927.jpg").exists(),
+        "{out}"
+    );
+}
+
+/// `_milked` made a link to another file system (a person staging
+/// duplicates on another drive): every move crosses volumes, so it is a
+/// copy, read back and compared, then the original deleted; the journal
+/// says so, and undo copies back the same way. Unix, where /dev/shm is a
+/// tmpfs; skipped when it is not another device.
+#[cfg(unix)]
+#[test]
+fn milk_across_volumes_copies_verifies_and_undoes() {
+    use std::os::unix::fs::MetadataExt;
+    let fx = fixture();
+    let shm = std::path::Path::new("/dev/shm");
+    let other = match tempfile::tempdir_in(shm) {
+        Ok(d) => d,
+        Err(_) => {
+            eprintln!("no /dev/shm; skipped");
+            return;
+        }
+    };
+    let dev = |p: &Path| fs::metadata(p).map(|m| m.dev()).unwrap_or(0);
+    if dev(other.path()) == dev(&fx.root) {
+        eprintln!("/dev/shm is the same device; skipped");
+        return;
+    }
+    std::os::unix::fs::symlink(other.path(), fx.root.join("_milked")).unwrap();
+    let hash_tree = |root: &Path| -> Vec<(String, u64, Vec<u8>)> {
+        files(root)
+            .into_iter()
+            .filter(|f| !f.starts_with("_milked"))
+            .map(|f| {
+                let p = root.join(&f);
+                let md = fs::metadata(&p).unwrap();
+                let secs = md
+                    .modified()
+                    .unwrap()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                (f, secs, fs::read(&p).unwrap())
+            })
+            .collect()
+    };
+    let before = hash_tree(&fx.root);
+
+    let (code, out, _) = run(&fx, &["milk", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("4 moved"), "{out}");
+    assert_eq!(
+        out.matches("copied across volumes").count(),
+        5,
+        "4 lines and the footer\n{out}"
+    );
+    assert!(out.contains("each copy read back and compared"), "{out}");
+    // the copies are on the other file system, the originals gone
+    assert!(other.path().join("backup/IMG_0041.jpg").exists(), "{out}");
+    assert!(!fx.root.join("backup/IMG_0041.jpg").exists());
+    // the journal records the copies
+    let j: Vec<String> = walkdir::WalkDir::new(&fx.journal)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json") && e.depth() >= 2)
+        .map(|e| fs::read_to_string(e.path()).unwrap())
+        .collect();
+    assert_eq!(j.len(), 1);
+    assert_eq!(j[0].matches("\"copied\": true").count(), 4, "{}", j[0]);
+
+    let (code, out, _) = run(&fx, &["--undo"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("4 restored"), "{out}");
+    assert!(out.contains("copied back across volumes"), "{out}");
+    // bytes and modification times as they were
+    assert_eq!(hash_tree(&fx.root), before);
+}
+
+/// `--skip` leaves a folder or a pattern out of the scan and remembers it
+/// in the app folder; the header and the SCAN line say so; `--unskip`
+/// forgets. `--min` leaves small files out, per run.
+#[test]
+fn skip_is_remembered_and_min_is_per_run() {
+    let fx = fixture();
+    let (code, out, _) = run(&fx, &["find", ".", "--skip", "backup"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("skip backup"), "the header names it\n{out}");
+    assert!(out.contains("1 skipped"), "the SCAN line counts it\n{out}");
+    assert!(!out.contains("backup/IMG_0041.jpg"), "{out}");
+    assert!(
+        fx.journal.join("skip.json").exists(),
+        "remembered in the app folder"
+    );
+    assert!(!fx.root.join("skip.json").exists(), "nothing in the tree");
+    // remembered: the next run skips it without being told
+    let (_, out, _) = run(&fx, &["find", "."]);
+    assert!(out.contains("skip backup"), "{out}");
+    assert!(!out.contains("backup/IMG_0041.jpg"), "{out}");
+    // a pattern, added to the list
+    let (_, out, _) = run(&fx, &["find", ".", "--skip", "*.bin"]);
+    assert!(out.contains("skip backup, *.bin"), "{out}");
+    // forgotten
+    let (_, out, _) = run(&fx, &["find", ".", "--unskip", "all"]);
+    assert!(!out.contains("skip "), "{out}");
+    assert!(
+        out.contains("backup/IMG_0041.jpg") || out.contains("backup\\IMG_0041.jpg"),
+        "{out}"
+    );
+    assert!(!fx.journal.join("skip.json").exists());
+
+    // a floor: the 300 KB copies stay, the 560-byte notes go
+    let (code, out, _) = run(&fx, &["find", ".", "--min", "100k"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("min 100 KB"), "{out}");
+    assert!(out.contains("under 100 KB"), "{out}");
+    assert!(!out.contains("notes"), "{out}");
+    assert!(
+        out.contains("next   dedupe milk . --min 100k"),
+        "the typed forms keep the floor\n{out}"
+    );
+    // bad values and a missing one are usage errors
+    let (code, out, err) = run(&fx, &["find", ".", "--min", "lots"]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(format!("{out}{err}").contains("not a size"), "{out}{err}");
+    let (code, out, err) = run(&fx, &["find", ".", "--skip"]);
+    assert_eq!(code, 1, "{out}{err}");
+    assert!(
+        format!("{out}{err}").contains("--skip needs a value"),
+        "{out}{err}"
+    );
 }

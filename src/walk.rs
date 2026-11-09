@@ -3,7 +3,9 @@
 //! Rules: never follow symlinks or junctions; never enter `_milked`;
 //! zero-byte files are not candidates (a thousand empty files are not a
 //! thousand copies of anything worth moving); directory metadata supplies
-//! size and modification time, so this stage opens no file.
+//! size and modification time, so this stage opens no file. A folder or
+//! file whose name is on the skip list is passed over whole (`skip`), and
+//! files under the size floor are not candidates (`--min`).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -33,6 +35,19 @@ pub struct ScanStats {
     pub empty: u64,
     /// Entries that could not be read (permission, vanished mid-scan).
     pub errors: u64,
+    /// Folders and files passed over by name (a skipped folder counts once).
+    pub skipped: u64,
+    /// Files under the size floor, and the floor.
+    pub small: u64,
+    pub min: u64,
+}
+
+/// What the scan leaves out besides `_milked`: names on the skip list, and
+/// files under a size floor.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Filter<'a> {
+    pub skip: &'a [String],
+    pub min: u64,
 }
 
 /// `_milked` by name; case-insensitive on Windows, where the file system
@@ -51,18 +66,35 @@ pub fn scan(
     root: &Path,
     recurse: bool,
     kind: Kind,
+    filter: Filter<'_>,
     progress: &mut dyn FnMut(&ScanStats),
 ) -> (Vec<Candidate>, ScanStats) {
-    let mut stats = ScanStats::default();
+    let mut stats = ScanStats {
+        min: filter.min,
+        ..Default::default()
+    };
     let mut out: Vec<Candidate> = Vec::new();
     let depth = if recurse { usize::MAX } else { 1 };
     let mut seen: u64 = 0;
+    let skipped = std::cell::Cell::new(0u64);
 
     let walker = WalkDir::new(root)
         .follow_links(false)
         .max_depth(depth)
         .into_iter()
-        .filter_entry(|e| !(e.file_type().is_dir() && is_milked_dir(e.file_name())));
+        .filter_entry(|e| {
+            if e.depth() == 0 {
+                return true; // the root itself is never skipped
+            }
+            if e.file_type().is_dir() && is_milked_dir(e.file_name()) {
+                return false;
+            }
+            if crate::skip::skipped(filter.skip, e.file_name()) {
+                skipped.set(skipped.get() + 1);
+                return false;
+            }
+            true
+        });
 
     for entry in walker {
         let entry = match entry {
@@ -90,6 +122,8 @@ pub fn scan(
                     let size = md.len();
                     if size == 0 {
                         stats.empty += 1;
+                    } else if size < filter.min {
+                        stats.small += 1;
                     } else {
                         let mtime = md.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                         stats.files += 1;
@@ -105,9 +139,11 @@ pub fn scan(
             }
         }
         if seen.is_multiple_of(256) {
+            stats.skipped = skipped.get();
             progress(&stats);
         }
     }
+    stats.skipped = skipped.get();
     progress(&stats);
     (out, stats)
 }
@@ -129,10 +165,10 @@ mod tests {
         mk(d.path(), "a.txt", b"aaa");
         mk(d.path(), "sub/b.txt", b"bbb");
         mk(d.path(), "sub/deeper/c.txt", b"ccc");
-        let (top, s) = scan(d.path(), false, Kind::All, &mut |_| {});
+        let (top, s) = scan(d.path(), false, Kind::All, Filter::default(), &mut |_| {});
         assert_eq!(top.len(), 1);
         assert_eq!(s.files, 1);
-        let (all, s) = scan(d.path(), true, Kind::All, &mut |_| {});
+        let (all, s) = scan(d.path(), true, Kind::All, Filter::default(), &mut |_| {});
         assert_eq!(all.len(), 3);
         assert_eq!(s.bytes, 9);
     }
@@ -145,10 +181,42 @@ mod tests {
         mk(d.path(), "empty.jpg", b"");
         mk(d.path(), "_milked/old.jpg", b"img");
         mk(d.path(), "sub/_milked/old2.jpg", b"img");
-        let (imgs, s) = scan(d.path(), true, Kind::Image, &mut |_| {});
+        let (imgs, s) = scan(d.path(), true, Kind::Image, Filter::default(), &mut |_| {});
         assert_eq!(imgs.len(), 1);
         assert!(imgs[0].path.ends_with("x.jpg"));
         assert_eq!(s.filtered, 1);
         assert_eq!(s.empty, 1);
+    }
+
+    #[test]
+    fn skip_names_and_the_size_floor() {
+        let d = tempfile::tempdir().unwrap();
+        mk(d.path(), "keep/a.jpg", &[1; 5000]);
+        mk(d.path(), "keep/thumb.jpg", &[1; 50]);
+        mk(d.path(), "node_modules/x/b.jpg", &[2; 5000]);
+        mk(d.path(), "keep/c.tmp", &[3; 5000]);
+        let skip = vec!["node_modules".to_string(), "*.tmp".to_string()];
+        let f = Filter {
+            skip: &skip,
+            min: 1000,
+        };
+        let (c, s) = scan(d.path(), true, Kind::All, f, &mut |_| {});
+        assert_eq!(c.len(), 1, "{c:?}");
+        assert!(c[0].path.ends_with("a.jpg"));
+        assert_eq!(s.skipped, 2, "the folder once, the file once");
+        assert_eq!(s.small, 1);
+        // the root itself is never skipped, whatever its name
+        let skip_root = vec![d.path().file_name().unwrap().to_string_lossy().into_owned()];
+        let (c, _) = scan(
+            d.path(),
+            true,
+            Kind::All,
+            Filter {
+                skip: &skip_root,
+                min: 0,
+            },
+            &mut |_| {},
+        );
+        assert_eq!(c.len(), 4);
     }
 }

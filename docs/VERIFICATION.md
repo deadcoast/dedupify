@@ -1843,3 +1843,254 @@ compile. Binary 26,510,992 bytes.
 - `v` on a video (the frame a third of the way in) and on an exact pair:
   code paths present, not driven here.
 - A resize during a sitting (handled as an event; not driven).
+
+---
+
+# VERIFICATION — Phase 10 (formats and filesystems), run on 2026-11-09
+
+Linux 6.18, rustc 1.97.0, ffmpeg 6.1.1 (which reads no HEIF itself: its
+demuxer gained HEIF stills in 7.0, its command line tiled ones in 8.1).
+Real files, none committed: sparse checkouts of
+`drewnoakes/metadata-extractor-images` (iPhone and Sony HEIC/HEIF, AVIF,
+and RAWs from 18 cameras, each with metadata-extractor's own dump),
+`AOMediaCodec/av1-avif` `testFiles` (Link-U transforms, Microsoft grid,
+rotation, crops), `strukturag/libheif` `examples`,
+`nokiatech/heif_conformance`. The Windows half of this phase is in
+`RUN_VERIFY.cmd` and is reported in its own section after that run.
+
+## 1. HEIF, HEIC and AVIF (NF-01)
+
+Every real file through `decode::load`, ffmpeg 6.1.1:
+
+```
+IMG_1034.heic        HEIC  4032x3024  2018-02-05 15:11:44.277   538 ms   48 tiles
+IMG_2927.HEIC        HEIC  3024x4032  2020-05-04 18:39:11.644   313 ms   48 tiles
+Issue 263 dotnet     HEIC  3024x4032  2019-08-21 11:21:36.245   432 ms   48 tiles, irot 3
+Issue 487.heic       HEIC  3024x4032  2020-06-30 11:27:59       420 ms   48 tiles, irot 3
+Sony A7M4.heif       HEIC  7008x4672  2022-06-10 18:17:40.250  1062 ms   6 tiles of 3520x1600
+cheers_1440x960      HEIC  1440x960   -                         110 ms   one item
+example.avif         AVIF   800x533   -                          68 ms
+Issue 649.avif       AVIF  5472x3648  2015-10-11 14:41:44.00    288 ms
+Tomsk 5x4 grid       AVIF  6400x2880  -                         327 ms   20 tiles
+Ronda_rotate90       AVIF  1080x1920  2016-12-29 11:24:41.17     94 ms   irot 3
+Chimera cropped      AVIF   480x256   2018-08-30 23:40:38.60     52 ms   clap
+Chimera 10-bit       AVIF  1920x1008  2018-08-30 00:38:53.17    112 ms   clap, 10-bit
+```
+
+(selection; `tests/formats_corpus.rs` holds all 34 with their expected
+size and moment.) Each picture was looked at: upright, every grid
+seamless, colours natural; the Tomsk file is the 5 × 4 mosaic of 20
+pictures its test set says it must display as. The four malformed HEIF
+files of the same set (named after the exceptions they caused in another
+reader) return errors (`box runs past its container`, `NAL runs past its
+item`), never a panic; `heif.rs`'s own test garbles every seventh byte of
+a file and truncates it at six points.
+
+**Rotation and mirror, measured** (RESEARCH §2.9). The Link-U files and
+their encoded PNGs: `imir 1` needs a left-right flip (mean difference to
+`kimono.png` 0.0; the other flip 54.5), `imir 0` top-bottom (0.0 /
+54.5), `irot 3` 270° anticlockwise (0.0 / 54.5), `irot 1` then `imir 0`
+in that order (0.0; the other order 54.5). Through the real AV1 decode,
+the five transformed files display as `kimono.avif` (mean difference
+under 4 levels each), and the rotated crop file lands on the plain crop
+file's picture. `clap` puts `kimono.crop` at (272, 39), the best of nine
+neighbouring offsets against `kimono.crop.png`. On iPhone files `irot 3`
+appears with EXIF "Rotate 90 CW" (two files) and the church interior of
+`Issue 263` decodes upright.
+
+**Colour, measured.** The Sony HEIF's `nclx` says limited range; its
+HEVC stream says full (ffprobe: `color_range=pc`). Against the file's own
+JPEG thumbnail item (decoded by the `image` crate), at 160×106: the
+stream's reading differs by 4.32 levels per pixel (mean 187.4 against
+187.9), the container's by 9.19 (mean 195.8). The stream decides. On
+`kimono.avif`, where both say limited/BT.2020, the decode is 2.80 levels
+from `kimono.png`.
+
+## 2. Camera RAW (NF-02)
+
+The embedded JPEGs of 18 real RAWs, first by a naive byte scan: previews
+from 160×120 to 7360×4912, and in the Pentax PEF and a Panasonic RW2
+runs of sensor data that start like a JPEG and claim 38581×40422 and
+64328×14895. Through `decode::load` (marker-chain check, mid-size choice,
+the RAW's own orientation and moment):
+
+```
+Canon EOS 70D.cr2     RAW  5472x3648  2014-04-29 17:07:52.98   126 ms
+Canon EOS R3.cr3      RAW  1620x1080  2023-02-09 10:10:27.79    19 ms
+Nikon D810.nef        RAW  1080x1620  2015-05-13 19:49:55.66    62 ms   portrait (Rotate 270 CW)
+Nikon D70.nef         RAW  2000x3008  2007-01-13 10:30:55.10    31 ms   preview stored turned
+Sony A7M3.arw         RAW  1080x1616  2019-04-24 22:14:20       39 ms   portrait (Rotate 270 CW)
+LG Nexus 5X.dng       RAW  4080x3028  2017-08-28 09:43:14      212 ms   no preview: ffmpeg, Rotate 180
+Fujifilm X-E1.raf     RAW  1920x1280  2012-11-08 14:57:15       41 ms
+Olympus E-M5.orf      RAW  3200x2400  2012-05-08 16:14:20       50 ms
+OM System OM-1.orf    RAW  3200x2400  -                         63 ms   DateTimeOriginal is all zeros
+Panasonic GF7.rw2     RAW  1920x1440  2015-01-18 15:41:07.530   39 ms
+Pentax K-1 II.pef     RAW  7360x4912  2020-07-25 22:48:40      228 ms
+```
+
+(selection.) For the 16 of the 18 RAWs that metadata-extractor reads, every
+moment equals its `Date/Time Original` to the second and every
+orientation its `Orientation` (compared by script). It does not read
+CR3: for the two CR3 files the check is only within the file — the three
+date fields of `CMT1` and `CMT2` all state the moment read here. Each
+picture was looked at: the two portraits and the D70 upright, the phone
+DNG's keyboard legible the right way up. exiftool's stripped RAW samples
+(a few KB each, data removed) decode to their 160-pixel thumbnails or
+report `RAW without an embedded preview`.
+
+**A real folder through the pipeline.** Real files with the derivatives
+a person makes: an iPhone HEIC and a stripped half-size JPEG export of
+it; a Canon CR3 with its full-size camera JPEG beside it under the same
+name and a half-size web export elsewhere; the portrait Nikon NEF and an
+upright quarter-size export; `kimono.avif`, its `irot` file and the
+test set's own JPEG; a second, unrelated iPhone HEIC. `find`, 120
+columns:
+
+```
+ DECODE ==============================  11 images hashed   2 HEIC   2 AVIF   2 RAW   2.0 s
+ NEAR 001   2 similar   336 KB reclaimable
+   keep  avif/kimono.avif                       722x1024     83.5 KB  2026-11-09
+   near  avif/kimono.rotate90.avif              722x1024     82.9 KB  re-encoded    d  0  p  0  q   2
+   near  avif/kimono.jpg                        722x1024     253 KB   re-encoded    d  0  p  0  q   2
+ NEAR 002   1 similar  +1 pair   296 KB reclaimable
+   keep  camera/R3_0001.CR3                     RAW          11.7 MB  2026-11-09
+   pair  camera/R3_0001.JPG                     6000x4000    1.83 MB  RAW + JPEG    d  0  p  0  q   6
+   near  web/r3-lab-robot.jpg                   3000x2000    296 KB   from the RAW  d  0  p  0  q   6
+ NEAR 003   1 similar   263 KB reclaimable
+   keep  phone/IMG_2927.HEIC                    3024x4032    704 KB   2026-11-09
+   near  phone/exports/IMG_2927 (edited).jpg    1512x2016    263 KB   resized 50%   d  0  p  0  q  12
+ NEAR 004   1 similar   194 KB reclaimable
+   keep  camera/DSC_0810.NEF                    RAW          38.8 MB  2026-11-09
+   near  web/boy-sunglasses.jpg                 1228x1840    194 KB   from the RAW  d  0  p  0  q   2
+ 1 RAW + JPEG   the camera's JPEG beside its RAW: kept with it; choose it by hand in the workspace
+```
+
+The turned AVIF and the upright NEF export carry no turn word: both
+sides are compared upright. `milk` moved the five derivatives, left both
+RAWs, and printed `kept~  camera/R3_0001.JPG  the camera's JPEG of a
+RAW, kept with it` with its footer; `--undo` restored the five; the 11
+files' SHA-256 equal the start.
+
+In the workspace on the same folder: the pair is `□` (off) and a space
+chooses it `by hand` (`6 selected  2.90 MB  1 by hand`); `k` on it makes
+it the keeper, the RAW becomes `· raw … RAW + JPEG`, the web export
+re-relates to the JPEG as `resized 50%`; a space on the RAW says `a
+camera RAW: never moved by the near tier` and selects nothing.
+
+## 3. decode.rs (TECH-01)
+
+One module, four routes, chosen by the file's bytes; every image
+extension of the scan now reaches DECODE (before, only the `image`
+crate's). Two end-to-end tests build their own files: a TIFF-structured
+RAW with an embedded preview, its camera JPEG and an export
+(`a_raw_keeps_its_group_and_its_camera_jpeg`); and a HEIC made here —
+x265 tiles in a 2 × 2 `grid`, `irot 1`, an `Exif` item — with an
+upright export and an unturned one
+(`a_tiled_rotated_heic_decodes_and_groups_with_its_jpeg`: the HEIC lists
+at 200×240, the upright export `same picture  d 0 p 0 q 0`, the unturned
+one `rotated 270°`). The second skips without an x265 encoder.
+
+## 4. Across volumes (CORE-05)
+
+`/dev/shm` here is a tmpfs (another device; a rename into it fails with
+errno 18). The sample with `_milked` made a link into it:
+
+```
+ moved     photos/exports/starry_night (1).jpg                                          copied across volumes
+ moved~    photos/exports/graf1_mirror.png                 mirrored  d  0  p  0  q   0  copied across volumes
+ 12 copied across volumes: each copy read back and compared before its original was deleted
+ restored  photos/exports/butterfly_small.jpg                                      copied back across volumes
+ 12 restored   2.87 MB back in place   journal 20261109-215125
+```
+
+Every file's bytes, size and modification time after the undo equal the
+start (39 files). The journal marks the 12 moves `"copied": true`; a
+pre-Phase-10 journal without the field reads as a rename (unit test).
+`milk_across_volumes_copies_verifies_and_undoes` asserts the same in the
+suite, times included. `fsops`' unit tests: a copy that cannot be made
+leaves source and destination as they were; a missing source is
+`Vanished`.
+
+## 5. Failures by kind, retry (SC-07)
+
+`chattr +i` makes a rename fail even for root (EPERM). The sample with
+one duplicate made immutable, in the workspace, 110 × 30, `m` enter:
+
+```
+ failed    photos/exports/home-copy.jpg                                                     permission denied
+ 14 moved   19.2 MB into s/_milked   journal 20261109-214522
+ ▸  enter back to the groups (5 left)  r retry 1 (close what holds them first)  u undo it  q quit
+```
+
+The attribute lifted, `r`: `1 moved   31.4 KB` under a journal of its
+own, and the bar without a retry; `u` reversed the retry alone (`1
+restored`); `--undo` from the command line reversed the first change;
+the tree's SHA-256 equal the start. The bar now offers `u undo it` only
+when the change journaled something (before, also when every file
+failed).
+
+## 6. Skip, size floor, doctor (QOL-06, QOL-08, QOL-09)
+
+```
+ dedupe find  …/sk/s  recursive  all kinds  min 100 KB  skip exports
+ SCAN   ==============================  19 files   31.9 MB   1 skipped   10 under 100 KB   0.0 s
+```
+
+`skip.json` in the app folder holds `["exports"]`; the next run without
+the flag still says `skip exports` and scans 29 files; `--unskip all`
+scans the 39 and removes the file. `skip_is_remembered_and_min_is_per_run`
+covers the same plus the `next` lines carrying `--min 100k` and the two
+usage errors. Doctor with the model installed and `_milked` linked to
+the tmpfs:
+
+```
+ PASS  _milked   0 files   0 B   on another volume: milk copies, reads back, then deletes
+ PASS  volumes   one volume under this folder
+ PASS  skip      *.tmp   remembered; --unskip NAME or --unskip all forgets
+ PASS  deep      …/sscd_disc_mixup.onnx   93.6 MB   SHA-256 matches
+ PASS  heif      HEIC and AVIF decode (probe pictures checked)
+```
+
+The probes (`assets/doctor/probe.heic`, 364 bytes, x265; `probe.avif`,
+313 bytes, libaom) are made by `examples/make_probes.rs`: red left, blue
+right, and the doctor checks both halves after decoding.
+
+## 7. Windows, prepared (QOL-10, TECH-07, SC-08)
+
+Built here, verified by the Windows run: the Ctrl-C test's Windows half
+(the child in its own process group, CTRL_BREAK from
+`GenerateConsoleCtrlEvent`; `ctrlc`'s handler takes every console event
+alike, read in its source), the launcher's UTF-8 logs (`Save`/`Add`
+through .NET with a BOM-less encoder, native output read as UTF-8), the
+real-format fetch and test, and the console screenshot after a live
+doctor. The type-check and clippy for `x86_64-pc-windows-msvc` pass;
+they caught `trash::Error::FileSystem` being a Linux-only variant. The
+committed `runs/win/logs/` (an earlier run, by the launcher's former
+folder name) is removed; `log/` and `formats/` are ignored.
+
+## Suite
+
+`cargo test --release`: 114 unit tests (17 new: `heif` 4, `raw` 3,
+`decode` 3, `skip` 3, `fsops` 3, `walk` 1) and 29 end-to-end tests pass
+(4 new: the RAW group, the tiled rotated HEIC, across volumes, skip and
+size floor; the Ctrl-C test now shares its body with the Windows one);
+with `DEDUPE_MODEL` the 29 pass; with `--no-default-features` 112 + 29;
+`formats_corpus -- --ignored` 3 tests, 34 of 34 real files. clippy
+(both feature sets, and for Windows) and `cargo fmt --check` clean.
+Binary 26,512,904 bytes.
+
+## Not verified here
+
+- Everything in §7, until the Windows run: the Ctrl-C test on Windows,
+  colour in the legacy console, the formats on ffmpeg 9.0.2.
+- The Recycle Bin refusing a file (the `m milk the N the bin refused`
+  fallback): the path is written and type-checked, not driven — the
+  freedesktop bin here accepts whatever it can rename, and a refusal
+  needs a volume without a bin.
+- A camera roll: bursts within one second (SubSecTime), many RAW + JPEG
+  pairs at once (CORE-08, Phase 11).
+- RAW makers outside the 18 cameras here (Sigma X3F, Hasselblad 3FR,
+  Phase One IIQ, Kodak, Minolta, Leaf): the same scan applies; not run.
+- HEIF overlays (`iovl`) are not decoded (counted `undecodable` on the
+  DECODE line); alpha planes are ignored (the colour picture is hashed, as
+  `bbb_alpha_inverted.avif` decodes); HEVC 4:4:4 tiles: not run.

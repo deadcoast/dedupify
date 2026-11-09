@@ -379,7 +379,13 @@ mod tests {
         mk(d.path(), "b.bin", b"same bytes");
         mk(d.path(), "c.bin", b"same byteS");
         mk(d.path(), "d.bin", b"other");
-        let (c, _) = scan(d.path(), true, Kind::All, &mut |_| {});
+        let (c, _) = scan(
+            d.path(),
+            true,
+            Kind::All,
+            crate::walk::Filter::default(),
+            &mut |_| {},
+        );
         let (g, s) = find_groups(c, false, &NoProgress);
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].members.len(), 2);
@@ -403,7 +409,13 @@ mod tests {
         mk(d.path(), "sub/x2.bin", &base);
         mk(d.path(), "mid.bin", &middle_diff);
         mk(d.path(), "head.bin", &head_diff);
-        let (c, _) = scan(d.path(), true, Kind::All, &mut |_| {});
+        let (c, _) = scan(
+            d.path(),
+            true,
+            Kind::All,
+            crate::walk::Filter::default(),
+            &mut |_| {},
+        );
         let (g, s) = find_groups(c, false, &NoProgress);
         assert_eq!(s.size_sharing, 4);
         assert_eq!(
@@ -425,7 +437,13 @@ mod tests {
         middle_diff[len / 2] ^= 0xff;
         mk(d.path(), "x1.bin", &base);
         mk(d.path(), "mid.bin", &middle_diff);
-        let (c, _) = scan(d.path(), true, Kind::All, &mut |_| {});
+        let (c, _) = scan(
+            d.path(),
+            true,
+            Kind::All,
+            crate::walk::Filter::default(),
+            &mut |_| {},
+        );
         let (g, s) = find_groups(c, true, &NoProgress);
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].tier, Tier::Sample);
@@ -441,7 +459,13 @@ mod tests {
             return; // filesystem without hard links; nothing to test here
         }
         mk(d.path(), "c.bin", b"linked content");
-        let (c, _) = scan(d.path(), true, Kind::All, &mut |_| {});
+        let (c, _) = scan(
+            d.path(),
+            true,
+            Kind::All,
+            crate::walk::Filter::default(),
+            &mut |_| {},
+        );
         let (g, s) = find_groups(c, false, &NoProgress);
         assert_eq!(s.hardlinks_collapsed, 1);
         assert_eq!(g.len(), 1);

@@ -36,7 +36,7 @@ fn load_all(dir: &Path) -> Vec<(String, RgbImage)> {
         .flatten()
         .filter(|e| e.file_type().is_file())
         .map(|e| e.into_path())
-        .filter(|p| dedupe::perceptual::decodable(p))
+        .filter(|p| dedupe::decode::decodable(p))
         .collect();
     paths.sort();
     for p in paths {

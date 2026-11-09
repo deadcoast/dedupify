@@ -16,7 +16,6 @@ use crate::journal::{self, Entry, Journal, Op, Writer};
 use crate::keeper;
 use crate::kind::Kind;
 use crate::near::{self, NearGroup, NearStats, Rep};
-use crate::perceptual;
 use crate::render::{LiveProgress, Renderer};
 use crate::theme::Role;
 use crate::util::{counted, fmt_count, rel_display, shorten_middle, under_root, unix_secs, width};
@@ -170,7 +169,11 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
     let lp = LiveProgress::new(r.theme);
     let t0 = Instant::now();
     lp.begin(Stage::Scan);
-    let (cands, scan) = walk::scan(&inv.root, inv.recurse, inv.kind, &mut |s| {
+    let filter = walk::Filter {
+        skip: &inv.skip,
+        min: inv.min,
+    };
+    let (cands, scan) = walk::scan(&inv.root, inv.recurse, inv.kind, filter, &mut |s| {
         lp.update_text(Stage::Scan, s.files, r.scan_text(s, None));
     });
     lp.finish(Stage::Scan, r.scan_text(&scan, Some(t0.elapsed())));
@@ -187,7 +190,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
     } else {
         cands
             .iter()
-            .filter(|c| perceptual::decodable(&c.path))
+            .filter(|c| crate::decode::decodable(&c.path))
             .count() as u64
     };
     let videos_seen = if video_on {
@@ -216,7 +219,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         }
         let reps: Vec<Rep> = all
             .iter()
-            .filter(|c| perceptual::decodable(&c.path))
+            .filter(|c| crate::decode::decodable(&c.path))
             .cloned()
             .filter_map(|c| match role.get(c.path.as_path()) {
                 Some(None) => None, // exact duplicate of a keeper: already handled
@@ -400,6 +403,9 @@ pub(crate) struct Item<'a> {
     /// Chosen in the workspace although the program's evidence did not
     /// confirm it: the person's look is the second family. [CLAUDE]
     pub(crate) by_hand: bool,
+    /// The camera's JPEG beside its RAW: left with it unless chosen by
+    /// hand, and counted apart from the unconfirmed. [CLAUDE, Phase 10]
+    pub(crate) pair: bool,
 }
 
 impl Item<'_> {
@@ -432,6 +438,7 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                 hash: exact::hex(&g.hash),
                 listed: false,
                 by_hand: false,
+                pair: false,
             });
         }
     }
@@ -439,9 +446,10 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
         let k = &g.members[0].hashed;
         for m in &g.members[1..] {
             let rel = m.relation.unwrap();
-            if rel.kin {
-                // another capture moment: another photograph, never moved
-                // or binned, by the program or by hand (RESEARCH §2.8)
+            if rel.kin || rel.raw {
+                // another capture moment: another photograph; or a camera
+                // RAW: never moved or binned, by the program or by hand
+                // (RESEARCH §2.8, §2.10)
                 continue;
             }
             // the words first, the evidence after, as on the listing
@@ -466,6 +474,7 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                 // (RESEARCH §2.6)
                 listed: rel.listed_only(),
                 by_hand: false,
+                pair: rel.pair,
             });
         }
     }
@@ -488,6 +497,7 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
                 hash: format!("video:{}f:{:.3}", m.hashed.sig.frames, rel.level2),
                 listed: false,
                 by_hand: false,
+                pair: false,
             });
         }
     }
@@ -496,6 +506,19 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
 
 /// The footer line for items a person chose although the program's own
 /// evidence did not confirm them.
+/// RAW + JPEG pairs left together, for the footer.
+fn pair_note(r: &Renderer, n: u64) {
+    if n > 0 {
+        r.note(
+            Role::Warn,
+            &format!(
+                "{} kept~: the camera's JPEG beside its RAW stays with it; choose it by hand in the workspace",
+                fmt_count(n)
+            ),
+        );
+    }
+}
+
 fn by_hand_note(r: &Renderer, n: u64) {
     if n > 0 {
         r.note(
@@ -580,18 +603,27 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
     }
     r.blank();
     let list = default_items(&f);
-    act_milk(&f, &list, inv, r, inv.dry_run).0
+    act_milk(&f, &list, inv, r, inv.dry_run).code
+}
+
+/// What an action did: its exit code, its journal when it wrote one, and
+/// every file it could not take with the reason (SC-07), so the workspace
+/// can offer a retry or a fallback by kind.
+pub(crate) struct Acted {
+    pub(crate) code: i32,
+    pub(crate) journal: Option<String>,
+    pub(crate) failed: Vec<(PathBuf, crate::fsops::ActError)>,
 }
 
 /// Move every actionable item of `f` into `_milked` (or say what would
-/// move). Returns the exit code and the journal id when one was written.
+/// move). A move across volumes is a verified copy (`fsops`).
 pub(crate) fn act_milk(
     f: &Found,
     list: &[Item<'_>],
     inv: &Invocation,
     r: &Renderer,
     dry_run: bool,
-) -> (i32, Option<String>) {
+) -> Acted {
     let milked = inv.root.join(MILKED_DIR);
     let milked_display = under_root(inv.root_display.as_deref(), MILKED_DIR);
     let mut w = Writer::new(&inv.root, &inv.command_line_as(Command::Milk));
@@ -604,8 +636,10 @@ pub(crate) fn act_milk(
         interrupt::install();
         interrupt::changing(true);
     }
-    let mut kept: Vec<(String, String)> = Vec::new();
+    let mut kept: Vec<(String, String, bool)> = Vec::new();
     let mut by_hand: u64 = 0;
+    let mut failures: Vec<(PathBuf, crate::fsops::ActError)> = Vec::new();
+    let mut copied_n: u64 = 0;
     for it in list {
         if !dry_run && interrupt::requested() {
             stopped = true;
@@ -616,7 +650,7 @@ pub(crate) fn act_milk(
         // same evidence rule as purge, reversible or not (RESEARCH §2.7) —
         // unless a person chose it in the workspace
         if !it.taken() {
-            kept.push((rel, it.near_reason.clone()));
+            kept.push((rel, it.near_reason.clone(), it.pair));
             continue;
         }
         let rel_path = it
@@ -657,13 +691,16 @@ pub(crate) fn act_milk(
             }
             continue;
         }
-        let res = dst
-            .parent()
-            .map(fs::create_dir_all)
-            .unwrap_or(Ok(()))
-            .and_then(|_| fs::rename(it.path, &dst));
-        match res {
-            Ok(()) => {
+        match crate::fsops::move_file(it.path, &dst) {
+            Ok(copied) => {
+                let mut detail = detail;
+                if copied {
+                    copied_n += 1;
+                    if !detail.is_empty() {
+                        detail.push_str("  ");
+                    }
+                    detail.push_str("copied across volumes");
+                }
                 r.action(verb, Role::Ok, &rel, &detail);
                 moved += 1;
                 bytes += it.size;
@@ -674,19 +711,21 @@ pub(crate) fn act_milk(
                     op: Op::Move {
                         from: it.path.to_path_buf(),
                         to: dst.clone(),
+                        copied,
                     },
                     size: it.size,
                     hash: it.hash.clone(),
                 });
             }
             Err(e) => {
-                r.action("failed", Role::Danger, &rel, &os_err(&e));
+                r.action("failed", Role::Danger, &rel, &e.words());
                 failed += 1;
+                failures.push((it.path.to_path_buf(), e));
             }
         }
     }
     interrupt::changing(false);
-    for (path, why) in &kept {
+    for (path, why, _) in &kept {
         r.action("kept~", Role::Warn, path, why);
     }
 
@@ -711,16 +750,28 @@ pub(crate) fn act_milk(
             "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
         );
     }
-    if !kept.is_empty() {
+    let kept_pairs = kept.iter().filter(|k| k.2).count() as u64;
+    let kept_unconfirmed = kept.len() as u64 - kept_pairs;
+    if kept_unconfirmed > 0 {
         r.note(
             Role::Warn,
             &format!(
                 "{} kept~: similar on two hashes, confirmed by nothing else; shown, left in place",
-                fmt_count(kept.len() as u64)
+                fmt_count(kept_unconfirmed)
             ),
         );
     }
+    pair_note(r, kept_pairs);
     by_hand_note(r, by_hand);
+    if copied_n > 0 {
+        r.note(
+            Role::Dupe,
+            &format!(
+                "{} copied across volumes: each copy read back and compared before its original was deleted",
+                fmt_count(copied_n)
+            ),
+        );
+    }
     if failed > 0 {
         r.note(
             Role::Danger,
@@ -743,7 +794,11 @@ pub(crate) fn act_milk(
     } else {
         EXIT_OK
     };
-    (code, journal_id)
+    Acted {
+        code,
+        journal: journal_id,
+        failed: failures,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -758,7 +813,7 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
         return EXIT_OK;
     }
     r.blank();
-    act_purge(&f, &list, &verified, inv, r, inv.dry_run).0
+    act_purge(&f, &list, &verified, inv, r, inv.dry_run).code
 }
 
 /// VERIFY — exact items byte for byte against the keeper; near items are
@@ -814,17 +869,22 @@ pub(crate) fn act_purge(
     inv: &Invocation,
     r: &Renderer,
     dry_run: bool,
-) -> (i32, Option<String>) {
+) -> Acted {
     // exceptions are printed after the action lines, before the footer
     let mut to_bin: Vec<usize> = Vec::new();
     let mut kept: Vec<(&str, String, String)> = Vec::new();
     let mut kept_mismatch: u64 = 0;
     let mut kept_unconfirmed: u64 = 0;
+    let mut kept_pairs: u64 = 0;
     for (i, it) in list.iter().enumerate() {
         if verified[i] {
             to_bin.push(i);
         } else if it.near.is_some() {
-            kept_unconfirmed += 1;
+            if it.pair {
+                kept_pairs += 1;
+            } else {
+                kept_unconfirmed += 1;
+            }
             kept.push((
                 "kept~",
                 rel_display(it.path, &inv.root),
@@ -841,6 +901,7 @@ pub(crate) fn act_purge(
     }
 
     let mut w = Writer::new(&inv.root, &inv.command_line_as(Command::Purge));
+    let mut failures: Vec<(PathBuf, crate::fsops::ActError)> = Vec::new();
     let mut binned: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
@@ -909,12 +970,10 @@ pub(crate) fn act_purge(
                         hash: it.hash.clone(),
                     });
                 } else {
-                    let why = match &res {
-                        Err(e) => e.to_string(),
-                        Ok(()) => "still present".to_string(),
-                    };
-                    r.action("failed", Role::Danger, &rel, &why);
+                    let e = bin_error(&res);
+                    r.action("failed", Role::Danger, &rel, &e.words());
                     failed += 1;
+                    failures.push((it.path.to_path_buf(), e));
                 }
             }
         }
@@ -964,6 +1023,7 @@ pub(crate) fn act_purge(
             ),
         );
     }
+    pair_note(r, kept_pairs);
     by_hand_note(r, by_hand);
     if failed > 0 {
         r.note(
@@ -987,7 +1047,40 @@ pub(crate) fn act_purge(
     } else {
         EXIT_OK
     };
-    (code, journal_id)
+    Acted {
+        code,
+        journal: journal_id,
+        failed: failures,
+    }
+}
+
+/// Why the bin left a file: a file held open is in use (and worth a
+/// retry); anything else is the bin refusing (and `_milked` is the
+/// fallback).
+fn bin_error(res: &Result<(), trash::Error>) -> crate::fsops::ActError {
+    use crate::fsops::ActError;
+    match res {
+        // the freedesktop bin's file-system errors carry the io error
+        #[cfg(all(
+            unix,
+            not(target_os = "macos"),
+            not(target_os = "ios"),
+            not(target_os = "android")
+        ))]
+        Err(trash::Error::FileSystem { source, .. }) => ActError::from_io(source),
+        // Windows HRESULTs: 0x80070020 sharing violation, 0x80070021 lock
+        Err(trash::Error::Os { code, description })
+            if *code == 32
+                || *code == 33
+                || *code as u32 == 0x8007_0020
+                || *code as u32 == 0x8007_0021 =>
+        {
+            let _ = description;
+            ActError::InUse
+        }
+        Err(e) => ActError::Bin(e.to_string()),
+        Ok(()) => ActError::Bin("the file is still there".into()),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1135,7 +1228,7 @@ pub(crate) fn act_undo_which(inv: &Invocation, r: &Renderer, id: Option<&str>) -
 
     // moves, newest first
     for e in j.entries.iter().rev() {
-        if let Op::Move { from, to } = &e.op {
+        if let Op::Move { from, to, .. } = &e.op {
             if stopped {
                 remaining.push(e.clone());
                 continue;
@@ -1167,19 +1260,19 @@ pub(crate) fn act_undo_which(inv: &Invocation, r: &Renderer, id: Option<&str>) -
                 failed += 1;
                 continue;
             }
-            let res = from
-                .parent()
-                .map(fs::create_dir_all)
-                .unwrap_or(Ok(()))
-                .and_then(|_| fs::rename(to, from));
-            match res {
-                Ok(()) => {
-                    r.action("restored", Role::Ok, &rel, "");
+            match crate::fsops::move_file(to, from) {
+                Ok(copied) => {
+                    let detail = if copied {
+                        "copied back across volumes"
+                    } else {
+                        ""
+                    };
+                    r.action("restored", Role::Ok, &rel, detail);
                     restored += 1;
                     bytes += e.size;
                 }
                 Err(err) => {
-                    r.action("failed", Role::Danger, &rel, &os_err(&err));
+                    r.action("failed", Role::Danger, &rel, &err.words());
                     failed += 1;
                 }
             }

@@ -25,13 +25,20 @@ fn main() -> ExitCode {
 }
 
 fn run(args: &[String], cwd: &std::path::Path, r: &Renderer, theme: Theme) -> i32 {
-    let inv = match cli::parse(args, cwd) {
+    let mut inv = match cli::parse(args, cwd) {
         Ok(i) => i,
         Err(e) => {
             r.error(&e.to_string());
             return actions::EXIT_USER;
         }
     };
+    // the skip list in force: remembered, plus --skip, minus --unskip
+    if matches!(
+        inv.command,
+        Command::Find | Command::Milk | Command::Purge | Command::Doctor
+    ) {
+        inv.skip = dedupe::skip::resolve(&inv.skip_add, &inv.skip_remove);
+    }
 
     match inv.command {
         Command::Help => {

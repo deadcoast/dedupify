@@ -433,6 +433,124 @@ verified on synthesised capture times (`capture.rs` builds a JPEG with an
 EXIF segment in its tests; `tests/e2e.rs` stamps the fixture) and not yet
 on a camera roll.
 
+### 2.9 HEIF, HEIC and AVIF — Phase 10 **[CLAUDE]**
+
+A phone photo today is a HEIC: HEVC-coded pictures in an ISO base media
+file (ISO/IEC 23008-12, profiled by MIAF); AVIF is the same container
+around AV1. The picture a viewer shows is the **primary item** (`pitm`),
+and on a phone that item is not one coded picture but a `grid`: an
+iPhone stores 4032×3024 as 48 HEVC tiles of 512×512 (6 × 8, cut to the
+output size the grid states), a Sony A7M4 stores 7008×4672 as 6 tiles of
+3520×1600 (the real files of VERIFICATION § Phase 10).
+
+**Why the container is read here.** ffmpeg reads HEIF stills from 7.0
+and its command line composes tiled ones from 8.1 (FFmpeg Changelog:
+7.0 "Support for HEIF/AVIF still images and tiled still images", 8.1
+"ffmpeg CLI tiled HEIF support"). The Windows machine this is verified
+on has 9.0.2; the Linux build machine has 6.1.1, which reads no HEIF at
+all. Every ffmpeg since 2013 decodes a raw HEVC stream, and with libdav1d
+or libaom a raw AV1 one. So `heif.rs` reads the boxes (`ftyp`, `meta`:
+`hdlr`, `pitm`, `iinf`/`infe`, `iloc`, `iref`, `iprp`/`ipco`/`ipma`,
+`idat`), turns each tile into an elementary stream (HEVC: the `hvcC`
+parameter sets and the length-prefixed NAL units rewritten as Annex B;
+AV1: a temporal delimiter, then the item's OBUs), and `decode.rs` pipes
+the stream to `ffmpeg -f hevc|obu`, reads one PPM per tile, composes the
+tiles row by row and cuts to the grid's output size. One process per
+file; the result is the same on every ffmpeg the person has.
+
+**Transforms.** A HEIF's orientation is not EXIF's: the primary item's
+transformative properties are applied in the order they are associated
+with it — `clap` (clean aperture, ISO/IEC 14496-12 §12.1.4: centred at
+`horizOff + (w − 1)/2`, `vertOff + (h − 1)/2`), `irot` (n × 90°
+anticlockwise), `imir`. The `imir` field changed meaning between
+editions of the standard (an "axis" in the first, a "mode" later), so
+it was **measured**, not read: the AVIF test set's Link-U files state
+what each must display as and ship the encoded picture as PNG
+(AOMediaCodec/av1-avif `testFiles/Link-U`). `kimono.mirror-horizontal`
+carries `imir 1` and needs a left-right flip to equal `kimono.png`
+(mean difference 0.0; the top-bottom flip: 54.5); `kimono.mirror-vertical`
+carries `imir 0` and needs top-bottom (0.0 against 54.5);
+`kimono.rotate90` carries `irot 3` and needs 270° anticlockwise (0.0
+against 54.5); `kimono.mirror-vertical.rotate270` carries `irot 1` then
+`imir 0`, and rotating then flipping in that order gives 0.0 (the other
+order: 54.5). The `clap` formula lands `kimono.crop` on offset (272, 39),
+the best match of its nine neighbours against `kimono.crop.png`. On real
+iPhone files `irot 3` sits with EXIF "Rotate 90 CW" (two files), and the
+church interior of one of them decodes upright.
+
+**Colour.** `colr nclx` in the container and the coded stream's own
+signalling (HEVC VUI) can disagree. The Sony A7M4 HEIF says limited
+range in `nclx`; its HEVC stream says full range. Its own JPEG thumbnail
+item, decoded independently by the `image` crate, was compared with the
+composed picture at the thumbnail's size: the stream's reading differs
+by 4.3 levels per pixel on average (mean 187.4 against the thumbnail's
+187.9), the container's by 9.2 (mean 195.8). So the stream decides;
+`nclx` is not applied over it. Where the two agree (the AVIF set's
+`kimono.avif`: limited, BT.2020 in both) the choice changes nothing, and
+the decode is 2.8 levels from the original PNG. A stream that signals
+nothing is decoded as ffmpeg's default (limited range) whatever `nclx`
+says: a contrast difference the hashes tolerate.
+
+**The capture moment** of a HEIF is the `Exif` item that describes the
+primary (`cdsc`): a 4-byte offset, then a TIFF structure, read by
+`kamadak-exif`.
+
+### 2.10 Camera RAW — Phase 10 **[CLAUDE]**
+
+Nothing here demosaics sensor data. Every RAW format carries the
+camera's own JPEG rendering of the shot, and that preview is what is
+hashed — but where it is differs per maker (TIFF IFDs, maker notes, a
+CR3 `PRVW` box, a RAF header field), and on a real set of 18 cameras
+(metadata-extractor-images: Canon CR2/CR3, Nikon NEF, Sony ARW, DNG
+from DJI, Leica and an LG phone, Fuji RAF, Olympus/OM ORF, Panasonic RW2,
+Pentax PEF) previews ranged from full size (Canon, Nikon, Pentax: up to
+7360×4912) to 1616–3200 pixels (Sony, Fuji, Olympus, Panasonic) to none
+(the phone DNG).
+
+**Finding the preview.** One reader for all makers: scan for the JPEG
+start marker and accept a candidate only when its whole marker chain
+parses — well-formed segments inside the file up to a baseline or
+progressive frame header (8-bit, 1 or 3 components, 16–16384 pixels a
+side), quantisation tables before the scan, the entropy-coded data walked
+to its EOI — and use it only if it decodes to the size its header
+states. The naive scan of the same set finds byte runs in compressed
+sensor data that begin like a JPEG and claim frames of 64328×14895 or
+38581×40422 (one would be a 958-megapixel allocation); the chain check
+rejects them. A RAW without a preview goes to ffmpeg's decoder (it reads
+the LG phone's DNG), else it is reported as `RAW without a preview`.
+
+**Which preview.** The hashes work at 288 and 512 pixels, so the
+smallest preview with a short side of at least 1000 and the largest's
+shape (within 1 %) is decoded — a 1620×1080 instead of a 7360×4912,
+a twenty-first of the pixels — else the largest.
+
+**Orientation and moment** come from the RAW's own metadata: the TIFF
+structure most makers use (Olympus and Panasonic with their own magic
+number, rewritten to 42 for the reader), CR3's `CMT1`/`CMT2` boxes, and
+for the rest (Fuji) the preview's own EXIF. The Nikon D810 and Sony A7M3
+files are portraits (`Rotate 270 CW`) and decode upright; the Nikon D70's
+preview is stored already turned while its EXIF says normal, and decodes
+upright too. The OM-1's `DateTimeOriginal` is `0000:00:00 00:00:00` (the
+clock was never set) and reads as no moment.
+
+**What a RAW is allowed.** A RAW is the original exposure, so:
+- it is the keeper of its near group (after the shared-moment rule, so a
+  RAW from another exposure cannot capture a family);
+- as a member — another RAW of the same shot, or after a person made a
+  JPEG the keeper with `k` — it is `raw`: listed, never moved or binned,
+  not even by hand;
+- the camera's own JPEG of it (same folder, same name: `IMG_0041.CR2`
+  and `IMG_0041.JPG`, not at another moment) is its `pair`: `RAW + JPEG`
+  on the line, left with it by `milk` and `purge`, choosable by hand in
+  the workspace — people who shoot RAW + JPEG keep both on purpose;
+- any other derivative (an export elsewhere) is a near duplicate of the
+  RAW under the usual two-family rule, described `from the RAW`: its size
+  is not compared with the RAW's, because the size of a RAW's picture is
+  not read (cameras disagree on what their "image width" field means:
+  the Fuji and Panasonic files state their preview's size), only its
+  preview's;
+- a byte-identical copy of a RAW is an exact duplicate like any other.
+
 ### 2.3 Searching Hamming space — Multi-Index Hashing
 
 With n hashes, checking all pairs costs n(n−1)/2 XOR+popcount operations.
@@ -633,9 +751,11 @@ Audio fingerprinting (Chromaprint) is out of scope.
 ## 4. Undo — the journal
 
 `--undo` **[SPEC]** reverses the last change. A reversal needs a record of
-what moved where; that record is the only state `dedupe` writes, and it is
-written **only when a command changes the directory** (never on `find`,
-never on `--dry-run`). It lives outside the scanned tree, in the OS's local
+what moved where; that record is written **only when a command changes
+the directory** (never on `find`, never on `--dry-run`). The app folder
+also holds two small conveniences, never in the scanned tree: the last
+folder looked at (`recent.json`, Phase 9) and the skip list
+(`skip.json`, Phase 10). It lives outside the scanned tree, in the OS's local
 application data directory (`%LOCALAPPDATA%\dedupe\journal\` on Windows,
 `~/.local/share/dedupe/journal/` on Linux) **[CLAUDE]**, so no file is ever
 added to a user's directory except the `_milked` folder the spec defines.
@@ -643,6 +763,14 @@ added to a user's directory except the `_milked` folder the spec defines.
 - `milk` journals each move as (source, destination, size, hash).
   Undo = move back, in reverse order; a destination that is no longer there
   is reported, not fabricated.
+- A move is a rename. Across volumes — a folder of the root that is a
+  mount point, or `_milked` made a link to another drive — the system
+  refuses the rename (EXDEV, ERROR_NOT_SAME_DEVICE) and the move becomes
+  copy, `fsync`, read the copy back and compare its BLAKE3 with the
+  original's, carry the times and the read-only bit over, delete the
+  original; if the original will not go, the copy is removed again
+  (Phase 10, `fsops.rs`). The journal marks such moves `copied`; undo
+  crosses back the same way. **[CLAUDE]**
 - `purge` sends duplicates to the system Recycle Bin via the `trash` crate
   (5.3.0), whose `os_limited::list` / `restore_all` are supported on Windows
   and freedesktop Linux ([docs](https://docs.rs/trash)). Undo lists the bin,
@@ -697,4 +825,7 @@ reorders, every member being the same bytes.
 - Normalised cross-correlation for template matching — J. P. Lewis, "Fast Normalized Cross-Correlation", Vision Interface 1995, http://scribblethink.org/Work/nvisionInterface/nip.html
 - EXIF 2.32 (CIPA DC-008-2019), tags 0x9003 DateTimeOriginal and 0x9291 SubSecTimeOriginal — https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf; reader: `kamadak-exif` — https://github.com/kamadak/exif-rs
 - `trash` crate — https://docs.rs/trash
+- HEIF: ISO/IEC 23008-12 (Image File Format), MIAF ISO/IEC 23000-22; FFmpeg Changelog (7.0 HEIF/AVIF stills and tiled stills; 8.1 CLI tiled HEIF) — https://github.com/FFmpeg/FFmpeg/blob/master/Changelog; AVIF specification — https://aomediacodec.github.io/av1-avif/; AVIF transform test files (Link-U) — https://github.com/AOMediaCodec/av1-avif/tree/master/testFiles/Link-U; HEIF conformance files — https://github.com/nokiatech/heif_conformance; libheif examples — https://github.com/strukturag/libheif/tree/master/examples
+- Clean aperture: ISO/IEC 14496-12 §12.1.4 (`clap`)
+- Real camera and phone files with independent metadata dumps — https://github.com/drewnoakes/metadata-extractor-images (heic, heif, avif, cr2, cr3, nef, arw, dng, raf, orf, rw2, pef)
 - `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher

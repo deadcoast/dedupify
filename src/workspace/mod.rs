@@ -23,12 +23,13 @@ use crossterm::{cursor, execute, queue, terminal};
 
 use crate::actions::{self, Found, EXIT_OK};
 use crate::cli::{Command, Invocation};
+use crate::fsops::ActError;
 use crate::preview::{self, Protocol, Visual};
 use crate::render::Renderer;
 use crate::theme::Role as Paint;
 use crate::util::{fmt_bytes, fmt_count, rel_display, shorten_middle};
 
-use state::{Act, Effect, GroupInfo, Key, Layout, MemberInfo, Role, Row, State};
+use state::{Act, Effect, GroupInfo, Key, Layout, Lock, MemberInfo, Role, Row, State};
 
 /// The workspace's view of the groups.
 pub(crate) fn layout_of(f: &Found) -> Layout {
@@ -58,7 +59,8 @@ pub(crate) fn layout_of(f: &Found) -> Layout {
                     size: m.hashed.rep.cand.size,
                     role: match (i, m.relation) {
                         (0, _) | (_, None) => Role::Keeper,
-                        (_, Some(r)) if r.kin => Role::Locked,
+                        (_, Some(r)) if r.kin => Role::Locked(Lock::Kin),
+                        (_, Some(r)) if r.raw => Role::Locked(Lock::Raw),
                         (_, Some(r)) if r.listed_only() => Role::Hand,
                         (_, Some(r)) if r.confirmed() => Role::Act,
                         _ => Role::Hand,
@@ -380,47 +382,46 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             }
             Effect::Act(act) => {
                 leave_screen();
-                let before = f.clone();
-                let list = chosen_items(f, st.selection());
-                r.blank();
-                let (c, journal) = match act {
-                    Act::Milk => {
-                        r.note(Paint::Plate, &inv.command_line_as(Command::Milk));
-                        r.blank();
-                        actions::act_milk(f, &list, inv, r, false)
-                    }
-                    Act::Purge => {
-                        r.note(Paint::Plate, &inv.command_line_as(Command::Purge));
-                        r.blank();
-                        let verified = actions::verify_items(&list, &f.pipe, r);
-                        actions::act_purge(f, &list, &verified, inv, r, false)
-                    }
-                };
-                drop(list);
-                code = c;
-                if let Some(id) = journal {
-                    undo_stack.push((id, before));
+                let sel: HashSet<PathBuf> = st.selection().clone();
+                let mut acted = act_on(act, f, &sel, inv, r, &mut undo_stack);
+                let mut last = act;
+                code = acted.code;
+                // the bar under the action: back, a retry or a fallback for
+                // what failed (by kind), undo, quit — as often as needed
+                loop {
                     st.changes = undo_stack.len();
-                }
-                f.prune_missing();
-                st.relayout(layout_of(f));
-                lines = listing_lines(f, inv, r, &st, cols);
-                match after_change(r, f) {
-                    After::Back => {
-                        if enter_screen().is_err() {
-                            return code;
+                    st.relayout(layout_of(f));
+                    lines = listing_lines(f, inv, r, &st, cols);
+                    match after_change(r, f, &acted, last) {
+                        After::Back => {
+                            if enter_screen().is_err() {
+                                return code;
+                            }
+                            break;
                         }
-                    }
-                    After::Undo => {
-                        code = undo_last(&mut undo_stack, f, inv, r);
-                        st.changes = undo_stack.len();
-                        st.relayout(layout_of(f));
-                        lines = listing_lines(f, inv, r, &st, cols);
-                        if !back_or_quit(r, f) || enter_screen().is_err() {
-                            return code;
+                        After::Retry => {
+                            let paths = failed_paths(&acted, ActError::retryable);
+                            acted = act_on(last, f, &paths, inv, r, &mut undo_stack);
+                            code = acted.code;
                         }
+                        After::Fallback => {
+                            let paths = failed_paths(&acted, |e| matches!(e, ActError::Bin(_)));
+                            last = Act::Milk;
+                            acted = act_on(Act::Milk, f, &paths, inv, r, &mut undo_stack);
+                            code = acted.code;
+                        }
+                        After::Undo => {
+                            code = undo_last(&mut undo_stack, f, inv, r);
+                            st.changes = undo_stack.len();
+                            st.relayout(layout_of(f));
+                            lines = listing_lines(f, inv, r, &st, cols);
+                            if !back_or_quit(r, f) || enter_screen().is_err() {
+                                return code;
+                            }
+                            break;
+                        }
+                        After::Quit => return code,
                     }
-                    After::Quit => return code,
                 }
             }
             Effect::Undo => {
@@ -443,24 +444,99 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
 
 enum After {
     Back,
+    /// Act again on the files that were in use or refused.
+    Retry,
+    /// Move into `_milked` the files the Recycle Bin refused.
+    Fallback,
     Undo,
     Quit,
 }
 
-/// The bar under an action's output: back to what is left, undo it, or leave.
-fn after_change(r: &Renderer, f: &Found) -> After {
+/// One change on the main screen: the native command, the action on the
+/// chosen files, its journal on the undo stack with the groups from
+/// before it, then the groups pruned of what it moved.
+fn act_on(
+    act: Act,
+    f: &mut Found,
+    paths: &HashSet<PathBuf>,
+    inv: &Invocation,
+    r: &Renderer,
+    stack: &mut Vec<(String, Found)>,
+) -> actions::Acted {
+    let before = f.clone();
+    let list = chosen_items(f, paths);
+    r.blank();
+    let acted = match act {
+        Act::Milk => {
+            r.note(Paint::Plate, &inv.command_line_as(Command::Milk));
+            r.blank();
+            actions::act_milk(f, &list, inv, r, false)
+        }
+        Act::Purge => {
+            r.note(Paint::Plate, &inv.command_line_as(Command::Purge));
+            r.blank();
+            let verified = actions::verify_items(&list, &f.pipe, r);
+            actions::act_purge(f, &list, &verified, inv, r, false)
+        }
+    };
+    drop(list);
+    if let Some(id) = &acted.journal {
+        stack.push((id.clone(), before));
+    }
+    f.prune_missing();
+    acted
+}
+
+fn failed_paths(acted: &actions::Acted, keep: impl Fn(&ActError) -> bool) -> HashSet<PathBuf> {
+    acted
+        .failed
+        .iter()
+        .filter(|(_, e)| keep(e))
+        .map(|(p, _)| p.clone())
+        .collect()
+}
+
+/// The bar under an action's output: back to what is left; try again the
+/// files that were in use; move into `_milked` what the bin refused; undo
+/// it (when it changed anything); leave.
+fn after_change(r: &Renderer, f: &Found, acted: &actions::Acted, act: Act) -> After {
     let left = f.group_count();
+    let retry_n = acted.failed.iter().filter(|(_, e)| e.retryable()).count();
+    let bin_n = acted
+        .failed
+        .iter()
+        .filter(|(_, e)| matches!(e, ActError::Bin(_)))
+        .count();
     let back = format!("back to the groups ({} left)", fmt_count(left as u64));
+    let retry = format!(
+        "retry {} (close what holds them first)",
+        fmt_count(retry_n as u64)
+    );
+    let fallback = format!(
+        "milk the {} the bin refused into {}",
+        fmt_count(bin_n as u64),
+        crate::MILKED_DIR
+    );
     let mut parts: Vec<(&str, &str)> = Vec::new();
     if left > 0 {
         parts.push(("enter", &back));
     }
-    parts.push(("u", "undo it"));
+    if retry_n > 0 {
+        parts.push(("r", &retry));
+    }
+    if bin_n > 0 && act == Act::Purge {
+        parts.push(("m", &fallback));
+    }
+    if acted.journal.is_some() {
+        parts.push(("u", "undo it"));
+    }
     parts.push(("q", "quit"));
     loop {
         match pause(r, &parts) {
             Key::Enter if left > 0 => return After::Back,
-            Key::Char('u') => return After::Undo,
+            Key::Char('r') if retry_n > 0 => return After::Retry,
+            Key::Char('m') if bin_n > 0 && act == Act::Purge => return After::Fallback,
+            Key::Char('u') if acted.journal.is_some() => return After::Undo,
             Key::Char('q') | Key::Esc | Key::Quit => return After::Quit,
             _ => {}
         }

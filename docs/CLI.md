@@ -10,6 +10,7 @@ design is silent or in conflict; each one is reversible.
 ```
 dedupe                                   interactive workflow menu
 dedupe <command> [PATH] [.] [img|vid]    native command
+       [--skip NAME]… [--unskip NAME|all]… [--min SIZE]
 dedupe --undo | -u  [PATH]               reverse a change under PATH (several pending: choose)
 dedupe doctor | --doctor | -dr [PATH]    troubleshooting suite
 dedupe --help | -h                       help page
@@ -42,9 +43,15 @@ Flags:
 | `--dry-run` | `-n` | **[SPEC]** flag; short form **[CLAUDE]**, the convention of `make -n`, `rsync -n`, `git clean -n` |
 | `--quick-search` | `-q` | **[SPEC]** flag; short form **[CLAUDE]**. `-q` is free because `dedupe` has no quiet mode: output is designed, not silenced; piping to a non-terminal switches to plain text automatically |
 | `--undo` | `-u` | **[SPEC]** flag; the spec's `-` alias is unusable (a lone `-` is the stdin convention and cannot carry a flag), so `-u` **[CLAUDE]** |
+| `--skip NAME` | — | **[CLAUDE, Phase 10]** leave out every folder and file named NAME (`*` and `?` allowed: `*.tmp`, `Lightroom*`), and remember it: later runs, in any folder, leave it out too. The list lives in the app folder beside the journals, never in the tree; every run that skips names it on its header line and counts what it left out on the SCAN line. Case is ignored on Windows, as the file system does. A folder is passed over whole |
+| `--unskip NAME` / `--unskip all` | — | **[CLAUDE, Phase 10]** forget one name, or every one |
+| `--min SIZE` | — | **[CLAUDE, Phase 10]** files under SIZE are not candidates, for this run only: `100k`, `2.5m`, `1g` or bytes, in the 1024-based units sizes are printed in. The header names the floor, the SCAN line counts what was under it, and the `next` lines and the menu's `again` carry it |
+
+Value flags take the next token or `--flag=value`. A value flag with no
+value, or a size that is not one, is a usage error (exit 1).
 
 `find --dry-run` is accepted and identical to `find`: `find` never changes
-anything. `--undo` may follow any command (`dedupe milk --undo` **[SPEC]**)
+the folder. `--undo` may follow any command (`dedupe milk --undo` **[SPEC]**)
 and ignores the command: the journal, not the command, says what to reverse.
 
 Ctrl-C **[CLAUDE]**: before a change starts it ends the run as in any
@@ -79,6 +86,44 @@ the near passes, ending with a `full` line that names the full run.
 so `find . img` could list fifteen near duplicates and `milk .` answer
 "no duplicates"; one rule for depth removed that.)
 
+**Formats** (Phase 10, RESEARCH §2.9–2.10) **[CLAUDE]**. Every image
+extension the scan accepts has a decoder (`decode.rs`), chosen by the
+file's bytes:
+- JPEG, PNG, GIF, WebP, BMP, TIFF, ICO: the `image` crate, EXIF
+  orientation applied;
+- HEIC, HEIF, AVIF (`.heic .heif .hif .avif`): the container is read
+  here and its tiles decoded by ffmpeg as an elementary stream, so any
+  ffmpeg with HEVC (and libdav1d or libaom for AVIF) works, including
+  versions before 8.1 that cannot compose a phone's tiled photo
+  themselves; the container's crop, rotation and mirror are applied, and
+  the capture moment comes from its Exif item;
+- camera RAWs (`.cr2 .cr3 .crw .nef .nrw .arw .sr2 .srf .dng .raf .orf
+  .rw2 .rwl .pef .srw .x3f .3fr .fff .iiq .erf .kdc .dcr .mrw .mos`): the
+  camera's embedded JPEG preview, oriented by the RAW's metadata; a RAW
+  with no preview goes to ffmpeg;
+- anything else ffmpeg reads (JPEG XL, PSD): its first frame.
+
+The DECODE line names the routes it used (`12 HEIC   3 RAW   1 AVIF`)
+and what it could not decode, by the reason a person can act on (`2 need
+ffmpeg`, `1 RAW without a preview`, `1 undecodable`).
+
+**RAW in a group.** A RAW is the keeper of its group (after the
+shared-moment rule). Its size column reads `RAW`: the size of a RAW's
+picture is not read, only its preview's, so no size is compared with it
+and an export of it is described `from the RAW`. As a member (another RAW
+of the shot, or after `k` made a JPEG the keeper) it is `raw`: listed,
+never moved or binned, not even by hand. The camera's own JPEG of it —
+same folder, same name — is `pair  RAW + JPEG`: `milk` and `purge` leave
+it with its RAW (`kept~`, counted on its own footer line), the workspace
+offers it by hand. A byte copy of a RAW is an exact duplicate as always.
+
+```
+ NEAR 002   1 similar  +1 pair   14.7 KB reclaimable
+   keep  dcim/IMG_0041.CR2      RAW          1.12 MB  2020-09-13
+   pair  dcim/IMG_0041.JPG      1200×800     84.2 KB  RAW + JPEG
+   near  web/holiday.jpg        600×400      14.7 KB  from the RAW
+```
+
 ### 2a. The result is the workspace **[CLAUDE, under FUOE]**
 
 On a terminal, after `find` prints its stages, groups and totals, the
@@ -111,7 +156,7 @@ cells narrower, with the cursor `▸` and a mark before it:
 | `■` | will be acted on |
 | `□` | could be, is not: deselected, or grouped and not confirmed (off until chosen) |
 | `◧` | a group with some of its members chosen |
-| `·` | another capture moment: never acted on, not even by hand |
+| `·` | another capture moment, or a camera RAW under another keeper: never acted on, not even by hand |
 | (none) | the keeper |
 
 By default the selection is exactly what `milk` and `purge` act on from
@@ -134,7 +179,7 @@ that stands for it in a near group, `+GROUP` on its line) counts once.
 | `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
 | `g` | type a group's number, enter: the group at the top of the window |
 | `n` | the `would` lines of `milk --dry-run` for the selection, on the main screen, under the native command; enter comes back |
-| `m` / `p` | a confirm bar, `milk 12 → _milked, 2.87 MB, 2 by hand   enter go   esc back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit` |
+| `m` / `p` | a confirm bar, `milk 12 → _milked, 2.87 MB, 2 by hand   enter go   esc back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit`, with `r retry N` when files were in use or refused and, after a purge, `m milk the N the bin refused into _milked` (Phase 10); `u undo it` appears only when the action changed something |
 | `u` | reverse the newest change of this sitting (its own journal, by id), restore its groups, and come back; changes stack, so `u` again reverses the one before |
 | `q` / esc / Ctrl-C | leave; when nothing was changed, the `next` lines are printed so the typed forms sit in the scrollback |
 
@@ -165,6 +210,25 @@ restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
 ` (2)`, ` (3)`, … before the extension **[CLAUDE]**. `_milked` is never
 scanned, so running `milk` twice is idempotent.
 
+Across volumes (Phase 10) **[CLAUDE]**: when a file is on another volume
+than `_milked` — a folder of the root that is a mount point, or `_milked`
+made a link to another drive to stage duplicates there — the system
+refuses the rename, and the move becomes a copy that is flushed to disk,
+read back and compared (BLAKE3) with the original, given the original's
+times, and only then is the original deleted. If the original will not
+delete, the copy is removed and the original stays. Such lines say
+`copied across volumes`, a footer line counts them, the journal marks
+them, and `--undo` crosses back the same way (`copied back across
+volumes`).
+
+A file that could not be moved prints `failed` with the reason in words:
+`gone since the scan`, `in use by another program`, `permission denied`,
+`copy to the other volume failed: …`. In the workspace, the bar after the
+action offers `r retry N` for files that were in use or refused, and
+after a purge, `m milk the N the bin refused into _milked` for files the
+Recycle Bin would not take (a network drive, a volume without a bin);
+each is a change of its own, undone by its own `u` (SC-07).
+
 ### purge **[SPEC]**
 The full suite with byte-for-byte verification of each exact duplicate
 against its keeper before the bin call, and the near-duplicate image and
@@ -185,9 +249,13 @@ videos and theirs; no token → both).
 ### doctor **[SPEC]**
 Checks and prints PASS / WARN / FAIL with a one-line fix for each:
 terminal colour and Unicode support, terminal width, journal directory
-writable, root readable and writable, `_milked` present and its size,
-Recycle Bin reachable, `ffmpeg`/`ffprobe` on PATH (the video pass), the
-optional model (`docs/DEEP.md`), Windows long-path support when any path
+writable, root readable and writable, `_milked` present and its size
+(and whether it is on another volume than the root), folders of the root
+on other volumes, the remembered skip list, Recycle Bin reachable,
+`ffmpeg`/`ffprobe` on PATH (videos, HEIC, AVIF), HEIC and AVIF decoding
+(two built-in probe pictures decoded the way a scan decodes them, their
+colours checked), the optional model and its SHA-256 against the
+published file (`docs/DEEP.md`), Windows long-path support when any path
 exceeds 260 characters, and the state of the journals (pending, and any
 file that could not be read). The write check creates and removes one
 probe file in the root.
@@ -264,6 +332,10 @@ saw images or videos, a `full` line names the full run. A hint's note is
 shown whole or not at all; its command is never cut. An empty scan prints
 SCAN and the totals only; a scan where nothing shares a size stops its
 stage lines at SIZE.
+
+What a run left out is said where it happens (Phase 10): the header
+names the skip list and the size floor (`skip node_modules, *.tmp  min
+100 KB`), and the SCAN line counts them (`3 skipped   41 under 100 KB`).
 
 Near groups follow the exact groups and continue the numbering:
 
@@ -407,20 +479,24 @@ newest, as before.
 
 ## 5. Safety model
 
-- `find` and `--dry-run` never write.
-- `milk` moves within the same volume (rename); nothing is copied, nothing
-  is deleted. A file that cannot be renamed is reported as `failed` and
-  left where it is; the exit code becomes 2.
+- `find` and `--dry-run` never change the folder. They record the folder
+  looked at (`recent.json`) and the skip list (`skip.json`) in the app
+  folder, beside the journals.
+- `milk` moves within the volume by rename; across volumes it copies,
+  reads the copy back and compares it, and only then deletes the original
+  (§2 milk). A file that cannot be moved is reported as `failed` with the
+  reason and left where it is; the exit code becomes 2.
 - `purge` verifies bytes before the bin call and never hard-deletes. Near
   duplicates are moved or binned only when two families of evidence agree
   — images: dHash and pHash with PDQ or the geometric fit, or the deep
   descriptor with the fit; videos: TMK level 2 ≥ 0.9, or the three image
   hashes agree on the sampled frames — marked `~` on their line; the rest
   print as `kept~` in `milk` as well as `purge`. Two files with different
-  EXIF capture moments are `kin` and never acted on. `--undo` restores
-  binned files like any other entry.
+  EXIF capture moments are `kin` and never acted on; a camera RAW is never
+  acted on by the near tier, and its camera JPEG twin stays with it unless
+  chosen by hand. `--undo` restores binned files like any other entry.
 - Every change writes one journal; `--undo` reverses it. No cache, no index,
-  no lock file, nothing persisted on a scan. `--undo` with nothing pending
+  no lock file, nothing persisted in the scanned tree. `--undo` with nothing pending
   under its root names up to three other roots that have a pending
   journal, with the command that undoes each.
 - Ctrl-C during a change stops it cleanly (§1); the journal covers every
@@ -428,7 +504,8 @@ newest, as before.
 - Windows paths are shown and journaled without the `\\?\` prefix
   `canonicalize` produces; `_milked` is recognised whatever its letter
   case there.
-- `_milked` and the journal directory are the only things `dedupe` creates.
+- `_milked` and the app folder (journals, `recent.json`, `skip.json`, an
+  optional model) are the only things `dedupe` creates.
 - The optional model (`docs/DEEP.md`) admits members; on its own it only
   adds lines. A member it admitted moves or bins only when the geometric
   fit confirms it.

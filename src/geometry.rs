@@ -443,8 +443,8 @@ pub fn fit(a: &Thumb, b: &Thumb) -> Fit {
 
 /// Decode both files and fit them. `None` when either does not decode.
 pub fn fit_files(a: &std::path::Path, b: &std::path::Path) -> Option<Fit> {
-    let ia = crate::perceptual::load_image(a).ok()?;
-    let ib = crate::perceptual::load_image(b).ok()?;
+    let ia = crate::decode::load_image(a).ok()?;
+    let ib = crate::decode::load_image(b).ok()?;
     Some(fit(
         &Thumb::from_image(&ia, MAX_SIDE),
         &Thumb::from_image(&ib, MAX_SIDE),

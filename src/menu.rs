@@ -517,6 +517,7 @@ mod tests {
             root: photos.path().to_path_buf(),
             recurse: true,
             kind: "img".into(),
+            min: None,
         };
         let mut m = Menu::with_recent(cwd, Some(again.clone()));
         assert_eq!(press(&mut m, &[Key::Enter]), Outcome::Run(again.args()));

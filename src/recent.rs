@@ -23,6 +23,9 @@ pub struct Recent {
     pub recurse: bool,
     /// `""`, `"img"` or `"vid"`.
     pub kind: String,
+    /// `--min` as typed, when the run had a size floor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<String>,
 }
 
 impl Recent {
@@ -31,6 +34,7 @@ impl Recent {
             root: inv.root.clone(),
             recurse: inv.recurse,
             kind: inv.kind.token().to_string(),
+            min: inv.min_display.clone(),
         }
     }
 
@@ -42,6 +46,10 @@ impl Recent {
         }
         if !self.kind.is_empty() {
             v.push(self.kind.clone());
+        }
+        if let Some(m) = &self.min {
+            v.push("--min".into());
+            v.push(m.clone());
         }
         v
     }
@@ -55,6 +63,10 @@ impl Recent {
         if !self.kind.is_empty() {
             s.push_str("  ");
             s.push_str(&self.kind);
+        }
+        if let Some(m) = &self.min {
+            s.push_str("  min ");
+            s.push_str(m);
         }
         s
     }
@@ -105,8 +117,21 @@ mod tests {
             root: photos.path().to_path_buf(),
             recurse: true,
             kind: "img".into(),
+            min: None,
         };
         assert_eq!(load_in(app.path()), None);
+        // a size floor travels with the record and its command
+        let with_min = Recent {
+            min: Some("100k".into()),
+            ..r.clone()
+        };
+        assert_eq!(
+            with_min.args().last().map(String::as_str),
+            Some("100k"),
+            "{:?}",
+            with_min.args()
+        );
+        assert!(with_min.label().ends_with("min 100k"));
         record_in(app.path(), &r);
         assert_eq!(load_in(app.path()), Some(r.clone()));
         assert_eq!(

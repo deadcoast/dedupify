@@ -19,6 +19,10 @@ use image::DynamicImage;
 use tract_onnx::prelude::*;
 
 pub const MODEL_FILE: &str = "sscd_disc_mixup.onnx";
+/// The published file's SHA-256 and size (docs/DEEP.md); `doctor` checks
+/// an installed model against them.
+pub const MODEL_SHA256: &str = "e65e2a5b9a5e44a0b0f011bddaa6f28621021f6120ca7ce8b526c19f2f6156f8";
+pub const MODEL_BYTES: u64 = 98_156_202;
 pub const ENV_MODEL: &str = "DEDUPE_MODEL";
 pub const SIZE: usize = 320;
 pub const DIM: usize = 512;

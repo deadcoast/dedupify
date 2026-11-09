@@ -232,6 +232,17 @@ impl LiveProgress {
             t.paint(Role::Info, &fmt_count(n.decoded)),
             plural(n.decoded, "image", "images")
         )];
+        // the routes other than the image crate, by name (Phase 10)
+        for (k, name) in [
+            (n.heif, "HEIC"),
+            (n.avif, "AVIF"),
+            (n.raw, "RAW"),
+            (n.ffmpeg, "via ffmpeg"),
+        ] {
+            if k > 0 {
+                v.push(format!("{} {name}", t.paint(Role::Info, &fmt_count(k))));
+            }
+        }
         if n.deep {
             v.push(t.paint(Role::Dupe, "+deep"));
         }
@@ -241,11 +252,19 @@ impl LiveProgress {
                 &format!("{} embeddings failed", fmt_count(n.deep_failed)),
             ));
         }
-        if n.undecodable > 0 {
-            v.push(t.paint(
-                Role::Dupe,
-                &format!("{} undecodable", fmt_count(n.undecodable)),
-            ));
+        // what was not decoded, by the reason a person can act on
+        let unreadable = n
+            .undecodable
+            .saturating_sub(n.need_ffmpeg + n.ffmpeg_failed + n.no_preview);
+        for (k, what, role) in [
+            (n.need_ffmpeg, "need ffmpeg", Role::Warn),
+            (n.ffmpeg_failed, "ffmpeg could not decode", Role::Warn),
+            (n.no_preview, "RAW without a preview", Role::Dupe),
+            (unreadable, "undecodable", Role::Dupe),
+        ] {
+            if k > 0 {
+                v.push(t.paint(role, &format!("{} {what}", fmt_count(k))));
+            }
         }
         if n.low_quality > 0 {
             v.push(t.paint(
@@ -450,6 +469,12 @@ impl Renderer {
             if inv.quick {
                 tail.push(t.paint(Role::Warn, "quick: size + sample only"));
             }
+            if inv.min > 0 {
+                tail.push(t.paint(Role::Dupe, &format!("min {}", fmt_bytes(inv.min))));
+            }
+            if !inv.skip.is_empty() {
+                tail.push(t.paint(Role::Dupe, &format!("skip {}", inv.skip.join(", "))));
+            }
         }
         if inv.dry_run && matches!(inv.command, Command::Milk | Command::Purge | Command::Undo) {
             tail.push(t.paint_bold(Role::Warn, "dry run"));
@@ -478,6 +503,16 @@ impl Renderer {
             ),
             t.paint(Role::Info, &fmt_bytes(s.bytes)),
         ];
+        // what the filters left out, so a short count is never a mystery
+        if s.skipped > 0 {
+            v.push(t.paint(Role::Dupe, &format!("{} skipped", fmt_count(s.skipped))));
+        }
+        if s.small > 0 {
+            v.push(t.paint(
+                Role::Dupe,
+                &format!("{} under {}", fmt_count(s.small), fmt_bytes(s.min)),
+            ));
+        }
         if let Some(e) = elapsed {
             v.push(t.paint(Role::Dupe, &fmt_duration(e)));
         }
@@ -573,10 +608,17 @@ impl Renderer {
         // evidence numbers go (the words stay), then the dimensions column,
         // so the path keeps at least 14 cells.
         let compact = std::cell::Cell::new(0u8);
-        let lead_cols = |w: u32, h: u32, size: u64| -> (String, String) {
+        // a RAW shows `RAW` where the size goes: its preview's size is not
+        // the picture's (Phase 10)
+        let lead_cols = |w: u32, h: u32, raw: bool, size: u64| -> (String, String) {
             let mut cols: Vec<String> = Vec::new();
             if compact.get() < 2 {
-                cols.push(fit(&format!("{w}{}{h}", t.glyphs.times), 11));
+                let dims = if raw {
+                    "RAW".to_string()
+                } else {
+                    format!("{w}{}{h}", t.glyphs.times)
+                };
+                cols.push(fit(&dims, 11));
             }
             cols.push(fit(&fmt_bytes(size), 7));
             (
@@ -587,8 +629,8 @@ impl Renderer {
                     .join("  "),
             )
         };
-        let keeper_tail = |c: &crate::walk::Candidate, w: u32, h: u32| -> Tail {
-            let (lp, lq) = lead_cols(w, h, c.size);
+        let keeper_tail = |c: &crate::walk::Candidate, w: u32, h: u32, raw: bool| -> Tail {
+            let (lp, lq) = lead_cols(w, h, raw, c.size);
             let date = fmt_date(c.mtime);
             Tail {
                 plain: format!("{lp}  {date}"),
@@ -609,7 +651,12 @@ impl Renderer {
         let member_tail = |m: &crate::near::NearMember, k: &crate::near::Hashed| -> Tail {
             let c = &m.hashed.rep.cand;
             let r = m.relation.unwrap();
-            let (lp, lq) = lead_cols(m.hashed.sig.width, m.hashed.sig.height, c.size);
+            let (lp, lq) = lead_cols(
+                m.hashed.sig.width,
+                m.hashed.sig.height,
+                m.hashed.raw,
+                c.size,
+            );
             // the words: what the member is. Lit in the info colour when the
             // member stays (another shot, the descriptor's word alone, or
             // nothing confirmed it), plain otherwise.
@@ -649,6 +696,7 @@ impl Renderer {
                                 &m.hashed.rep.cand,
                                 m.hashed.sig.width,
                                 m.hashed.sig.height,
+                                m.hashed.raw,
                             )
                             .plain,
                         )
@@ -677,21 +725,23 @@ impl Renderer {
         for (i, g) in groups.iter().enumerate() {
             let n = format!("{:0width$}", offset + i + 1, width = digits);
             let head = t.paint_bold(Role::Info, &format!("NEAR {n}"));
-            let deep_n = g.deep_only_count();
-            let kin_n = g.kin_count();
-            let similar = g.members.len() - 1 - deep_n - kin_n;
-            let mut count = format!("{} similar", t.paint(Role::Info, &similar.to_string()));
-            if deep_n > 0 {
-                count.push_str(&format!(
-                    "  {}",
-                    t.paint(Role::Info, &format!("+{deep_n} deep"))
-                ));
-            }
-            if kin_n > 0 {
-                count.push_str(&format!(
-                    "  {}",
-                    t.paint(Role::Info, &format!("+{kin_n} kin"))
-                ));
+            let kinds = g.kinds();
+            let mut count = format!(
+                "{} similar",
+                t.paint(Role::Info, &kinds.similar.to_string())
+            );
+            for (n, word) in [
+                (kinds.deep, "deep"),
+                (kinds.kin, "kin"),
+                (kinds.pair, "pair"),
+                (kinds.raw, "RAW"),
+            ] {
+                if n > 0 {
+                    count.push_str(&format!(
+                        "  {}",
+                        t.paint(Role::Info, &format!("+{n} {word}"))
+                    ));
+                }
             }
             let recl = format!(
                 "{} reclaimable",
@@ -717,7 +767,8 @@ impl Renderer {
                     path_cells,
                 );
                 if j == 0 {
-                    let tail = keeper_tail(c, m.hashed.sig.width, m.hashed.sig.height);
+                    let tail =
+                        keeper_tail(c, m.hashed.sig.width, m.hashed.sig.height, m.hashed.raw);
                     self.line(&format!(
                         "   {}  {}  {}",
                         t.paint_bold(Role::Keep, "keep"),
@@ -1002,14 +1053,14 @@ impl Renderer {
         if groups.is_empty() {
             return;
         }
-        let deep_only: u64 = groups.iter().map(|g| g.deep_only_count() as u64).sum();
-        let kin: u64 = groups.iter().map(|g| g.kin_count() as u64).sum();
-        let similar: u64 = groups
-            .iter()
-            .map(|g| g.members.len() as u64 - 1)
-            .sum::<u64>()
-            - deep_only
-            - kin;
+        let sum = |f: fn(&crate::near::Kinds) -> usize| -> u64 {
+            groups.iter().map(|g| f(&g.kinds()) as u64).sum()
+        };
+        let deep_only = sum(|k| k.deep);
+        let kin = sum(|k| k.kin);
+        let pairs = sum(|k| k.pair);
+        let raws = sum(|k| k.raw);
+        let similar = sum(|k| k.similar);
         let recl: u64 = groups.iter().map(NearGroup::reclaimable).sum();
         if deep_only > 0 {
             self.totals_line(
@@ -1027,6 +1078,30 @@ impl Renderer {
                 vec![t.paint(
                     Role::Dupe,
                     "taken at a different moment: another photograph, left alone",
+                )],
+            );
+        }
+        if pairs > 0 {
+            self.totals_line(
+                vec![format!(
+                    "{} RAW + JPEG",
+                    t.paint_bold(Role::Info, &fmt_count(pairs))
+                )],
+                vec![t.paint(
+                    Role::Dupe,
+                    "the camera's JPEG beside its RAW: kept with it; choose it by hand in the workspace",
+                )],
+            );
+        }
+        if raws > 0 {
+            self.totals_line(
+                vec![format!(
+                    "{} RAW",
+                    t.paint_bold(Role::Info, &fmt_count(raws))
+                )],
+                vec![t.paint(
+                    Role::Dupe,
+                    "a camera RAW grouped under another file: never moved or binned",
                 )],
             );
         }

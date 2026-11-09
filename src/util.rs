@@ -332,6 +332,29 @@ pub fn unix_secs(t: SystemTime) -> i64 {
         .unwrap_or(0)
 }
 
+/// The volume `path` lives on: the device number on Unix, the volume
+/// serial number on Windows. `None` when it cannot be read. Two paths with
+/// different ids are on different volumes: a rename between them fails.
+pub fn volume_id(path: &std::path::Path) -> Option<u64> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path).ok().map(|m| m.dev())
+    }
+    #[cfg(windows)]
+    {
+        let h = winapi_util::Handle::from_path_any(path).ok()?;
+        winapi_util::file::information(&h)
+            .ok()
+            .map(|i| i.volume_serial_number())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

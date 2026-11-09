@@ -103,17 +103,52 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         ),
     });
 
-    // _milked
+    // _milked, and whether it is on the root's volume (a link to another
+    // drive makes every milk a verified copy)
     let milked = root.join(MILKED_DIR);
+    let root_vol = crate::util::volume_id(root);
     if milked.is_dir() {
         let (n, b) = dir_size(&milked);
-        v.push(pass(
-            MILKED_DIR,
-            format!("{}   {}", counted(n, "file", "files"), fmt_bytes(b)),
-        ));
+        let mut d = format!("{}   {}", counted(n, "file", "files"), fmt_bytes(b));
+        let other =
+            matches!((root_vol, crate::util::volume_id(&milked)), (Some(a), Some(b)) if a != b);
+        if other {
+            d.push_str("   on another volume: milk copies, reads back, then deletes");
+        }
+        v.push(pass(MILKED_DIR, d));
     } else {
         v.push(pass(MILKED_DIR, "absent (created by the first milk)"));
     }
+    // folders of the root on other volumes (mount points; the scan never
+    // follows links or junctions, so on Windows there are none to reach)
+    if let Some(rv) = root_vol {
+        let others = other_volumes(root, rv, 20_000);
+        v.push(if others.is_empty() {
+            pass("volumes", "one volume under this folder")
+        } else {
+            pass(
+                "volumes",
+                format!(
+                    "{} on another volume (first: {}): milk copies them across, verified",
+                    counted(others.len() as u64, "folder", "folders"),
+                    crate::util::rel_display(&others[0], root)
+                ),
+            )
+        });
+    }
+
+    // the remembered skip list (QOL-06)
+    v.push(if inv.skip.is_empty() {
+        pass("skip", "nothing skipped by name")
+    } else {
+        pass(
+            "skip",
+            format!(
+                "{}   remembered; --unskip NAME or --unskip all forgets",
+                inv.skip.join(", ")
+            ),
+        )
+    });
 
     // long paths (Windows MAX_PATH is 260)
     let longest = longest_path_len(root, 2_000);
@@ -175,10 +210,35 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
     let mp = crate::deep::model_path();
     v.push(if mp.is_file() {
         let size = fs::metadata(&mp).map(|m| m.len()).unwrap_or(0);
-        pass(
-            "deep",
-            format!("{}   {}", mp.to_string_lossy(), fmt_bytes(size)),
-        )
+        // the published file, byte for byte (docs/DEEP.md)
+        match sha256_file(&mp) {
+            Some(h) if h == crate::deep::MODEL_SHA256 && size == crate::deep::MODEL_BYTES => pass(
+                "deep",
+                format!(
+                    "{}   {}   SHA-256 matches",
+                    mp.to_string_lossy(),
+                    fmt_bytes(size)
+                ),
+            ),
+            Some(h) => warn(
+                "deep",
+                format!(
+                    "{}   {}   SHA-256 {}… is not the published file's",
+                    mp.to_string_lossy(),
+                    fmt_bytes(size),
+                    &h[..12]
+                ),
+                format!(
+                    "download it again (docs/DEEP.md); expected {}…",
+                    &crate::deep::MODEL_SHA256[..12]
+                ),
+            ),
+            None => warn(
+                "deep",
+                format!("{}   unreadable", mp.to_string_lossy()),
+                "check the file's permissions",
+            ),
+        }
     } else {
         Check {
             name: "deep",
@@ -188,15 +248,19 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         }
     });
 
-    // ffmpeg (video phase)
-    v.push(match (which("ffmpeg"), which("ffprobe")) {
-        (Some(a), Some(_)) => pass("ffmpeg", a),
+    // ffmpeg (videos, HEIC, AVIF)
+    let ff = which("ffmpeg");
+    v.push(match (&ff, which("ffprobe")) {
+        (Some(a), Some(_)) => pass("ffmpeg", a.clone()),
         _ => warn(
             "ffmpeg",
             "ffmpeg / ffprobe not on PATH",
-            "needed for the video phase only: winget install Gyan.FFmpeg",
+            "needed for videos, HEIC and AVIF: winget install Gyan.FFmpeg",
         ),
     });
+    // HEIC and AVIF: two built-in probes decoded the way a scan decodes
+    // them, and their two halves checked (red left, blue right)
+    v.push(heif_check(ff.is_some()));
 
     v
 }
@@ -261,6 +325,90 @@ fn longest_path_len(root: &Path, limit: usize) -> usize {
         .map(|e| e.path().as_os_str().len())
         .max()
         .unwrap_or(0)
+}
+
+const PROBE_HEIC: &[u8] = include_bytes!("../assets/doctor/probe.heic");
+const PROBE_AVIF: &[u8] = include_bytes!("../assets/doctor/probe.avif");
+
+/// Decode one probe; `Ok` when the left half reads red and the right blue.
+fn probe(b: &[u8]) -> Result<(), String> {
+    let d = crate::decode::load_heif_bytes(b).map_err(|e| e.to_string())?;
+    let img = d.img.to_rgb8();
+    if img.dimensions() != (64, 64) {
+        return Err(format!("decoded {}×{}", img.width(), img.height()));
+    }
+    let l = img.get_pixel(16, 32).0;
+    let r = img.get_pixel(48, 32).0;
+    if l[0] > 150 && l[2] < 100 && r[2] > 150 && r[0] < 100 {
+        Ok(())
+    } else {
+        Err("decoded to the wrong colours".into())
+    }
+}
+
+fn heif_check(ffmpeg: bool) -> Check {
+    if !ffmpeg {
+        return warn(
+            "heif",
+            "HEIC and AVIF photos are not decoded without ffmpeg",
+            "winget install Gyan.FFmpeg",
+        );
+    }
+    match (probe(PROBE_HEIC), probe(PROBE_AVIF)) {
+        (Ok(()), Ok(())) => pass("heif", "HEIC and AVIF decode (probe pictures checked)"),
+        (Err(e), Ok(())) => warn(
+            "heif",
+            format!("HEIC does not decode: {e}"),
+            "an ffmpeg build with the HEVC decoder (any full build)",
+        ),
+        (Ok(()), Err(e)) => warn(
+            "heif",
+            format!("AVIF does not decode: {e}"),
+            "an ffmpeg build with libdav1d or libaom (any full build)",
+        ),
+        (Err(e), Err(_)) => warn(
+            "heif",
+            format!("HEIC and AVIF do not decode: {e}"),
+            "an ffmpeg full build (HEVC, libdav1d)",
+        ),
+    }
+}
+
+/// SHA-256 of a file, hex.
+fn sha256_file(p: &Path) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let mut f = fs::File::open(p).ok()?;
+    let mut h = Sha256::new();
+    std::io::copy(&mut f, &mut h).ok()?;
+    Some(
+        h.finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>(),
+    )
+}
+
+/// Folders under `root` (up to `limit` of them looked at) whose volume is
+/// not `root_vol`. A folder on another volume is reported, not entered.
+fn other_volumes(root: &Path, root_vol: u64, limit: usize) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut seen = 0usize;
+    let mut it = walkdir::WalkDir::new(root).follow_links(false).into_iter();
+    while let Some(e) = it.next() {
+        let Ok(e) = e else { continue };
+        if !e.file_type().is_dir() || e.depth() == 0 {
+            continue;
+        }
+        seen += 1;
+        if seen > limit {
+            break;
+        }
+        if crate::util::volume_id(e.path()).is_some_and(|v| v != root_vol) {
+            out.push(e.path().to_path_buf());
+            it.skip_current_dir();
+        }
+    }
+    out
 }
 
 fn which(bin: &str) -> Option<String> {

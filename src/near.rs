@@ -33,6 +33,9 @@ pub struct Hashed {
     pub deep: Option<crate::deep::Embedding>,
     /// EXIF capture time, when the file states one.
     pub capture: Option<Capture>,
+    /// A camera RAW, hashed from its embedded preview: the keeper of its
+    /// group when it is in one, never acted on as a member.
+    pub raw: bool,
 }
 
 /// How a member relates to its keeper: the evidence, and what it allows.
@@ -60,6 +63,15 @@ pub struct Relation {
     pub fit: Option<Fit>,
     /// Both files state a capture time and they differ.
     pub kin: bool,
+    /// The member is a camera RAW: listed, never acted on, not even by
+    /// hand (Phase 10). [CLAUDE]
+    pub raw: bool,
+    /// The keeper is a camera RAW: the member's size is not compared with
+    /// it (a RAW's own pixel count is not read, only its preview's).
+    pub keeper_raw: bool,
+    /// A RAW and the camera's own JPEG of it (same folder, same name):
+    /// kept together; the JPEG can be chosen by hand.
+    pub pair: bool,
 }
 
 impl Relation {
@@ -89,7 +101,7 @@ impl Relation {
 
     /// What `milk` and `purge` require before touching the file.
     pub fn confirmed(&self) -> bool {
-        if self.kin {
+        if self.kin || self.raw || self.pair {
             return false;
         }
         if self.hash_pair() {
@@ -99,16 +111,21 @@ impl Relation {
         }
     }
 
-    /// Shown but never acted on, whatever else is measured: a different
-    /// photograph (`kin`), or the learned descriptor's word alone.
+    /// Shown but never acted on by the program's rule, whatever else is
+    /// measured: a different photograph (`kin`), a RAW, or the learned
+    /// descriptor's word alone.
     pub fn listed_only(&self) -> bool {
-        self.kin || (self.deep_only() && !self.fit_ok())
+        self.kin || self.raw || (self.deep_only() && !self.fit_ok())
     }
 
     /// The verb on the member's line.
     pub fn verb(&self) -> &'static str {
         if self.kin {
             "kin"
+        } else if self.raw {
+            "raw"
+        } else if self.pair {
+            "pair"
         } else if self.deep_only() && !self.fit_ok() {
             "deep"
         } else {
@@ -152,6 +169,12 @@ impl Relation {
                 (Some(m), _) => format!("another shot, {}", m.get(..10).unwrap_or("")),
                 (None, _) => "another shot".to_string(),
             };
+        }
+        if self.pair {
+            return "RAW + JPEG".to_string();
+        }
+        if self.raw {
+            return "the RAW".to_string();
         }
         if self.deep_only() && !self.fit_ok() {
             return "looks alike".to_string();
@@ -215,12 +238,16 @@ impl Relation {
         let rw = mw as f32 / kw as f32;
         let rh = mh as f32 / kh as f32;
         let same_size = (rw - 1.0).abs() <= 0.03 && (rh - 1.0).abs() <= 0.03;
-        if !geometric && !same_size {
+        // against a RAW the comparison would be with its preview's size
+        if !geometric && !same_size && !self.keeper_raw {
             if (rw - rh).abs() <= 0.03 {
                 parts.push(format!("resized {:.0}%", rw * 100.0));
             } else {
                 parts.push(format!("{}×{}", mw, mh));
             }
+        }
+        if parts.is_empty() && self.keeper_raw {
+            parts.push("from the RAW".to_string());
         }
         if parts.is_empty() {
             parts.push(if !self.hash_pair() {
@@ -256,6 +283,12 @@ impl Relation {
     pub fn unconfirmed_reason(&self) -> String {
         if self.kin {
             return "taken at a different moment".to_string();
+        }
+        if self.pair {
+            return "the camera's JPEG of a RAW, kept with it".to_string();
+        }
+        if self.raw {
+            return "a RAW, never moved".to_string();
         }
         let fit_txt = match self.fit {
             Some(f) => format!("fit {:.2} under {FIT_MIN:.2}", f.ncc.max(0.0)),
@@ -323,20 +356,36 @@ impl NearGroup {
             .sum()
     }
 
+    /// Every member but the keeper, by what its line says: `kin` first,
+    /// then a RAW and its camera JPEG (`pair`), a RAW (`raw`), the
+    /// descriptor's word alone (`deep`), and the rest (`similar`).
+    pub fn kinds(&self) -> Kinds {
+        let mut k = Kinds::default();
+        for m in self.members.iter().skip(1) {
+            let Some(r) = m.relation else { continue };
+            if r.kin {
+                k.kin += 1;
+            } else if r.pair {
+                k.pair += 1;
+            } else if r.raw {
+                k.raw += 1;
+            } else if r.deep_only() && !r.fit_ok() {
+                k.deep += 1;
+            } else {
+                k.similar += 1;
+            }
+        }
+        k
+    }
+
     /// Members shown with the `deep` verb (learned descriptor alone).
     pub fn deep_only_count(&self) -> usize {
-        self.members
-            .iter()
-            .filter(|m| m.relation.is_some_and(|r| r.deep_only() && !r.fit_ok()))
-            .count()
+        self.kinds().deep
     }
 
     /// Members shown with the `kin` verb (different capture moment).
     pub fn kin_count(&self) -> usize {
-        self.members
-            .iter()
-            .filter(|m| m.relation.is_some_and(|r| r.kin))
-            .count()
+        self.kinds().kin
     }
 
     /// Members the hashes grouped that nothing confirmed: `kept~`.
@@ -350,6 +399,16 @@ impl NearGroup {
             })
             .count()
     }
+}
+
+/// Member counts of one group, by kind (`NearGroup::kinds`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Kinds {
+    pub similar: usize,
+    pub deep: usize,
+    pub kin: usize,
+    pub pair: usize,
+    pub raw: usize,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -370,6 +429,18 @@ pub struct NearStats {
     pub fit_confirmed: u64,
     /// Members set aside as `kin` by their capture time.
     pub kin: u64,
+    /// Decoded through a route other than the `image` crate.
+    pub heif: u64,
+    pub avif: u64,
+    pub raw: u64,
+    pub ffmpeg: u64,
+    /// Not decoded: ffmpeg needed and absent; ffmpeg failed; a RAW with no
+    /// usable preview. The rest of `undecodable` is unreadable files.
+    pub need_ffmpeg: u64,
+    pub ffmpeg_failed: u64,
+    pub no_preview: u64,
+    /// Members of near groups that are a RAW's own camera JPEG.
+    pub raw_pairs: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -435,24 +506,34 @@ pub fn hash_all(
     let deep_failed = AtomicU64::new(0);
     progress.tick(Stage::Decode, 0, total);
     type Decoded = Result<
-        (Signature, Option<crate::deep::Embedding>, Option<Capture>),
-        perceptual::DecodeError,
+        (
+            Signature,
+            Option<crate::deep::Embedding>,
+            Option<Capture>,
+            crate::decode::Route,
+        ),
+        crate::decode::DecodeError,
     >;
     let results: Vec<(Rep, Decoded)> = reps
         .into_par_iter()
         .map(|rep| {
             // one decode feeds every hash and, when active, the embedding;
-            // the capture time is a header read
-            let r = perceptual::load_image(&rep.cand.path).map(|img| {
-                let sig = perceptual::signature_from_image(&img);
-                let emb = deep.and_then(|m| match m.embed(&img) {
+            // the capture time comes from the route when it read the
+            // metadata (HEIF, RAW), else from the file's EXIF
+            let r = crate::decode::load(&rep.cand.path).map(|d| {
+                let sig = perceptual::signature_from_image(&d.img);
+                let emb = deep.and_then(|m| match m.embed(&d.img) {
                     Ok(e) => Some(e),
                     Err(_) => {
                         deep_failed.fetch_add(1, Ordering::Relaxed);
                         None
                     }
                 });
-                (sig, emb, capture::read(&rep.cand.path))
+                let cap = match d.capture {
+                    Some(c) => c,
+                    None => capture::read(&rep.cand.path),
+                };
+                (sig, emb, cap, d.route)
             });
             let d = done.fetch_add(1, Ordering::Relaxed) + 1;
             progress.tick(Stage::Decode, d, total);
@@ -467,12 +548,22 @@ pub fn hash_all(
     let mut out = Vec::with_capacity(results.len());
     for (rep, r) in results {
         match r {
-            Ok((sig, emb, capture)) => {
+            Ok((sig, emb, capture, route)) => {
+                use crate::decode::Route;
+                use crate::heif::Codec;
                 stats.decoded += 1;
+                match route {
+                    Route::Image => {}
+                    Route::Heif(Codec::Av1) => stats.avif += 1,
+                    Route::Heif(_) => stats.heif += 1,
+                    Route::Raw => stats.raw += 1,
+                    Route::Ffmpeg => stats.ffmpeg += 1,
+                }
                 if sig.quality < QUALITY_MIN {
                     stats.low_quality += 1;
                 } else {
                     out.push(Hashed {
+                        raw: route == Route::Raw,
                         rep,
                         sig,
                         deep: emb,
@@ -480,7 +571,16 @@ pub fn hash_all(
                     });
                 }
             }
-            Err(_) => stats.undecodable += 1,
+            Err(e) => {
+                use crate::decode::DecodeError as E;
+                stats.undecodable += 1;
+                match e {
+                    E::NoFfmpeg(_) => stats.need_ffmpeg += 1,
+                    E::Ffmpeg(..) => stats.ffmpeg_failed += 1,
+                    E::NoPreview => stats.no_preview += 1,
+                    _ => {}
+                }
+            }
         }
     }
     (out, stats)
@@ -499,19 +599,25 @@ pub fn keeper_order_with_degree(
     b: &Hashed,
     db: usize,
 ) -> std::cmp::Ordering {
-    db.cmp(&da).then_with(|| keeper_order(a, b))
+    // a RAW is the original exposure: it keeps its group (Phase 10)
+    b.raw
+        .cmp(&a.raw)
+        .then_with(|| db.cmp(&da))
+        .then_with(|| keeper_order(a, b))
 }
 
 pub fn keeper_order(a: &Hashed, b: &Hashed) -> std::cmp::Ordering {
-    b.sig
-        .pixels()
-        .cmp(&a.sig.pixels())
-        .then_with(|| a.rep.cand.mtime.cmp(&b.rep.cand.mtime))
-        .then_with(|| b.rep.cand.size.cmp(&a.rep.cand.size))
-        .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))
+    b.raw.cmp(&a.raw).then_with(|| {
+        b.sig
+            .pixels()
+            .cmp(&a.sig.pixels())
+            .then_with(|| a.rep.cand.mtime.cmp(&b.rep.cand.mtime))
+            .then_with(|| b.rep.cand.size.cmp(&a.rep.cand.size))
+            .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))
+    })
 }
 
-pub const NEAR_POLICY_LABEL: &str = "keep: shared moment, most matched, then most pixels";
+pub const NEAR_POLICY_LABEL: &str = "keep: shared moment, the RAW, most matched, then most pixels";
 
 /// Best relation of `m` to the keeper `k`, searching both directions.
 pub fn relation(k: &Signature, m: &Signature) -> Relation {
@@ -526,7 +632,19 @@ pub fn relation_of(k: &Hashed, m: &Hashed) -> Relation {
         _ => None,
     };
     let kin = capture::different_moments(k.capture.as_ref(), m.capture.as_ref()) == Some(true);
-    relation_deep(&k.sig, &m.sig, cos, kin)
+    let mut r = relation_deep(&k.sig, &m.sig, cos, kin);
+    r.raw = m.raw;
+    r.keeper_raw = k.raw;
+    r.pair = !kin && k.raw != m.raw && twins(&k.rep.cand.path, &m.rep.cand.path);
+    r
+}
+
+/// A camera writes a RAW and its JPEG side by side under one name
+/// (`IMG_0041.CR2`, `IMG_0041.JPG`): same folder, same stem, the case of
+/// either ignored.
+pub fn twins(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let stem = |p: &std::path::Path| p.file_stem().map(|s| s.to_string_lossy().to_lowercase());
+    a.parent() == b.parent() && stem(a).is_some() && stem(a) == stem(b)
 }
 
 pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool) -> Relation {
@@ -554,6 +672,9 @@ pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool)
         deep,
         fit: None,
         kin,
+        raw: false,
+        keeper_raw: false,
+        pair: false,
     }
 }
 
@@ -768,6 +889,7 @@ pub fn group(
         }
     }
     stats.kin = groups.iter().map(|g| g.kin_count() as u64).sum();
+    stats.raw_pairs = groups.iter().map(|g| g.kinds().pair as u64).sum();
     groups.sort_by(|a, b| {
         b.reclaimable().cmp(&a.reclaimable()).then_with(|| {
             a.members[0]
@@ -812,6 +934,9 @@ mod words_tests {
             deep: None,
             fit: None,
             kin: false,
+            raw: false,
+            keeper_raw: false,
+            pair: false,
         }
     }
 

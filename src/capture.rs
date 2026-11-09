@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
-use exif::{In, Reader, Tag};
+use exif::{Exif, In, Reader, Tag};
 
 /// What a file says about when it was exposed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,16 +56,39 @@ pub fn read(path: &Path) -> Option<Capture> {
     let file = File::open(path).ok()?;
     let mut reader = BufReader::new(file);
     let exif = Reader::new().read_from_container(&mut reader).ok()?;
-    let dt = exif.get_field(Tag::DateTimeOriginal, In::PRIMARY)?;
-    let datetime = dt.display_value().to_string();
-    // a camera that has not been set writes zeros; that is not a time
-    if datetime.len() < 19 || datetime.starts_with("0000") {
+    from_exif(&exif)
+}
+
+/// The first ASCII string of the primary image's field `number`, matched
+/// by number alone: a CR3 keeps its Exif fields in a TIFF structure of
+/// their own (`CMT2`), where the reader files them under IFD0's context.
+fn ascii(e: &Exif, number: u16) -> Option<String> {
+    let f = e
+        .fields()
+        .find(|f| f.tag.number() == number && f.ifd_num == In::PRIMARY)?;
+    match &f.value {
+        exif::Value::Ascii(v) => v.first().map(|s| {
+            String::from_utf8_lossy(s)
+                .trim_end_matches('\0')
+                .trim()
+                .to_string()
+        }),
+        _ => None,
+    }
+}
+
+/// The capture moment an EXIF block states: `DateTimeOriginal` as
+/// `YYYY-MM-DD HH:MM:SS`, and `SubSecTimeOriginal` when present.
+pub fn from_exif(e: &Exif) -> Option<Capture> {
+    let raw = ascii(e, Tag::DateTimeOriginal.number())?;
+    // EXIF writes `YYYY:MM:DD HH:MM:SS`; the date's colons become dashes
+    let b = raw.as_bytes();
+    if !raw.is_ascii() || b.len() < 19 || b[4] != b':' || b[7] != b':' || raw.starts_with("0000") {
+        // a camera that has not been set writes zeros; that is not a time
         return None;
     }
-    let subsec = exif
-        .get_field(Tag::SubSecTimeOriginal, In::PRIMARY)
-        .map(|f| f.display_value().to_string().trim_matches('"').to_string())
-        .filter(|s| !s.is_empty());
+    let datetime = format!("{}-{}-{}", &raw[..4], &raw[5..7], &raw[8..19]);
+    let subsec = ascii(e, Tag::SubSecTimeOriginal.number()).filter(|s| !s.is_empty());
     Some(Capture { datetime, subsec })
 }
 

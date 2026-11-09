@@ -25,8 +25,17 @@ pub enum Role {
     /// Grouped but not confirmed (or the descriptor's word alone):
     /// selectable by hand, off until chosen.
     Hand,
-    /// Another capture moment: another photograph, never acted on.
-    Locked,
+    /// Never acted on, not even by hand: another capture moment (another
+    /// photograph), or a camera RAW.
+    Locked(Lock),
+}
+
+/// Why a member is locked; the word the workspace says when space is
+/// pressed on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lock {
+    Kin,
+    Raw,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -181,7 +190,7 @@ impl State {
             for m in &g.members {
                 let keep_choice = self.roles.get(&m.path) == Some(&m.role);
                 let on = match m.role {
-                    Role::Keeper | Role::Locked => false,
+                    Role::Keeper | Role::Locked(_) => false,
                     Role::Act | Role::Hand if keep_choice => self.selected.contains(&m.path),
                     Role::Act => true,
                     Role::Hand => false,
@@ -302,7 +311,7 @@ impl State {
                 let mi = self.member(g, m);
                 match mi.role {
                     Role::Keeper => Mark::None,
-                    Role::Locked => Mark::Lock,
+                    Role::Locked(_) => Mark::Lock,
                     _ if self.selected.contains(&mi.path) => Mark::On,
                     _ => Mark::Off,
                 }
@@ -337,8 +346,11 @@ impl State {
                 self.message =
                     Some("the keeper stays; k on another file makes it the keeper".into())
             }
-            Role::Locked => {
+            Role::Locked(Lock::Kin) => {
                 self.message = Some("another shot: a different photograph, never moved".into())
+            }
+            Role::Locked(Lock::Raw) => {
+                self.message = Some("a camera RAW: never moved by the near tier".into())
             }
             Role::Act | Role::Hand => {
                 if !self.selected.remove(&mi.path) {
@@ -802,7 +814,7 @@ mod tests {
                         mi("b.png", 300, Role::Keeper),
                         mi("b_small.jpg", 50, Role::Act),
                         mi("b_crop.jpg", 70, Role::Hand),
-                        mi("b_next.jpg", 290, Role::Locked),
+                        mi("b_next.jpg", 290, Role::Locked(Lock::Kin)),
                     ],
                 },
                 GroupInfo {
@@ -959,7 +971,7 @@ mod tests {
             mi("b_small.jpg", 50, Role::Keeper),
             mi("b.png", 300, Role::Act),
             mi("b_crop.jpg", 70, Role::Act),
-            mi("b_next.jpg", 290, Role::Locked),
+            mi("b_next.jpg", 290, Role::Locked(Lock::Kin)),
         ];
         st.relayout(l);
         assert!(!st.selected.contains(&p("a (1).jpg")));

@@ -21,8 +21,14 @@ use crate::util::stamp;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum Op {
-    /// `milk`: renamed within the volume.
-    Move { from: PathBuf, to: PathBuf },
+    /// `milk`: renamed within the volume, or (`copied`) across volumes:
+    /// copied, verified, the original deleted (Phase 10).
+    Move {
+        from: PathBuf,
+        to: PathBuf,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        copied: bool,
+    },
     /// `purge`: sent to the system Recycle Bin at `time_deleted` (unix s).
     Trash { path: PathBuf, time_deleted: i64 },
 }
@@ -305,6 +311,7 @@ mod tests {
             op: Op::Move {
                 from: root.join("a"),
                 to: root.join("_milked/a"),
+                copied: true,
             },
             size: 3,
             hash: "abc".into(),
@@ -332,6 +339,25 @@ mod tests {
         let back = read(&p2).unwrap();
         assert!(back.consumed);
         assert_eq!(back.entries, j2.entries);
+        // a cross-volume move says so; a rename does not write the field,
+        // and a journal from before Phase 10 (no field) reads as a rename
+        assert_eq!(read(&p1).unwrap().entries, j1.entries);
+        let old: Entry = serde_json::from_str(
+            r#"{"op":"move","from":"/r/a","to":"/r/_milked/a","size":1,"hash":""}"#,
+        )
+        .unwrap();
+        assert!(matches!(old.op, Op::Move { copied: false, .. }));
+        let txt = serde_json::to_string(&Entry {
+            op: Op::Move {
+                from: "/r/a".into(),
+                to: "/r/_milked/a".into(),
+                copied: false,
+            },
+            size: 1,
+            hash: String::new(),
+        })
+        .unwrap();
+        assert!(!txt.contains("copied"), "{txt}");
 
         // the writer: nothing on disk before the first entry, one file after
         let before = list(&root).unwrap().len();
@@ -345,6 +371,7 @@ mod tests {
                 op: Op::Move {
                     from: root.join(format!("f{i}")),
                     to: root.join(format!("_milked/f{i}")),
+                    copied: false,
                 },
                 size: 1,
                 hash: String::new(),

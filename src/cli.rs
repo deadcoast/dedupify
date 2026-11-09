@@ -3,6 +3,7 @@
 //! ```text
 //! dedupe                                   menu
 //! dedupe <find|milk|purge> [PATH] [.] [img|vid] [-n] [-q]
+//!        [--skip NAME]… [--unskip NAME|all]… [--min SIZE]
 //! dedupe --undo | -u [PATH] [-n]
 //! dedupe doctor | --doctor | -dr [PATH]
 //! dedupe --help | -h
@@ -54,6 +55,17 @@ pub struct Invocation {
     pub kind: Kind,
     pub dry_run: bool,
     pub quick: bool,
+    /// `--skip NAME` given this time: added to the remembered list.
+    pub skip_add: Vec<String>,
+    /// `--unskip NAME` / `--unskip all`: removed from it.
+    pub skip_remove: Vec<String>,
+    /// The names in force for this run (remembered ∪ added − removed),
+    /// filled by `skip::resolve` before the scan; empty until then.
+    pub skip: Vec<String>,
+    /// `--min SIZE`: files smaller are not candidates (0 = no floor).
+    pub min: u64,
+    /// The size as typed, for the command lines this run prints.
+    pub min_display: Option<String>,
 }
 
 impl Invocation {
@@ -84,6 +96,12 @@ impl Invocation {
             if self.quick {
                 parts.push("--quick-search".into());
             }
+            // the skip list is remembered, so the typed forms skip without
+            // naming it; the size floor is per run and travels with them
+            if let Some(m) = &self.min_display {
+                parts.push("--min".into());
+                parts.push(m.clone());
+            }
         }
         if self.dry_run && matches!(command, Command::Milk | Command::Purge | Command::Undo) {
             parts.push("--dry-run".into());
@@ -105,10 +123,20 @@ pub enum CliError {
     UnknownFlag(String),
     UnknownToken(String),
     MissingCommand(String),
-    SecondPath { first: String, second: String },
-    SecondKind { first: String, second: String },
+    SecondPath {
+        first: String,
+        second: String,
+    },
+    SecondKind {
+        first: String,
+        second: String,
+    },
     RootMissing(String),
     RootNotDir(String),
+    /// A flag that takes a value came last.
+    MissingValue(String),
+    /// `--min` with something that is not a size.
+    BadSize(String),
 }
 
 impl fmt::Display for CliError {
@@ -130,6 +158,10 @@ impl fmt::Display for CliError {
             }
             CliError::RootMissing(s) => write!(f, "folder not found  {s}"),
             CliError::RootNotDir(s) => write!(f, "not a folder  {s}"),
+            CliError::MissingValue(s) => write!(f, "{s} needs a value"),
+            CliError::BadSize(s) => {
+                write!(f, "not a size  {s}   (100k, 2.5m, 1g, or bytes)")
+            }
         }
     }
 }
@@ -160,10 +192,44 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
     let mut quick = false;
     let mut undo = false;
     let mut help = false;
+    let mut skip_add: Vec<String> = Vec::new();
+    let mut skip_remove: Vec<String> = Vec::new();
+    let mut min: u64 = 0;
+    let mut min_display: Option<String> = None;
 
-    for tok in &args {
-        let t = tok.as_str();
+    let mut i = 0;
+    while i < args.len() {
+        let t = args[i].as_str();
+        i += 1;
         if t.starts_with('-') && t != "-" {
+            // value flags: `--skip X` or `--skip=X`
+            let (flag, inline) = match t.split_once('=') {
+                Some((f, v)) if f.starts_with("--") => (f, Some(v.to_string())),
+                _ => (t, None),
+            };
+            if matches!(flag, "--skip" | "--unskip" | "--min") {
+                let value = match inline {
+                    Some(v) => v,
+                    None => {
+                        let v = args
+                            .get(i)
+                            .cloned()
+                            .ok_or_else(|| CliError::MissingValue(flag.to_string()))?;
+                        i += 1;
+                        v
+                    }
+                };
+                match flag {
+                    "--skip" => skip_add.push(value),
+                    "--unskip" => skip_remove.push(value),
+                    _ => {
+                        min = crate::skip::parse_size(&value)
+                            .ok_or_else(|| CliError::BadSize(value.clone()))?;
+                        min_display = Some(value);
+                    }
+                }
+                continue;
+            }
             match t {
                 "--help" | "-h" => help = true,
                 "--dry-run" | "-n" => dry_run = true,
@@ -233,7 +299,15 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         Command::Undo
     } else if let Some(c) = command {
         c
-    } else if path.is_none() && !recurse && kind == Kind::All && !dry_run && !quick {
+    } else if path.is_none()
+        && !recurse
+        && kind == Kind::All
+        && !dry_run
+        && !quick
+        && skip_add.is_empty()
+        && skip_remove.is_empty()
+        && min_display.is_none()
+    {
         Command::Menu
     } else {
         let culprit = path
@@ -243,8 +317,14 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         let culprit = if culprit.is_empty() {
             if dry_run {
                 "--dry-run".into()
-            } else {
+            } else if quick {
                 "--quick-search".into()
+            } else if !skip_add.is_empty() {
+                "--skip".into()
+            } else if !skip_remove.is_empty() {
+                "--unskip".into()
+            } else {
+                "--min".into()
             }
         } else {
             culprit
@@ -262,6 +342,11 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         kind,
         dry_run,
         quick,
+        skip_add,
+        skip_remove,
+        skip: Vec::new(),
+        min,
+        min_display,
     })
 }
 

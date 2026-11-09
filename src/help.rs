@@ -39,7 +39,7 @@ pub fn page(r: &Renderer) {
         String::new(),
         c(
             "find",
-            "list every duplicate group, then decide on it (m p n k u q)",
+            "list every duplicate group, then decide in the workspace",
         ),
         c(
             "milk",
@@ -54,7 +54,7 @@ pub fn page(r: &Renderer) {
         ),
         c(
             "doctor",
-            "check terminal, folder, journal, Recycle Bin, ffmpeg, model",
+            "check terminal, folder, volumes, bin, ffmpeg, HEIC, model",
         ),
         String::new(),
         tok("PATH", "root folder                         default: here"),
@@ -64,7 +64,7 @@ pub fn page(r: &Renderer) {
         ),
         tok(
             "img",
-            "images only                         default: everything",
+            "images only (HEIC, AVIF, RAW too)   default: everything",
         ),
         tok("vid", "videos only (ffmpeg)"),
         String::new(),
@@ -74,7 +74,26 @@ pub fn page(r: &Renderer) {
             "--quick-search",
             "byte copies only, by size and 64 KiB samples; no near pass",
         ),
-        fl("-u", "--undo", "reverse the last milk or purge under PATH"),
+        fl(
+            "",
+            "--skip NAME",
+            "leave out folders and files named NAME (* ?); remembered",
+        ),
+        fl(
+            "",
+            "--unskip NAME",
+            "forget a skipped name; --unskip all forgets every one",
+        ),
+        fl(
+            "",
+            "--min SIZE",
+            "leave out files under SIZE (100k, 2m), this run",
+        ),
+        fl(
+            "-u",
+            "--undo",
+            "reverse the last milk or purge under PATH; pick if several",
+        ),
         fl("-dr", "--doctor", "same as the doctor command"),
         fl("-h", "--help", "this page"),
         String::new(),
@@ -102,7 +121,7 @@ pub fn page(r: &Renderer) {
         format!(
             " {} {}",
             d(g.bullet),
-            d("find and dry runs never write; purge never hard-deletes")
+            d("find and dry runs never change the folder; purge never hard-deletes")
         ),
     ];
     for l in lines {

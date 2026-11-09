@@ -236,11 +236,50 @@ Items: SHELVED.md § Phase 9. What it became:
   `--undo` journal line ran past the width under a long root (its command
   now shortens in the middle).
 
-## Phase 10 — formats and filesystems   ← planned
+## Phase 10 — formats and filesystems   ← built and verified on Linux 2026-11-09; the Windows run (RUN_VERIFY.cmd) pending
 
 Phone and camera files decode (HEIC/HEIF/AVIF via ffmpeg, RAW previews);
 `milk` survives volume boundaries; Windows-only paths (Ctrl-C, colour)
 verified; doctor covers the new failure modes. Items: SHELVED.md § Phase 10.
+What it became:
+
+- **TECH-01** `decode.rs` owns every still decoder and picks the route by
+  the file's bytes: the `image` crate; HEIF/HEIC/AVIF; RAW previews;
+  ffmpeg for the rest (JPEG XL, PSD, a DNG without a preview). Every
+  image extension the scan accepts is decoded; the DECODE line names the
+  routes and the reasons for what it could not decode.
+- **NF-01** `heif.rs` reads the container (grid tiles, `iden`, `clap`,
+  `irot`, `imir` in association order, the Exif item) and ffmpeg decodes
+  the tiles as an elementary stream, so a phone's tiled photo decodes on
+  any ffmpeg with HEVC (and libdav1d or libaom for AVIF), not only on
+  8.1+. `imir`'s meaning and the colour authority were measured
+  (RESEARCH §2.9): the stream's own colour signalling decides.
+- **NF-02** `raw.rs`: the embedded preview by a marker-chain-validated
+  scan, the mid-size preview when one has the full shape, orientation and
+  moment from the RAW's metadata (TIFF, Olympus/Panasonic magic, CR3
+  boxes, the preview's EXIF). A RAW keeps its group, is never acted on by
+  the near tier (`raw`), and its camera JPEG twin is a `pair`, left with
+  it unless chosen by hand (RESEARCH §2.10).
+- **CORE-05** `fsops.rs`: a move across volumes is copy, fsync, read
+  back, BLAKE3 compare, times kept, then delete (the copy removed if the
+  original will not go); journaled as `copied`; undo crosses back the
+  same way.
+- **SC-07** typed failures (`ActError`: vanished, in use, permission,
+  cross-device, bin, other) on the `failed` lines and to the workspace,
+  whose bar offers `r retry` (in use, refused) and, after a purge,
+  `m milk the N the bin refused`, each an undoable change of its own.
+- **QOL-06** `--skip NAME` (`*`, `?`), remembered in the app folder,
+  `--unskip NAME|all`; named on the header, counted on the SCAN line.
+- **QOL-08** `--min SIZE`, per run, carried by the `next` lines and
+  `again`.
+- **QOL-09** doctor: `_milked` and the root's folders against the root's
+  volume; HEIC and AVIF decoded from two built-in probe pictures; the
+  model's SHA-256 against the published file; the skip list.
+- **QOL-10, TECH-07, SC-08** the launcher writes UTF-8 logs (read in
+  place, no longer committed), runs a Windows Ctrl-C test
+  (`GenerateConsoleCtrlEvent`, CTRL_BREAK to a child in its own process
+  group) and the real-format tests against the machine's ffmpeg, and
+  photographs its own console after a live doctor.
 
 ## Phase 11 — matching depth   ← planned
 
@@ -276,9 +315,12 @@ pass runs.
 - A tier acts (moves or bins) only when two independent families of
   evidence agree: the two 64-bit hashes with PDQ or the geometric fit, or
   the learned descriptor with the fit. A single family lists. Two files
-  that state different capture moments are never acted on. In the
-  workspace a person may choose a listed file by hand — their look is the
-  second family for that file, and every line and footer says so; another
-  capture moment cannot be chosen.
+  that state different capture moments are never acted on, and neither is
+  a camera RAW by the near tier (Phase 10). In the workspace a person may
+  choose a listed file by hand — their look is the second family for that
+  file, and every line and footer says so; another capture moment and a
+  RAW cannot be chosen.
+- A move never leaves two files or none: across volumes it is a verified
+  copy whose original is deleted last (Phase 10).
 - New flags need a reason stronger than convenience; the menu stays at five
   workflows (plus `again`, the last folder) per screen.

@@ -83,31 +83,12 @@ impl Visual {
         }
     }
 
-    /// Decode the still. Videos go through ffmpeg (`-ss` before `-i`, so
-    /// the seek is to the keyframe and cheap).
+    /// Decode the still (`decode`): an image upright, a video's frame a
+    /// third of the way in.
     pub fn load(&self) -> Option<DynamicImage> {
         match self {
-            Visual::Image(p) => crate::perceptual::load_image(p).ok(),
-            Visual::Video(p, duration) => {
-                let t = format!("{:.3}", (duration / 3.0).max(0.0));
-                let out = Command::new("ffmpeg")
-                    .args([
-                        "-nostdin",
-                        "-hide_banner",
-                        "-loglevel",
-                        "error",
-                        "-ss",
-                        &t,
-                        "-i",
-                    ])
-                    .arg(p)
-                    .args(["-frames:v", "1", "-f", "image2pipe", "-vcodec", "png", "-"])
-                    .stdin(Stdio::null())
-                    .stderr(Stdio::null())
-                    .output()
-                    .ok()?;
-                image::load_from_memory(&out.stdout).ok()
-            }
+            Visual::Image(p) => crate::decode::load_image(p).ok(),
+            Visual::Video(p, duration) => crate::decode::video_frame(p, *duration),
         }
     }
 }

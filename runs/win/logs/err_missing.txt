@@ -1,3 +1,0 @@
- dedupe  folder not found  C:\no\such\folder
-         dedupe --help
-exit 1  0 s

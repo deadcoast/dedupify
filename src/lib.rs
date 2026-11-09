@@ -10,6 +10,7 @@
 pub mod actions;
 pub mod capture;
 pub mod cli;
+pub mod decode;
 #[cfg(feature = "deep")]
 pub mod deep;
 #[cfg(not(feature = "deep"))]
@@ -17,6 +18,9 @@ pub mod deep {
     //! Stub for builds without the deep tier: nothing is ever installed.
     use std::path::{Path, PathBuf};
     pub const MODEL_FILE: &str = "sscd_disc_mixup.onnx";
+    pub const MODEL_SHA256: &str =
+        "e65e2a5b9a5e44a0b0f011bddaa6f28621021f6120ca7ce8b526c19f2f6156f8";
+    pub const MODEL_BYTES: u64 = 98_156_202;
     pub const DIM: usize = 512;
     pub const DEEP_MIN: f32 = 0.70;
     pub type Embedding = [f32; DIM];
@@ -53,8 +57,10 @@ pub mod deep {
 }
 pub mod doctor;
 pub mod exact;
+pub mod fsops;
 pub mod geometry;
 pub mod hamming;
+pub mod heif;
 pub mod help;
 pub mod interrupt;
 pub mod journal;
@@ -65,8 +71,10 @@ pub mod near;
 pub mod pdq;
 pub mod perceptual;
 pub mod preview;
+pub mod raw;
 pub mod recent;
 pub mod render;
+pub mod skip;
 pub mod theme;
 pub mod util;
 pub mod video;

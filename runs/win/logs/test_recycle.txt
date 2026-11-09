@@ -1,9 +1,0 @@
-    Finished `release` profile [optimized] target(s) in 0.20s
-     Running tests\e2e.rs (target\release\deps\e2e-2362722771720996.exe)
-
-running 1 test
-test purge_then_undo_through_the_bin ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 25 filtered out; finished in 0.52s
-
-exit 0  1 s

@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use image::imageops::FilterType;
-use image::{DynamicImage, GrayImage, ImageDecoder, ImageReader};
+use image::{DynamicImage, GrayImage};
 
 use crate::pdq::{self, Hash256, Pdq};
 
@@ -107,43 +107,15 @@ pub fn hamming(a: u64, b: u64) -> u32 {
 // decode → 288×288 luminance grid
 // ---------------------------------------------------------------------------
 
-#[derive(Debug)]
-pub enum DecodeError {
-    Io(std::io::Error),
-    Image(image::ImageError),
-}
+pub use crate::decode::DecodeError;
 
-impl std::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DecodeError::Io(e) => write!(f, "{e}"),
-            DecodeError::Image(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-/// Decode `path`, apply its EXIF orientation, and compute both planes:
-/// the 288×288 grid (dHash, pHash) and the PDQ result.
+/// Decode `path` upright (`decode::load`) and compute both planes: the
+/// 288×288 grid (dHash, pHash) and the PDQ result.
 pub fn load_planes(path: &Path) -> Result<(Vec<f32>, Pdq, u32, u32), DecodeError> {
-    let img = load_image(path)?;
+    let img = crate::decode::load_image(path)?;
     let (w, h) = (img.width(), img.height());
     let (grid, p) = planes_from_image(&img);
     Ok((grid, p, w, h))
-}
-
-/// Decode `path` with its EXIF orientation applied.
-pub fn load_image(path: &Path) -> Result<DynamicImage, DecodeError> {
-    let reader = ImageReader::open(path)
-        .map_err(DecodeError::Io)?
-        .with_guessed_format()
-        .map_err(DecodeError::Io)?;
-    let mut decoder = reader.into_decoder().map_err(DecodeError::Image)?;
-    let orientation = decoder
-        .orientation()
-        .unwrap_or(image::metadata::Orientation::NoTransforms);
-    let mut img = DynamicImage::from_decoder(decoder).map_err(DecodeError::Image)?;
-    img.apply_orientation(orientation);
-    Ok(img)
 }
 
 /// Decode `path` for the grid only (tests and tools that need no PDQ).
@@ -444,22 +416,6 @@ pub fn signature_from_image(img: &DynamicImage) -> Signature {
 pub fn signature(path: &Path) -> Result<Signature, DecodeError> {
     let (grid, p, w, h) = load_planes(path)?;
     Ok(signature_from_planes(&grid, &p, w, h))
-}
-
-/// Decodable by this build's `image` features; the exact tier accepts the
-/// wider `kind::IMAGE_EXT`, the near tier only these.
-pub const DECODABLE_EXT: &[&str] = &[
-    "jpg", "jpeg", "jpe", "jfif", "png", "gif", "webp", "bmp", "tif", "tiff", "ico",
-];
-
-pub fn decodable(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| {
-            let e = e.to_ascii_lowercase();
-            DECODABLE_EXT.iter().any(|d| *d == e)
-        })
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

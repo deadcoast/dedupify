@@ -9,13 +9,26 @@ pub enum Kind {
     Video,
 }
 
-/// Extensions treated as images. Lower-case, no dot. Covers raster formats
-/// and camera raws; the exact tier only needs the filter, perceptual
-/// decoding (Phase 2) will narrow to what `image` can decode.
+/// Extensions treated as images. Lower-case, no dot: raster formats, the
+/// HEIF family and camera RAWs (`decode` has a route for each).
 pub const IMAGE_EXT: &[&str] = &[
     "jpg", "jpeg", "jpe", "jfif", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif",
-    "avif", "jxl", "psd", "ico", "dng", "cr2", "cr3", "nef", "arw", "orf", "rw2", "raf", "pef",
+    "hif", "avif", "jxl", "psd", "ico", "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "sr2",
+    "srf", "orf", "rw2", "rwl", "raf", "pef", "srw", "x3f", "3fr", "fff", "iiq", "erf", "kdc",
+    "dcr", "mrw", "mos",
 ];
+
+/// Camera RAW extensions: decoded through their embedded preview, and
+/// never acted on by the near tier (`raw`, `near`). [CLAUDE, Phase 10]
+pub const RAW_EXT: &[&str] = &[
+    "dng", "cr2", "cr3", "crw", "nef", "nrw", "arw", "sr2", "srf", "orf", "rw2", "rwl", "raf",
+    "pef", "srw", "x3f", "3fr", "fff", "iiq", "erf", "kdc", "dcr", "mrw", "mos",
+];
+
+/// A camera RAW, by extension.
+pub fn is_raw(path: &Path) -> bool {
+    has_ext(path, RAW_EXT)
+}
 
 /// Extensions treated as videos.
 pub const VIDEO_EXT: &[&str] = &[

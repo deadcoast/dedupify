@@ -13,6 +13,15 @@ or binned on one family of evidence: the two 64-bit hashes must be
 confirmed by PDQ or by the geometric fit (or, in the workspace, by your
 own look, labelled as such), and two photographs with different capture
 moments are shown and left alone.
+
+Phone and camera files are read as they come: HEIC, HEIF and AVIF (the
+tiled photos phones write, decoded through any ffmpeg with HEVC and AV1
+decoders) and camera RAWs through the JPEG preview every RAW carries. A
+RAW keeps its group and is never moved or binned by the near tier; the
+camera's JPEG beside it is shown as `RAW + JPEG` and stays unless you
+choose it. `milk` across volumes (a mount point in the tree, or
+`_milked` linked to another drive) copies, reads the copy back, compares
+it, then deletes the original.
 `docs/COMPARISON.md` says what here is the standard pipeline and what is
 not.
 
@@ -22,7 +31,7 @@ cargo install --path .
 
 ```
 dedupe                      workflow menu
-dedupe find [PATH] [.]      list every duplicate group, then decide on it
+dedupe find [PATH] [.]      list every duplicate group, then decide in the workspace
 dedupe milk [PATH] [.]      move duplicates into PATH\_milked
 dedupe purge [PATH] [.]     verify bytes, then Recycle Bin
 dedupe --undo [PATH]        reverse the last milk or purge
@@ -30,8 +39,10 @@ dedupe doctor [PATH]        checks, with a fix line for each
 ```
 
 `.` includes subfolders; `img` / `vid` restrict the kind; `-n` dry run;
-`-q` byte copies only (size and 64 KiB samples, no near pass); `-h` the
-help page.
+`-q` byte copies only (size and 64 KiB samples, no near pass); `--skip
+NAME` leaves a folder or pattern out and remembers it (`--unskip` to
+forget); `--min SIZE` leaves out small files for a run; `-h` the help
+page.
 
 - `docs/PLAN.md` — the phases, what this build contains, what is next
 - `docs/RESEARCH.md` — the mathematics and the papers behind each choice
@@ -41,8 +52,9 @@ help page.
 - `docs/COMPARISON.md` — against czkawka, fclones and the hash libraries: same, different, missing
 - `docs/IDENTIFIED.md` → `docs/SHELVED.md` → `docs/TODO.md` — the latest review, its items by milestone, the milestone in progress
 
-Nothing is cached or indexed on a scan. A change writes one journal in the
-OS local-data folder; `--undo` consumes it. Ctrl-C during a change stops
+Nothing is cached or indexed on a scan, and nothing is written into the
+scanned folder but `_milked`. A change writes one journal in the OS
+local-data folder; `--undo` consumes it. Ctrl-C during a change stops
 after the file in hand and the journal still covers every move. Set
 `DEDUPE_JOURNAL_DIR` to move the journals, `NO_COLOR=1` for uncoloured
 output, `DEDUPE_ASCII=1` for the ASCII glyph set.
