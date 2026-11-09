@@ -336,7 +336,7 @@ impl Menu {
                     vec![(format!("  {} ", g.pointer), Role::Keep, true), lit(&cmd)],
                 );
                 let what = match self.selected() {
-                    Workflow::Find => "prints groups, changes nothing",
+                    Workflow::Find => "lists groups, then m milk  p purge  q",
                     Workflow::Milk => "moves duplicates; dedupe --undo reverses it",
                     Workflow::Purge => {
                         "verifies bytes, then Recycle Bin; dedupe --undo reverses it"

@@ -36,6 +36,7 @@ help page.
 - `docs/VERIFICATION.md` — what was run in the build environment and what it showed
 - `docs/DEEP.md` — the optional learned tier: install, provenance, what it may do
 - `docs/COMPARISON.md` — against czkawka, fclones and the hash libraries: same, different, missing
+- `docs/IDENTIFIED.md` → `docs/SHELVED.md` → `docs/TODO.md` — the latest review, its items by milestone, the milestone in progress
 
 Nothing is cached or indexed on a scan. A change writes one journal in the
 OS local-data folder; `--undo` consumes it. Ctrl-C during a change stops
