@@ -1,0 +1,3 @@
+ dedupe  one kind at a time  img  and  vid   (leave both out for everything)
+         dedupe --help
+exit 1  0 s

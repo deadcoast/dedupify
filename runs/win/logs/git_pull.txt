@@ -1,0 +1,8 @@
+From https://github.com/deadcoast/dedupify
+ * branch            main       -> FETCH_HEAD
+   52e0eb5..f3f05f1  main       -> origin/main
+Updating 52e0eb5..f3f05f1
+Fast-forward
+ src/render.rs | 35 +++++++++++++++++++++++++----------
+ 1 file changed, 25 insertions(+), 10 deletions(-)
+exit 0  1 s
