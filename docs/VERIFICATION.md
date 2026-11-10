@@ -2120,7 +2120,9 @@ PowerShell script that is running; the launcher now hashes itself before
 its checkout and pull and, when either changed it, runs the new copy with
 `-Pulled` for the rest of the run. The copy on that machine is now `c8a3edb`'s, which
 already has the formats and colour steps; the restart takes effect from
-the run after next.
+the run after next. On 2026-11-10 the owner skipped the second run and
+closed the phase: QOL-10, TECH-07 and SC-08 are built and unverified on
+Windows, carried to `SHELVED.md` § Phase 12.
 
 On `c8a3edb`'s code: the build took 130 s (binary 28,694,016 bytes);
 `cargo test --release` passed 114 unit and 27 end-to-end tests (Linux's

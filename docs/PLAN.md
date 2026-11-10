@@ -236,7 +236,7 @@ Items: SHELVED.md § Phase 9. What it became:
   `--undo` journal line ran past the width under a long root (its command
   now shortens in the middle).
 
-## Phase 10 — formats and filesystems   ← built and verified on Linux 2026-11-09; the Windows run (RUN_VERIFY.cmd) pending
+## Phase 10 — formats and filesystems   ← delivered 2026-11-10 (Linux-verified; QOL-10, TECH-07 and SC-08 built, their Windows run skipped by the owner and carried to Phase 12)
 
 Phone and camera files decode (HEIC/HEIF/AVIF via ffmpeg, RAW previews);
 `milk` survives volume boundaries; Windows-only paths (Ctrl-C, colour)
@@ -289,7 +289,7 @@ What it became:
   path column takes what its own columns leave, and the listing gives up
   the least it can when the width is short (CLI §3).
 
-## Phase 11 — matching depth   ← planned
+## Phase 11 — matching depth   ← in progress (TODO.md)
 
 The carried measurement debts and the engine's known misses: robust and
 mirrored fit, non-black bars, the deep threshold and the capture-moment
@@ -300,7 +300,9 @@ rule on real labelled data, provenance-aware keepers. Items: SHELVED.md
 
 The code shaped for what it became: actions/render/video split, a shared
 group interface, the `unwrap()` audit, in-tree benchmarks, pseudo-terminal
-tests on Windows, CI on Linux and Windows. Items: SHELVED.md § Phase 12.
+tests on Windows, CI on Linux and Windows, and the Windows verification
+Phase 10 carried (Ctrl-C, UTF-8 logs, console colour). Items: SHELVED.md
+§ Phase 12.
 
 ## Docs chain
 

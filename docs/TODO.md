@@ -1,42 +1,35 @@
-# TODO — Phase 10: formats and filesystems
+# TODO — Phase 11: matching depth
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 10 · items: `SHELVED.md` § Phase 10 · source:
-`IDENTIFIED.md` (IDs below). Build order top to bottom. Previous
-milestone: Phase 9, delivered 2026-11-09 (`SHELVED.md` § Phase 9 `[done]`).
+Milestone: `PLAN.md` § Phase 11 · items: `SHELVED.md` § Phase 11 · source:
+`IDENTIFIED.md` § 4.3–4.5 (IDs below). Build order top to bottom. Previous
+milestone: Phase 10, delivered 2026-11-10 (`SHELVED.md` § Phase 10 `[done]`;
+its three Windows-only verifications wait in § Phase 12).
 
-- [x] **TECH-01** `decode.rs` owning every decoder
-- [x] **NF-01** HEIC / HEIF / AVIF through ffmpeg, EXIF from the container
-- [x] **NF-02** RAW stills through their embedded previews; RAW + JPEG pairs
-- [x] **CORE-05** cross-volume `milk` (copy, verify, delete; journaled)
-- [x] **SC-07** typed action errors (the workspace offers retry / fallback)
-  — retry driven; the bin-refused fallback written, not driven (VERIFICATION § Phase 10)
-- [x] **QOL-06** `--skip` exclusions, remembered in the app dir
-- [x] **QOL-08** `--min` size floor
-- [x] **QOL-09** doctor: HEIC decode, `_milked` volume, model SHA-256
-- [ ] **QOL-10** Windows console colour verified (screenshot in VERIFICATION)
-  — built: the launcher photographs its console after a live doctor; the first Windows
-  run ran the launcher's previous copy (no picture); awaits the next run
-- [ ] **TECH-07** Ctrl-C e2e on Windows
-  — built: CTRL_BREAK through `GenerateConsoleCtrlEvent`; passed in the first Windows run,
-  where a skip could not be told from a pass; with a console it now fails rather than
-  skip; awaits the next run
-- [ ] **SC-08** UTF-8 Windows logs, no log churn in commits
-  — built: UTF-8 writer, `runs/win/logs/` removed, `log/` ignored; the first Windows run's
-  logs are UTF-16 (the previous launcher wrote them); awaits the next run
+- [ ] **CORE-04** deep threshold on real labelled copies
+- [ ] **CORE-08** capture-moment rule on a real camera roll (needs NF-01)
+- [ ] **CORE-01** robust (trimmed / rank) NCC in the fit
+- [ ] **CORE-02** mirror search in the fit
+- [ ] **CORE-03** non-black video bars
+- [ ] **CORE-06** mid-file sample for files over 1 GB
+- [ ] **CORE-07** provenance-aware keeper policy
+- [ ] **NF-05** burst / series handling, keep the sharpest
+- [ ] **TECH-02** DCT-domain JPEG downscale, re-measured against conformance
+- [ ] **QOL-07** ETA on long stages
 
-Done when: every box ticked, the suite green on Linux and in
-`runs/win/RUN_VERIFY.cmd`, `VERIFICATION` has the Phase 10 section, and
-`PLAN.md` marks Phase 10 delivered.
+Done when: every box ticked, the suite green on Linux (with the Windows
+type-check and clippy; a Windows run if the phase touches Windows-only
+code), every new or moved threshold measured on a corpus named in
+`VERIFICATION` § Phase 11, and `PLAN.md` marks Phase 11 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 10 `[done]`, then
+When this list is complete: mark `SHELVED.md` § Phase 11 `[done]`, then
 rewrite this file from the next `[shelved]` section of `SHELVED.md`
-(Phase 11 — matching depth). If SHELVED has no `[shelved]` section left,
+(Phase 12 — structure and CI). If SHELVED has no `[shelved]` section left,
 run the IDENTIFIED workflow instead.

@@ -18,25 +18,10 @@ Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
 
 ---
 
-## Phase 9 — the workspace, deep   `[done]` 2026-11-09 — see PLAN.md § Phase 9, VERIFICATION.md § Phase 9
+## Phase 10 — formats and filesystems   `[done]` 2026-11-10 — see PLAN.md § Phase 10, VERIFICATION.md § Phase 10
 
-Order inside the milestone is build order: each item relies on the ones
-above it.
-
-1. **SC-01** one coherent doc set: decide RESEARCH/VERIFICATION file
-   layout, delete the duplicate, fix the 47 stale references
-2. **SC-04** stale menu and copy strings
-3. **TECH-03** workspace state machine (Browse, Confirm, Acted, Keeper),
-   unit-testable without a pseudo-terminal — the base for 4–8
-4. **QOL-01** per-group / per-member selection, bar counts follow
-5. **QOL-02** several changes per sitting, `u` reverses the last
-6. **QOL-04** cursor, scroll and `g` jump over long results
-7. **NF-04** `o` reveal the file in Explorer
-8. **NF-03** in-terminal preview (sixel / kitty), OS-viewer fallback
-9. **QOL-03** remembered last folder and kind on the bare menu
-10. **QOL-05** undo history: pick which journal to reverse
-
-## Phase 10 — formats and filesystems   `[todo]`
+Items 9–11 are built; their Windows run was skipped and they wait in
+Phase 12 (below) for their Windows verification.
 
 1. **TECH-01** `decode.rs` owning every decoder
 2. **NF-01** HEIC / HEIF / AVIF through ffmpeg, EXIF from the container
@@ -50,7 +35,7 @@ above it.
 10. **TECH-07** Ctrl-C e2e on Windows
 11. **SC-08** UTF-8 Windows logs, no log churn in commits
 
-## Phase 11 — matching depth   `[shelved]`
+## Phase 11 — matching depth   `[todo]`
 
 1. **CORE-04** deep threshold on real labelled copies
 2. **CORE-08** capture-moment rule on a real camera roll (needs NF-01)
@@ -73,6 +58,14 @@ above it.
 6. **TECH-05** in-tree benchmarks on fixed corpora
 7. **TECH-04** ConPTY pseudo-terminal tests on Windows
 8. **TECH-08** CI matrix (ubuntu, windows, ffmpeg)
+9. **TECH-07** Ctrl-C e2e on Windows — built in Phase 10; verified by a
+   Windows pass with a console present (the next `RUN_VERIFY.cmd`, or the
+   TECH-08 job if its runner has a console: without one the test skips
+   and proves nothing)
+10. **SC-08** UTF-8 Windows logs — built in Phase 10; read from the next
+    `runs/win/RUN_VERIFY.cmd`
+11. **QOL-10** Windows console colour — built in Phase 10; the screenshot
+    from the next `runs/win/RUN_VERIFY.cmd` goes into VERIFICATION
 
 ## Not yet placed
 
