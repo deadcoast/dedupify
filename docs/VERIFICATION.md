@@ -2068,21 +2068,108 @@ they caught `trash::Error::FileSystem` being a Linux-only variant. The
 committed `runs/win/logs/` (an earlier run, by the launcher's former
 folder name) is removed; `log/` and `formats/` are ignored.
 
+## 8. One date column per listing (found on the first Windows run)
+
+The Windows run's listing at 100 columns put the keeper's date at column
+89 in the GROUP blocks, 78 in the NEAR blocks and 80 in the VIDEO block
+(`log\find_all.txt`); its workspace at 120 columns, at 107 and 67 (the
+screenshot and listing sent back). Each block fitted its own widest tail to the right
+edge, and an exact keeper row, having no dimension or size columns, ended
+at the edge itself. CLI §2a's mock hid it at 70 columns.
+
+`Renderer::listing` now measures the NEAR and VIDEO blocks at every
+compaction level, places one date-and-words column where the widest
+date, words and evidence of the whole listing leave it, and takes the
+least severe compaction that keeps every path its room (the worst column
+any block drops, then the total: evidence numbers 1, a codec 2,
+dimensions 3; for one block alone this picks what the old rules picked).
+Measured on the Linux copy of the Windows sample at every width from 40
+to 200, against the build of `c8a3edb`:
+
+- one column at every width from 62 to 200 (139 widths); from 40 to 61
+  a block's paths reach their 12-cell floor and its dates sit to the
+  right of the shared column;
+- no width has a line more over the edge than before (headers fewer;
+  below 62 columns both builds overflow their stage lines, their member
+  lines at the path floor and the policy line: found here, not fixed);
+- aligning costs a column at 8 of the 161 widths, where a block's path
+  sat a cell or two above its floor: the video dimensions at 79–80, the
+  video codec at 86–87, the near evidence numbers at 116, the video
+  evidence numbers at 128–130 (so near evidence first shows at 117, not
+  116, and video evidence at 131, not 128); nothing is dropped at any
+  other width.
+
+`keepers_dates_share_one_column_across_blocks` (exact, near and video
+blocks at 200 and 100 columns) fails on `c8a3edb`'s renderer (`dates at
+{"GROUP": {189}, "NEAR": {158}, "VIDEO": {152}}, 200 columns`) and passes
+now. The group headers are now fitted like stage lines (rightmost parts go first): at 64 columns
+`VIDEO 014 … keeper of GROUP 001` ran two cells past the edge in both
+builds. CLI §2a's mock had its keeper and kin rows one cell short and
+§3's near mock two rows one cell long; both are aligned now.
+
+## 9. Windows, the first run (2026-11-09 15:54)
+
+Windows 11 Home (NT 10.0.26300), Ryzen 7 9800X3D (16 threads), 61.6 GB,
+PowerShell 5.1 in ConsoleHost at 120 columns, code page 437, rustc
+1.99.0, ffmpeg 9.0.2 (gyan.dev full build).
+
+The launcher pulled `710c893..c8a3edb` and then ran the steps of the copy
+it had already read, `710c893`'s (before Phase 9): no formats step, no
+console picture, and logs in UTF-16 (`Out-File`). A pull cannot reach a
+PowerShell script that is running; the launcher now hashes itself before
+its checkout and pull and, when either changed it, runs the new copy with
+`-Pulled` for the rest of the run. The copy on that machine is now `c8a3edb`'s, which
+already has the formats and colour steps; the restart takes effect from
+the run after next.
+
+On `c8a3edb`'s code: the build took 130 s (binary 28,694,016 bytes);
+`cargo test --release` passed 114 unit and 27 end-to-end tests (Linux's
+29 less its three Unix-only tests, plus the Windows Ctrl-C test),
+`interrupted_milk_leaves_a_journal_undo_can_use`,
+`a_raw_keeps_its_group_and_its_camera_jpeg`,
+`a_tiled_rotated_heic_decodes_and_groups_with_its_jpeg` and
+`skip_is_remembered_and_min_is_per_run` among them; with the model, 27
+passed; the real Recycle Bin test passed. The Ctrl-C test and the HEIC
+test return early, as a pass, when they cannot run (no console; no
+libx265), and libtest keeps their note out of the log, so this run does
+not show that either ran. The Ctrl-C test now fails instead when a
+console is present. The doctor passed every check, among them `heif
+HEIC and AVIF decode (probe pictures checked)` on ffmpeg 9.0.2: the
+first HEIF decode on Windows. `milk` + `--undo` and `purge` + `--undo`
+each left the 39 files with every SHA-256 equal.
+
+The live workspace showed the groups, words and evidence numbers of the
+Linux copy's run; the `graf1` pair keeps the export there, because on
+equal pixels the older file keeps and the sample's generator wrote
+`exports\graf1_mirror.png` 3.7 s before `graf1.png`. The pasted listing
+had two row cursors: the workspace redraws every line of the alternate
+screen each frame, and the terminal harness here at 30 and 50 rows shows
+one row cursor per frame at the top, scrolled to the bottom and back. The
+paste joined two screens. The `▸` before `m milk` marks the action row
+(CLI §2a).
+
 ## Suite
 
 `cargo test --release`: 114 unit tests (17 new: `heif` 4, `raw` 3,
-`decode` 3, `skip` 3, `fsops` 3, `walk` 1) and 29 end-to-end tests pass
-(4 new: the RAW group, the tiled rotated HEIC, across volumes, skip and
-size floor; the Ctrl-C test now shares its body with the Windows one);
-with `DEDUPE_MODEL` the 29 pass; with `--no-default-features` 112 + 29;
-`formats_corpus -- --ignored` 3 tests, 34 of 34 real files. clippy
-(both feature sets, and for Windows) and `cargo fmt --check` clean.
-Binary 26,512,904 bytes.
+`decode` 3, `skip` 3, `fsops` 3, `walk` 1) and 30 end-to-end tests pass
+(5 new: the RAW group, the tiled rotated HEIC, across volumes, skip and
+size floor, one date column; the Ctrl-C test now shares its body with
+the Windows one); with `DEDUPE_MODEL` the 30 pass; with
+`--no-default-features` 112 + 30; `formats_corpus -- --ignored` 3 tests,
+34 of 34 real files. clippy (both feature sets; for
+`x86_64-pc-windows-msvc` with `blake3/pure`, and with the deep feature
+through clang) and `cargo fmt --check` clean. Binary 26,518,856 bytes.
 
 ## Not verified here
 
-- Everything in §7, until the Windows run: the Ctrl-C test on Windows,
-  colour in the legacy console, the formats on ffmpeg 9.0.2.
+- §7 on Windows, until the next run (§9 says why the first did not
+  reach it): the Ctrl-C test with a console proven, colour in the legacy
+  console, UTF-8 logs, the formats on ffmpeg 9.0.2; and the launcher's
+  restart after a pull that changes it, which no PowerShell here could
+  run.
+- Terminals under 62 columns: the stage lines, member lines whose path
+  is at its 12-cell floor, and the policy line run past the edge (both
+  before this phase and after it; §8).
 - The Recycle Bin refusing a file (the `m milk the N the bin refused`
   fallback): the path is written and type-checked, not driven — the
   freedesktop bin here accepts whatever it can rename, and a refusal

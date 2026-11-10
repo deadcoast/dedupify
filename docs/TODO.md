@@ -18,11 +18,15 @@ milestone: Phase 9, delivered 2026-11-09 (`SHELVED.md` § Phase 9 `[done]`).
 - [x] **QOL-08** `--min` size floor
 - [x] **QOL-09** doctor: HEIC decode, `_milked` volume, model SHA-256
 - [ ] **QOL-10** Windows console colour verified (screenshot in VERIFICATION)
-  — built: the launcher photographs its console after a live doctor; awaits the Windows run
+  — built: the launcher photographs its console after a live doctor; the first Windows
+  run ran the launcher's previous copy (no picture); awaits the next run
 - [ ] **TECH-07** Ctrl-C e2e on Windows
-  — built: CTRL_BREAK through `GenerateConsoleCtrlEvent`; awaits the Windows run
+  — built: CTRL_BREAK through `GenerateConsoleCtrlEvent`; passed in the first Windows run,
+  where a skip could not be told from a pass; with a console it now fails rather than
+  skip; awaits the next run
 - [ ] **SC-08** UTF-8 Windows logs, no log churn in commits
-  — built: UTF-8 writer, `runs/win/logs/` removed, `log/` ignored; awaits the Windows run
+  — built: UTF-8 writer, `runs/win/logs/` removed, `log/` ignored; the first Windows run's
+  logs are UTF-16 (the previous launcher wrote them); awaits the next run
 
 Done when: every box ticked, the suite green on Linux and in
 `runs/win/RUN_VERIFY.cmd`, `VERIFICATION` has the Phase 10 section, and

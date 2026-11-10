@@ -2,6 +2,8 @@
 # suite (with the real-format files and the Ctrl-C test), then exercises
 # every command on runs\win\sample and logs it all, UTF-8, under
 # runs\win\log. Run from anywhere; everything is anchored below.
+# -Pulled: started by an older copy of this script after its pull (below).
+param([switch]$Pulled)
 $ErrorActionPreference = 'Continue'
 $repo = 'C:\github\dedupify'
 $log = Join-Path $repo 'runs\win\log'
@@ -95,9 +97,21 @@ Show 'env' @(
 )
 
 Step 'git pull'
-# local edits under runs\win are this script's own earlier copies; the repo's version wins
-Run 'git_checkout' 'git checkout -- runs/win'
-Run 'git_pull' 'git pull --ff-only origin main'
+if ($Pulled) {
+    Write-Host 'pulled by the copy of this script that started the run'
+} else {
+    $self = (Get-FileHash $PSCommandPath -Algorithm SHA256).Hash
+    # local edits under runs\win are this script's own earlier copies; the repo's version wins
+    Run 'git_checkout' 'git checkout -- runs/win'
+    Run 'git_pull' 'git pull --ff-only origin main'
+    # PowerShell runs the copy it read at the start; when the checkout or
+    # the pull changed this script, the new copy runs the rest of the run
+    if ((Get-FileHash $PSCommandPath -Algorithm SHA256).Hash -ne $self) {
+        Write-Host 'the pull changed this script; the new copy runs the rest' -ForegroundColor Yellow
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Pulled
+        exit $LASTEXITCODE
+    }
+}
 
 Step 'cargo build --release'
 Run 'build' 'cargo build --release'

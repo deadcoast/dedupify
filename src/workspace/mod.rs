@@ -101,9 +101,7 @@ fn listing_lines(
     width_cells: usize,
 ) -> Vec<String> {
     let captured = r.capture(width_cells.saturating_sub(2).max(40), |c| {
-        c.groups(&f.groups, &inv.root);
-        c.near_groups(&f.near, &inv.root, f.groups.len());
-        c.video_groups(&f.video, &inv.root, f.groups.len() + f.near.len());
+        c.listing(&f.groups, &f.near, &f.video, &inv.root);
     });
     let lines: Vec<String> = captured
         .into_iter()

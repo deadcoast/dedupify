@@ -135,13 +135,13 @@ one-line bar under the listing; Phase 9 made it this:
  dedupe find  C:\Photos  recursive  all kinds
  ──────────────────────────────────────────────────────────────────────
  ■ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
-   keep  clips\vtest.avi                                     2026-11-09
+   keep  clips\vtest.avi                                        2026-11-09
 ▸■ dupe  clips\vtest - Copy.avi
  ◧ NEAR 005   3 similar  +1 kin   918 KB reclaimable
-   keep  photos\shot_a.jpg                1282×1110   531 KB   2026-11-09
+   keep  photos\shot_a.jpg                 1282×1110   531 KB   2026-11-09
  ■ near  photos\exports\shot_a_export.jpg  961×832     223 KB   resized 75%
  □ near  photos\exports\shot_a_crop.jpg    1100×950    301 KB   similar, unconfirmed
- · kin   photos\shot_b.jpg                1282×1110   642 KB   another shot, 05:06:08
+ · kin   photos\shot_b.jpg                 1282×1110   642 KB   another shot, 05:06:08
  ──────────────────────────────────────────────────────────────────────
  15 selected  19.2 MB                                         group 1/14
    ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to
@@ -268,10 +268,21 @@ Rules the renderer enforces:
 
 - Width-aware: every line is measured in display cells (`unicode-width`) and
   fitted to the terminal; long paths are shortened in the middle with `…`,
-  never wrapped. The path column of a NEAR or VIDEO block is sized from
-  the widest tail in that block; when the path would fall under 14 cells
-  a NEAR block drops its dimensions column, and a VIDEO block drops its
-  codec column, then its dimensions, before the path falls under 18.
+  never wrapped.
+- One date column per listing **[CLAUDE, Phase 10]**: the keeper's date
+  and each member's words start at the same cell in the GROUP, NEAR and
+  VIDEO blocks alike, the column the widest words-and-evidence part of the
+  whole listing leaves at the right edge; each block's path column takes
+  what its own columns (dimensions, size; duration, codec) leave before
+  it. A path keeps 32 cells while its block shows evidence numbers and 18
+  while it shows dimensions or a codec; when the width is short the
+  listing gives up the least it can across all blocks, measured by the
+  worst column dropped and then the total: evidence numbers before a
+  codec, a codec before dimensions. Aligning can cost one block a column
+  it would keep alone (VERIFICATION, Phase 10 §8 has the widths). A path
+  never shrinks under 12 cells; on a terminal that narrow a block's dates
+  sit to the right of the shared column rather than cut its paths
+  further.
   A stage line drops its rightmost segments rather than wrap (the in-place
   redraw cannot clear a wrapped line). A totals line whose policy part does
   not fit moves that part to an indented second line.
@@ -345,8 +356,8 @@ Near groups follow the exact groups and continue the numbering:
    near  photos\export\beach_mirror.png    1000×750   444 KB   mirrored                d  0  p  0  q   8
    near  photos\export\beach.jpg           1000×750   45.9 KB  same picture            d  0  p  0  q   2  +GROUP 002
    near  photos\export\beach_crop.jpg      950×712    41.7 KB  cropped 95%             d 10  p  6  q  32  fit 1.00
-   near  photos\beach_small.jpg             500×375    10.6 KB  resized 50%             d  0  p  0  q   4
-   kin   photos\beach_next.jpg              1000×750   440 KB   another shot, 14:02:11  d  1  p  2  q   6
+   near  photos\beach_small.jpg            500×375    10.6 KB  resized 50%             d  0  p  0  q   4
+   kin   photos\beach_next.jpg             1000×750   440 KB   another shot, 14:02:11  d  1  p  2  q   6
  ───────────────────────────────────────────────────────────────
  2 groups   3 duplicates   646 KB reclaimable   keep: oldest copy
  1 kin   taken at a different moment: another photograph, left alone

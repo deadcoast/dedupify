@@ -340,9 +340,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
 }
 
 pub(crate) fn report(f: &Found, inv: &Invocation, r: &Renderer) {
-    r.groups(&f.groups, &inv.root);
-    r.near_groups(&f.near, &inv.root, f.groups.len());
-    r.video_groups(&f.video, &inv.root, f.groups.len() + f.near.len());
+    r.listing(&f.groups, &f.near, &f.video, &inv.root);
     r.skipped(&f.scan, &f.pipe);
     r.totals(
         &f.groups,

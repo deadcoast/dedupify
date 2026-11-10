@@ -278,8 +278,16 @@ What it became:
 - **QOL-10, TECH-07, SC-08** the launcher writes UTF-8 logs (read in
   place, no longer committed), runs a Windows Ctrl-C test
   (`GenerateConsoleCtrlEvent`, CTRL_BREAK to a child in its own process
-  group) and the real-format tests against the machine's ffmpeg, and
-  photographs its own console after a live doctor.
+  group; with a console present it fails rather than skip) and the
+  real-format tests against the machine's ffmpeg, and photographs its own
+  console after a live doctor. When its own pull changes the script, the
+  new copy runs the rest of the run (the first Windows run of this phase
+  ran the old steps on the new code).
+- **One date column per listing** **[CLAUDE]**, found in the first
+  Windows run's workspace: the keeper's date and each member's words start
+  at one cell in the GROUP, NEAR and VIDEO blocks alike; each block's
+  path column takes what its own columns leave, and the listing gives up
+  the least it can when the width is short (CLI §3).
 
 ## Phase 11 — matching depth   ← planned
 

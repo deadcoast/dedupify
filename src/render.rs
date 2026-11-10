@@ -27,6 +27,36 @@ const REDRAW_EVERY: Duration = Duration::from_millis(40);
 const STAGE_LEAD: usize = 1 + 6 + 1 + BAR_CELLS + 2;
 /// The verb column of the `next` / `near` / `video` / `undo` lines.
 const HINT_VERB: usize = 5;
+/// A group row before its tail: margin, indent, verb, gap; then the gap
+/// after the path. The tail starts `ROW_LEAD + path` cells in.
+const ROW_LEAD: usize = 1 + 2 + 4 + 2 + 2;
+/// An exact keeper row after its path: the date and one cell of margin.
+const EXACT_POST: usize = 10 + 1;
+
+/// One listing section's columns at each compaction level (index):
+/// `pre` the cells between the path and the date-or-words column
+/// (dimensions, size, ... with their gaps), `post` the widest date, words
+/// and evidence after it, `room` the fewest path cells a level needs (the
+/// last level needs none), `cost` what the level gives up: 1 the evidence
+/// numbers, 2 the codec, 3 the dimensions.
+struct Measure {
+    pre: Vec<usize>,
+    post: Vec<usize>,
+    room: &'static [usize],
+    cost: &'static [u8],
+}
+
+impl Measure {
+    /// An empty section: no columns, never compacted.
+    fn none() -> Measure {
+        Measure {
+            pre: vec![0],
+            post: vec![0],
+            room: &[],
+            cost: &[0],
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // live progress (Sync — ticked from rayon workers)
@@ -519,21 +549,56 @@ impl Renderer {
         v.join("   ")
     }
 
-    /// The group list. `root` makes paths relative.
-    pub fn groups(&self, groups: &[Group], root: &Path) {
-        self.groups_from(groups, root, 0);
+    /// The groups of one listing, paths relative to `root`: exact, then
+    /// near, then video, numbered on from each other. One column holds
+    /// every keeper's date and every member's words in all three blocks,
+    /// so the eye finds them in one place; each block's path column takes
+    /// what its own columns leave (docs/CLI.md §3).
+    pub fn listing(&self, groups: &[Group], near: &[NearGroup], video: &[VideoGroup], root: &Path) {
+        let n = self.near_section(near, root, 0, None);
+        let v = self.video_section(video, root, 0, None);
+        let exact_post = if groups.is_empty() { 0 } else { EXACT_POST };
+        let col_at = |ln: usize, lv: usize| {
+            let post = exact_post.max(n.post[ln]).max(v.post[lv]);
+            self.theme.width.saturating_sub(post)
+        };
+        // every pair of levels is tried; the least severe one that leaves
+        // each path its room wins: the worst column any block drops first
+        // (evidence numbers before a codec, a codec before dimensions),
+        // then the total. The last levels need no room.
+        let mut best: Option<((u8, u8), usize, usize)> = None;
+        for ln in 0..n.pre.len() {
+            for lv in 0..v.pre.len() {
+                let col = col_at(ln, lv);
+                let fits = |m: &Measure, l: usize| {
+                    l >= m.room.len() || col >= ROW_LEAD + m.pre[l] + m.room[l]
+                };
+                if !(fits(&n, ln) && fits(&v, lv)) {
+                    continue;
+                }
+                let key = (n.cost[ln].max(v.cost[lv]), n.cost[ln] + v.cost[lv]);
+                if best.is_none_or(|b| key < b.0) {
+                    best = Some((key, ln, lv));
+                }
+            }
+        }
+        let (ln, lv) = best.map_or((n.pre.len() - 1, v.pre.len() - 1), |b| (b.1, b.2));
+        let col = col_at(ln, lv);
+        self.exact_section(groups, root, col);
+        self.near_section(near, root, groups.len(), Some((col, ln)));
+        self.video_section(video, root, groups.len() + near.len(), Some((col, lv)));
     }
 
-    /// Exact groups numbered from `offset + 1` (the workspace reprints one).
-    pub fn groups_from(&self, groups: &[Group], root: &Path, offset: usize) {
+    /// Exact groups; the keeper's date starts at `col`.
+    fn exact_section(&self, groups: &[Group], root: &Path, col: usize) {
         let t = &self.theme;
         if groups.is_empty() {
             return;
         }
         self.blank();
-        let digits = (offset + groups.len()).to_string().len().max(3);
+        let digits = groups.len().to_string().len().max(3);
         for (i, g) in groups.iter().enumerate() {
-            let n = format!("{:0width$}", offset + i + 1, width = digits);
+            let n = format!("{:0width$}", i + 1, width = digits);
             let head = match g.tier {
                 Tier::Full => t.paint_bold(Role::Plate, &format!("GROUP {n}")),
                 Tier::Sample => t.paint_bold(Role::Warn, &format!("LIKELY {n}")),
@@ -561,11 +626,11 @@ impl Renderer {
             if !tail.is_empty() {
                 parts.push(tail);
             }
-            self.line(&format!(" {}", parts.join("   ")));
+            // a short terminal loses the rightmost parts, never wraps
+            self.line(&format!(" {}", join_fit(&parts, t.width.saturating_sub(1))));
 
             // member lines:  "   keep  <path>  <date>"
-            let date_cells = 10;
-            let path_cells = t.width.saturating_sub(3 + 6 + 2 + date_cells + 1).max(12);
+            let path_cells = col.saturating_sub(ROW_LEAD).max(12);
             for (j, m) in g.members.iter().enumerate() {
                 let rel = rel_display(&m.path, root);
                 let shown = shorten_middle(&rel, path_cells, t.glyphs.ellipsis);
@@ -588,13 +653,20 @@ impl Renderer {
     }
 
     /// Near-duplicate groups. `offset` continues the numbering after the
-    /// exact groups so a line in the output has one number.
-    pub fn near_groups(&self, groups: &[NearGroup], root: &Path, offset: usize) {
+    /// exact groups so a line in the output has one number. Without a
+    /// `plan` (date column, compaction level) the section is measured, not
+    /// printed.
+    fn near_section(
+        &self,
+        groups: &[NearGroup],
+        root: &Path,
+        offset: usize,
+        plan: Option<(usize, usize)>,
+    ) -> Measure {
         let t = &self.theme;
         if groups.is_empty() {
-            return;
+            return Measure::none();
         }
-        self.blank();
         let digits = (offset + groups.len()).to_string().len().max(3);
 
         // Every member's tail (everything after the path) is built first,
@@ -607,7 +679,7 @@ impl Renderer {
         // Two steps of compaction when the width is short: first the
         // evidence numbers go (the words stay), then the dimensions column,
         // so the path keeps at least 14 cells.
-        let compact = std::cell::Cell::new(0u8);
+        let compact = std::cell::Cell::new(0usize);
         // a RAW shows `RAW` where the size goes: its preview's size is not
         // the picture's (Phase 10)
         let lead_cols = |w: u32, h: u32, raw: bool, size: u64| -> (String, String) {
@@ -707,20 +779,27 @@ impl Renderer {
                 .max()
                 .unwrap_or(0)
         };
-        // margin 1 + indent 2 + verb 4 + 2 + path + 2 + tail, inside the width.
+        // the columns before the date or words, with their gap
+        let pre = || width(&lead_cols(0, 0, false, 0).0) + 2;
         // The path is the identifier: the evidence numbers go before it
         // drops under 32 cells, the dimensions before it drops under 18.
-        let lead = 1 + 2 + 4 + 2 + 2;
-        let mut widest_tail = widest();
-        if t.width < lead + widest_tail + 32 {
-            compact.set(1);
-            widest_tail = widest();
-        }
-        if t.width < lead + widest_tail + 18 {
-            compact.set(2);
-            widest_tail = widest();
-        }
-        let path_cells = t.width.saturating_sub(lead + widest_tail).max(12);
+        let Some((col, level)) = plan else {
+            let mut m = Measure {
+                pre: Vec::new(),
+                post: Vec::new(),
+                room: &[32, 18],
+                cost: &[0, 1, 3],
+            };
+            for l in 0..=m.room.len() {
+                compact.set(l);
+                m.pre.push(pre());
+                m.post.push(widest().saturating_sub(pre()));
+            }
+            return m;
+        };
+        compact.set(level);
+        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(12);
+        self.blank();
 
         for (i, g) in groups.iter().enumerate() {
             let n = format!("{:0width$}", offset + i + 1, width = digits);
@@ -756,7 +835,8 @@ impl Renderer {
                     ));
                 }
             }
-            self.line(&format!(" {}", parts.join("   ")));
+            // a short terminal loses the rightmost parts, never wraps
+            self.line(&format!(" {}", join_fit(&parts, t.width.saturating_sub(1))));
 
             let keeper = &g.members[0].hashed;
             for (j, m) in g.members.iter().enumerate() {
@@ -791,15 +871,22 @@ impl Renderer {
                 }
             }
         }
+        Measure::none()
     }
 
     /// Video groups; numbering continues after exact and near groups.
-    pub fn video_groups(&self, groups: &[VideoGroup], root: &Path, offset: usize) {
+    /// Measured, not printed, without a `plan` (as `near_section`).
+    fn video_section(
+        &self,
+        groups: &[VideoGroup],
+        root: &Path,
+        offset: usize,
+        plan: Option<(usize, usize)>,
+    ) -> Measure {
         let t = &self.theme;
         if groups.is_empty() {
-            return;
+            return Measure::none();
         }
-        self.blank();
         let digits = (offset + groups.len()).to_string().len().max(3);
 
         struct Tail {
@@ -810,7 +897,7 @@ impl Renderer {
         // Compaction when the width is short: 1 drops the evidence numbers
         // (the words stay), 2 drops the codec, 3 drops the dimensions
         // (duration and size stay).
-        let compact = std::cell::Cell::new(0u8);
+        let compact = std::cell::Cell::new(0usize);
         let meta_cols = |m: &crate::video::VideoMember| -> (String, String) {
             let c = &m.hashed.rep.cand;
             let meta = &m.hashed.sig.meta;
@@ -899,19 +986,27 @@ impl Renderer {
                 .max()
                 .unwrap_or(0)
         };
+        // the columns before the date or words, with their gap
+        let pre = || width(&meta_cols(&groups[0].members[0]).0) + 2;
         // the path is the identifier: the evidence numbers go before it
         // drops under 32 cells, the codec and the dimensions under 18
-        let lead = 1 + 2 + 4 + 2 + 2;
-        let mut widest_tail = widest();
-        if t.width < lead + widest_tail + 32 {
-            compact.set(1);
-            widest_tail = widest();
-        }
-        while compact.get() < 3 && t.width < lead + widest_tail + 18 {
-            compact.set(compact.get() + 1);
-            widest_tail = widest();
-        }
-        let path_cells = t.width.saturating_sub(lead + widest_tail).max(12);
+        let Some((col, level)) = plan else {
+            let mut m = Measure {
+                pre: Vec::new(),
+                post: Vec::new(),
+                room: &[32, 18, 18],
+                cost: &[0, 1, 2, 3],
+            };
+            for l in 0..=m.room.len() {
+                compact.set(l);
+                m.pre.push(pre());
+                m.post.push(widest().saturating_sub(pre()));
+            }
+            return m;
+        };
+        compact.set(level);
+        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(12);
+        self.blank();
 
         for (i, g) in groups.iter().enumerate() {
             let n = format!("{:0width$}", offset + i + 1, width = digits);
@@ -931,7 +1026,8 @@ impl Renderer {
                     &format!("keeper of GROUP {:0width$}", eg + 1, width = digits),
                 ));
             }
-            self.line(&format!(" {}", parts.join("   ")));
+            // a short terminal loses the rightmost parts, never wraps
+            self.line(&format!(" {}", join_fit(&parts, t.width.saturating_sub(1))));
 
             let keeper = &g.members[0];
             for (j, m) in g.members.iter().enumerate() {
@@ -958,6 +1054,7 @@ impl Renderer {
                 }
             }
         }
+        Measure::none()
     }
 
     /// A totals line: the counts, then the policy and thresholds. When the

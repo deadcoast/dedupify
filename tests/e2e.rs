@@ -540,7 +540,9 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
 /// The same on Windows (TECH-07): the child runs in a process group of
 /// its own and gets CTRL_BREAK from `GenerateConsoleCtrlEvent` (a
 /// CTRL_C cannot be aimed at one process group). The handler treats it
-/// as Ctrl-C. Skipped when this test has no console to send it through.
+/// as Ctrl-C. Skipped only when this test has no console at all (a
+/// service); with one, an event that cannot be sent fails the test, so a
+/// pass under `runs/win` is the interrupt itself.
 #[cfg(windows)]
 #[test]
 fn interrupted_milk_leaves_a_journal_undo_can_use() {
@@ -548,6 +550,7 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
     #[link(name = "kernel32")]
     extern "system" {
         fn GenerateConsoleCtrlEvent(event: u32, group: u32) -> i32;
+        fn GetConsoleWindow() -> *mut std::ffi::c_void;
     }
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CTRL_BREAK_EVENT: u32 = 1;
@@ -557,8 +560,17 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
             c
         },
         |child| {
-            // SAFETY: a plain Win32 call with our own child's group id
-            unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) != 0 }
+            // SAFETY: plain Win32 calls: no arguments, or our own child's
+            // group id
+            if unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) } != 0 {
+                return true;
+            }
+            let err = std::io::Error::last_os_error();
+            assert!(
+                unsafe { GetConsoleWindow() }.is_null(),
+                "CTRL_BREAK could not be sent with a console present: {err}"
+            );
+            false
         },
     );
 }
@@ -1109,6 +1121,51 @@ fn fixture_with_videos() -> Fx {
     let fx = fixture();
     add_videos(&fx.root);
     fx
+}
+
+/// One column holds every keeper's date in the GROUP, NEAR and VIDEO
+/// blocks of one listing (Phase 10), at a wide and a common width.
+#[test]
+fn keepers_dates_share_one_column_across_blocks() {
+    let fx = fixture_with_photos();
+    let videos = ffmpeg_ok();
+    if videos {
+        add_videos(&fx.root);
+    }
+    for cols in ["200", "100"] {
+        let out = Command::new(bin())
+            .args(["find", "."])
+            .current_dir(&fx.root)
+            .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", cols)
+            .output()
+            .expect("spawn dedupe");
+        let out = String::from_utf8_lossy(&out.stdout);
+        let mut at: std::collections::BTreeMap<&str, std::collections::BTreeSet<usize>> =
+            Default::default();
+        let mut block = "";
+        for line in out.lines() {
+            for b in ["GROUP", "NEAR", "VIDEO"] {
+                if line.starts_with(&format!(" {b} ")) {
+                    block = b;
+                }
+            }
+            if line.starts_with("   keep  ") {
+                let t = line.trim_end();
+                let date: String = t.chars().rev().take(10).collect();
+                assert!(
+                    date.chars().filter(|c| *c == '-').count() == 2,
+                    "no date at the end of {t:?}"
+                );
+                at.entry(block).or_default().insert(t.chars().count() - 10);
+            }
+        }
+        assert!(at.contains_key("GROUP") && at.contains_key("NEAR"), "{out}");
+        assert!(!videos || at.contains_key("VIDEO"), "{out}");
+        let all: std::collections::BTreeSet<usize> = at.values().flatten().copied().collect();
+        assert_eq!(all.len(), 1, "dates at {at:?}, {cols} columns\n{out}");
+    }
 }
 
 #[test]
