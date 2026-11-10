@@ -3,7 +3,7 @@
 A duplicate finder for the terminal. One run finds exact duplicates,
 near-duplicate images (rescaled, re-encoded, mirrored, rotated, cropped,
 letterboxed) and near-duplicate videos (re-encoded, scaled, trimmed,
-mirrored, boxed in black bars; `ffmpeg` and `ffprobe` on PATH), says in
+mirrored, boxed in bars; `ffmpeg` and `ffprobe` on PATH), says in
 words what each one is — `resized 50%`, `cropped 80%`, `another shot,
 05:06:08` — and then opens the result as a workspace: every file marked,
 `space` to choose, `v` to see the keeper beside it in the terminal, `k`
@@ -12,7 +12,8 @@ them to the Recycle Bin, `u` to reverse the last change. Nothing is moved
 or binned on one family of evidence: the two 64-bit hashes must be
 confirmed by PDQ or by the geometric fit (or, in the workspace, by your
 own look, labelled as such), and two photographs with different capture
-moments are shown and left alone.
+moments — or two frames of one burst — are shown and left alone unless
+you cull them yourself (`c`).
 
 Phone and camera files are read as they come: HEIC, HEIF and AVIF (the
 tiled photos phones write, decoded through any ffmpeg with HEVC and AV1

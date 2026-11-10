@@ -46,7 +46,7 @@ too, as `dedupe` does for all eight dihedral variants.
 | evidence to group | one perceptual hash at a chosen size, Hamming distance under a preset (`SIMILAR_VALUES`, e.g. ≤ 15 of 256 bits at 16×16 "Medium") | two 64-bit hashes of different construction (gradient and DCT) must both be within threshold on the same orientation |
 | evidence to delete or move | the same single distance | a second family must agree: PDQ ≤ 31 (frequency domain, 256 bits) **or** the geometric fit ≥ 0.92 (spatial correlation); the learned descriptor admits but never acts alone |
 | crops, letterboxes, small rotations | not matched by block hashes (nor by `dedupe`'s) | found by the fit when the hashes or the descriptor bring the pair in; the fit also tells which is the crop and by how much |
-| burst frames, stereo pairs, the same scene from another position | grouped when the hash distance is small | the hashes may group them; PDQ and the fit refuse them (measured: chessboard poses fit 0.31–0.45); different EXIF capture moments make them `kin`, never acted on |
+| burst frames, stereo pairs, the same scene from another position | grouped when the hash distance is small | the hashes may group them; PDQ and the fit refuse them (measured: chessboard poses fit 0.31–0.45, at most 0.823 under the Phase 11 search); different EXIF capture moments, or one moment under names a camera numbered apart (a burst), make them `kin`, never acted on unless a person chooses them (`c`) |
 | thresholds | user-chosen presets | fixed, each measured on a corpus before shipping, with the measurement in `docs/VERIFICATION.md` |
 | reversal | trash (optional) | one journal per change; `--undo` reverses moves and Recycle Bin entries; Ctrl-C mid-change still leaves a complete journal |
 
@@ -73,7 +73,10 @@ change measured at tmk 0.975 minimum on the synthetic corpus, Phase 3).
 Both approaches are published; TMK handles trims without a duration
 prefilter and gives one score per pair. czkawka has audio fingerprinting,
 which `dedupe` does not; both strip black bars before hashing (`dedupe`
-since Phase 7, with ffmpeg's `cropdetect` over the keyframes); `dedupe`
+since Phase 7, with ffmpeg's `cropdetect` over the keyframes, and since
+Phase 11 bars of a flat colour, and a blurred copy of the picture where
+it is much flatter than the picture, by the detail along each edge
+band); `dedupe`
 has the positional frame tier (three image hashes on twelve sampled
 frames, medians on the modal orientation) as the second family for
 mirrored or re-framed videos, which czkawka's docs do not describe.

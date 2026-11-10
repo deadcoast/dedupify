@@ -72,6 +72,11 @@ pub struct Relation {
     /// A RAW and the camera's own JPEG of it (same folder, same name):
     /// kept together; the JPEG can be chosen by hand.
     pub pair: bool,
+    /// Another frame of the same moment: both files state one capture
+    /// time and it agrees, but their names are numbered apart
+    /// (`IMG_0012`, `IMG_0013`) — a burst from a camera that records no
+    /// fraction of a second. Counted as `kin`. [CLAUDE, Phase 11]
+    pub frame: bool,
 }
 
 impl Relation {
@@ -86,12 +91,20 @@ impl Relation {
     }
 
     pub fn fit_ok(&self) -> bool {
-        self.fit.is_some_and(|f| f.ncc >= FIT_MIN)
+        self.fit.is_some_and(|f| f.confirmed())
     }
 
-    /// Admitted by the learned descriptor.
+    /// Admitted by the learned descriptor: at `DEEP_MIN`, or in the band
+    /// under it when the fit confirms the pair as well.
     pub fn deep_in(&self) -> bool {
-        self.deep.is_some_and(|c| c >= crate::deep::DEEP_MIN)
+        self.deep.is_some_and(|c| c >= crate::deep::DEEP_MIN) || (self.deep_band() && self.fit_ok())
+    }
+
+    /// The descriptor's cosine is in `[DEEP_FIT_MIN, DEEP_MIN)`: such a
+    /// pair is grouped only when the fit confirms it (Phase 11).
+    pub fn deep_band(&self) -> bool {
+        self.deep
+            .is_some_and(|c| (crate::deep::DEEP_FIT_MIN..crate::deep::DEEP_MIN).contains(&c))
     }
 
     /// Grouped by the deep tier alone: the two 64-bit hashes disagree.
@@ -159,6 +172,9 @@ impl Relation {
         keeper_taken: Option<&str>,
         member_taken: Option<&str>,
     ) -> String {
+        if self.frame {
+            return "another shot, same second".to_string();
+        }
         if self.kin {
             // the member's own moment: the time when the day is the
             // keeper's, the day otherwise
@@ -203,7 +219,10 @@ impl Relation {
         // geometry: what the fit found, when it was the evidence
         let mut geometric = false;
         if let Some(f) = self.fit {
-            if f.ncc >= FIT_MIN {
+            if f.confirmed() {
+                if f.mirrored && orientation.is_empty() {
+                    parts.push("mirrored".to_string());
+                }
                 if f.angle != 0.0 {
                     parts.push(format!("rotated {:+.0}°", f.angle));
                     geometric = true;
@@ -274,13 +293,16 @@ impl Relation {
             s.push_str(&format!("  deep {c:.2}"));
         }
         if let Some(f) = self.fit {
-            s.push_str(&format!("  fit {:.2}", f.ncc.max(0.0)));
+            s.push_str(&format!("  fit {:.2}", f.score().max(0.0)));
         }
         s
     }
 
     /// Why `confirmed()` is false, for the `kept~` line.
     pub fn unconfirmed_reason(&self) -> String {
+        if self.frame {
+            return "another frame of the same second".to_string();
+        }
         if self.kin {
             return "taken at a different moment".to_string();
         }
@@ -291,7 +313,7 @@ impl Relation {
             return "a RAW, never moved".to_string();
         }
         let fit_txt = match self.fit {
-            Some(f) => format!("fit {:.2} under {FIT_MIN:.2}", f.ncc.max(0.0)),
+            Some(f) => format!("fit {:.2} under {FIT_MIN:.2}", f.score().max(0.0)),
             None => "no fit".to_string(),
         };
         if self.deep_only() {
@@ -589,10 +611,12 @@ pub fn hash_all(
 /// Keeper order inside one group: the member the most other members match
 /// directly on the two 64-bit hashes (the hub — an original is what its
 /// derivatives all resemble, derivatives need not resemble each other),
-/// then most pixels (a downscaled copy is the derivative), then oldest, then
-/// largest file (at equal age and size a lossless encoding outweighs a lossy
-/// one), then path. Degree comes first so a padded or letterboxed copy with
-/// more pixels than the original cannot take the keeper seat.
+/// then most pixels (a downscaled copy is the derivative), then the path
+/// that does not name or file it as a copy (`keeper::derived`, CORE-07),
+/// then oldest, then largest file (at equal age and size a lossless
+/// encoding outweighs a lossy one), then path. Degree comes first so a
+/// padded or letterboxed copy with more pixels than the original cannot
+/// take the keeper seat. A RAW comes before all of it (Phase 10).
 pub fn keeper_order_with_degree(
     a: &Hashed,
     da: usize,
@@ -611,13 +635,18 @@ pub fn keeper_order(a: &Hashed, b: &Hashed) -> std::cmp::Ordering {
         b.sig
             .pixels()
             .cmp(&a.sig.pixels())
+            .then_with(|| {
+                crate::keeper::derived(&a.rep.cand.path)
+                    .cmp(&crate::keeper::derived(&b.rep.cand.path))
+            })
             .then_with(|| a.rep.cand.mtime.cmp(&b.rep.cand.mtime))
             .then_with(|| b.rep.cand.size.cmp(&a.rep.cand.size))
             .then_with(|| a.rep.cand.path.cmp(&b.rep.cand.path))
     })
 }
 
-pub const NEAR_POLICY_LABEL: &str = "keep: shared moment, the RAW, most matched, then most pixels";
+pub const NEAR_POLICY_LABEL: &str =
+    "keep: shared moment, the RAW, most matched, most pixels, not a copy";
 
 /// Best relation of `m` to the keeper `k`, searching both directions.
 pub fn relation(k: &Signature, m: &Signature) -> Relation {
@@ -631,12 +660,54 @@ pub fn relation_of(k: &Hashed, m: &Hashed) -> Relation {
         (Some(a), Some(b)) => Some(crate::deep::cosine(a, b)),
         _ => None,
     };
-    let kin = capture::different_moments(k.capture.as_ref(), m.capture.as_ref()) == Some(true);
+    let (kp, mp) = (&k.rep.cand.path, &m.rep.cand.path);
+    let frame = capture::different_moments(k.capture.as_ref(), m.capture.as_ref()) == Some(false)
+        && numbered_apart(kp, mp);
+    let kin =
+        frame || capture::different_moments(k.capture.as_ref(), m.capture.as_ref()) == Some(true);
     let mut r = relation_deep(&k.sig, &m.sig, cos, kin);
+    r.frame = frame;
     r.raw = m.raw;
     r.keeper_raw = k.raw;
-    r.pair = !kin && k.raw != m.raw && twins(&k.rep.cand.path, &m.rep.cand.path);
+    r.pair = !kin && k.raw != m.raw && twins(kp, mp);
     r
+}
+
+/// Two names a camera numbered apart: the same once every run of digits
+/// is set aside, with at least one of those numbers different —
+/// `IMG_0012` / `IMG_0013`, `DSC00012` / `DSC00013`,
+/// `20230101_120000_001` / `…_002`, `payload_N000` / `payload_N001`.
+/// A copy's name changes shape instead (`IMG_0012 (1)`, `IMG_0012 2`,
+/// `IMG_0012-2`, `IMG_0012 - Copy`), and a format conversion keeps the
+/// number (`IMG_0012.png`). Letters compare without case; numbers by
+/// value. [CLAUDE, Phase 11]
+pub fn numbered_apart(a: &std::path::Path, b: &std::path::Path) -> bool {
+    fn runs(p: &std::path::Path) -> Option<(Vec<String>, Vec<u128>)> {
+        let stem = p.file_stem()?.to_string_lossy().to_lowercase();
+        let (mut words, mut nums) = (vec![String::new()], Vec::new());
+        let mut digits = String::new();
+        for c in stem.chars() {
+            if c.is_ascii_digit() {
+                digits.push(c);
+                continue;
+            }
+            if !digits.is_empty() {
+                nums.push(digits.parse().ok()?);
+                digits.clear();
+                words.push(String::new());
+            }
+            words.last_mut()?.push(c);
+        }
+        if !digits.is_empty() {
+            nums.push(digits.parse().ok()?);
+            words.push(String::new());
+        }
+        Some((words, nums))
+    }
+    match (runs(a), runs(b)) {
+        (Some((wa, na)), Some((wb, nb))) => wa == wb && na.len() == nb.len() && na != nb,
+        _ => false,
+    }
 }
 
 /// A camera writes a RAW and its JPEG side by side under one name
@@ -675,6 +746,7 @@ pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool)
         raw: false,
         keeper_raw: false,
         pair: false,
+        frame: false,
     }
 }
 
@@ -763,34 +835,63 @@ pub fn group(
             }
         };
         let mut leftover: Vec<usize> = Vec::new();
+        // a single's best keeper in the band under DEEP_MIN, tried only
+        // after the pairs at DEEP_MIN: an attachment the fit may still
+        // drop must not take a single from a pair that lists (Phase 11)
+        let mut band_best: Vec<(f32, usize, usize)> = Vec::new(); // (cosine, single, comp)
         for &s_ in &singles {
             let mut best: Option<(usize, f32)> = None;
             for (ci, c) in comps.iter().enumerate() {
                 if let Some(cs) = cos_to(s_, c[0]) {
-                    if cs >= crate::deep::DEEP_MIN && best.is_none_or(|(_, b)| cs > b) {
+                    if cs >= crate::deep::DEEP_FIT_MIN && best.is_none_or(|(_, b)| cs > b) {
                         best = Some((ci, cs));
                     }
                 }
             }
             match best {
-                Some((ci, cs)) => deep_attached.push((ci, s_, cs)),
+                Some((ci, cs)) if cs >= crate::deep::DEEP_MIN => deep_attached.push((ci, s_, cs)),
+                Some((ci, cs)) => {
+                    band_best.push((cs, s_, ci));
+                    leftover.push(s_);
+                }
                 None => leftover.push(s_),
             }
         }
-        // leftovers pair among themselves, star-shaped around the better keeper
-        let mut cand: Vec<(f32, usize, usize)> = Vec::new();
+        // leftovers pair among themselves, star-shaped around the better
+        // keeper; then, in the band, a pair or a keeper, best cosine first
+        enum Join {
+            Pair(usize, usize),
+            Keeper(usize, usize), // (single, comp)
+        }
+        let mut cand: Vec<(f32, Join)> = Vec::new();
         for i in 0..leftover.len() {
             for j in i + 1..leftover.len() {
                 if let Some(cs) = cos_to(leftover[i], leftover[j]) {
-                    if cs >= crate::deep::DEEP_MIN {
-                        cand.push((cs, leftover[i], leftover[j]));
+                    if cs >= crate::deep::DEEP_FIT_MIN {
+                        cand.push((cs, Join::Pair(leftover[i], leftover[j])));
                     }
                 }
             }
         }
+        cand.extend(
+            band_best
+                .into_iter()
+                .map(|(cs, s_, ci)| (cs, Join::Keeper(s_, ci))),
+        );
+        // at DEEP_MIN pairs only (no keeper is there); under it both kinds
         cand.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         let mut placed: std::collections::HashMap<usize, usize> = std::collections::HashMap::new(); // member → comp
-        for (cs, a, b) in cand {
+        for (cs, join) in cand {
+            let (a, b) = match join {
+                Join::Keeper(s_, ci) => {
+                    if let std::collections::hash_map::Entry::Vacant(e) = placed.entry(s_) {
+                        e.insert(ci);
+                        deep_attached.push((ci, s_, cs));
+                    }
+                    continue;
+                }
+                Join::Pair(a, b) => (a, b),
+            };
             match (placed.get(&a).copied(), placed.get(&b).copied()) {
                 (None, None) => {
                     let (k, m) = if keeper_order(&hashed[a], &hashed[b]) == std::cmp::Ordering::Less
@@ -821,6 +922,8 @@ pub fn group(
 
     let mut slots: Vec<Option<Hashed>> = hashed.into_iter().map(Some).collect();
     let mut groups: Vec<NearGroup> = Vec::new();
+    // members the descriptor attached (not the hashes), by path
+    let mut by_deep: std::collections::HashSet<std::path::PathBuf> = Default::default();
     for (ci, idxs) in comps.iter().enumerate() {
         let keeper = slots[idxs[0]].take().unwrap();
         let mut members: Vec<NearMember> = vec![NearMember {
@@ -838,6 +941,7 @@ pub fn group(
         for &(aci, m, _) in &deep_attached {
             if aci == ci {
                 let h = slots[m].take().unwrap();
+                by_deep.insert(h.rep.cand.path.clone());
                 let relation = Some(relation_of(&members[0].hashed, &h));
                 members.push(NearMember {
                     hashed: h,
@@ -866,7 +970,10 @@ pub fn group(
                 .skip(1)
                 .filter_map(move |(mi, m)| {
                     let r = m.relation?;
-                    let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only());
+                    let needs = !r.kin
+                        && ((r.hash_pair() && !r.pdq_ok())
+                            || r.deep_only()
+                            || (!r.hash_pair() && r.deep_band()));
                     needs.then_some((gi, mi))
                 })
         })
@@ -888,6 +995,23 @@ pub fn group(
             }
         }
     }
+    // members the descriptor brought in under DEEP_MIN stay only when the
+    // fit confirmed them; a group left with its keeper alone goes too
+    for g in groups.iter_mut() {
+        let before = g.members.len();
+        let keeper = g.members.remove(0);
+        g.members.retain(|m| {
+            !by_deep.contains(&m.hashed.rep.cand.path)
+                || m.relation.is_none_or(|r| !r.deep_band() || r.fit_ok())
+        });
+        g.members.insert(0, keeper);
+        let dropped = before - g.members.len();
+        stats.deep_pairs = stats.deep_pairs.saturating_sub(dropped as u64);
+        stats.grouped = stats
+            .grouped
+            .saturating_sub(dropped as u64 + u64::from(g.members.len() < 2));
+    }
+    groups.retain(|g| g.members.len() >= 2);
     stats.kin = groups.iter().map(|g| g.kin_count() as u64).sum();
     stats.raw_pairs = groups.iter().map(|g| g.kinds().pair as u64).sum();
     groups.sort_by(|a, b| {
@@ -937,6 +1061,7 @@ mod words_tests {
             raw: false,
             keeper_raw: false,
             pair: false,
+            frame: false,
         }
     }
 
@@ -969,6 +1094,37 @@ mod words_tests {
     }
 
     #[test]
+    fn numbered_apart_tells_frames_from_copies() {
+        use std::path::Path;
+        let ap = |a: &str, b: &str| numbered_apart(Path::new(a), Path::new(b));
+        // frames a camera numbered
+        for (a, b) in [
+            ("d/IMG_0012.JPG", "d/IMG_0013.JPG"),
+            ("d/DSC00012.JPG", "e/dsc00013.jpg"),
+            ("d/20230101_120000_001.jpg", "d/20230101_120000_002.jpg"),
+            ("burst/payload_N000.jpg", "burst/payload_N003.jpg"),
+            ("d/P1000123.JPG", "d/P1000124.JPG"),
+        ] {
+            assert!(ap(a, b), "{a} {b}");
+        }
+        // copies, conversions, and names with no number
+        for (a, b) in [
+            ("d/IMG_0012.JPG", "d/IMG_0012 (1).JPG"),
+            ("d/IMG_0012.JPG", "d/IMG_0012 2.JPG"),
+            ("d/IMG_0012.JPG", "d/IMG_0012-2.JPG"),
+            ("d/IMG_0012.JPG", "d/IMG_0012 - Copy.JPG"),
+            ("d/IMG_0012.JPG", "exports/IMG_0012.png"),
+            ("d/IMG_0012.JPG", "d/img_0012.jpg"),
+            ("d/IMG_0012.JPG", "d/IMG_E0012.JPG"),
+            ("d/beach.jpg", "d/beach_small.jpg"),
+            ("d/beach.jpg", "e/beach.jpg"),
+            ("d/0012.jpg", "d/012.jpg"),
+        ] {
+            assert!(!ap(a, b), "{a} {b}");
+        }
+    }
+
+    #[test]
     fn fit_words_and_the_frames() {
         let k = (1000, 750);
         let mut r = rel(10, 6, 32);
@@ -979,6 +1135,7 @@ mod words_tests {
             dy: 0,
             angle: 0.0,
             inner_is_second: true,
+            ..Fit::none()
         });
         assert_eq!(r.words_for(k, (950, 712), None, None), "cropped 95%");
         r.fit = Some(Fit {
@@ -988,6 +1145,7 @@ mod words_tests {
             dy: 0,
             angle: 0.0,
             inner_is_second: false,
+            ..Fit::none()
         });
         assert_eq!(r.words_for(k, (1000, 1000), None, None), "letterboxed");
         assert_eq!(r.words_for(k, (1100, 825), None, None), "with a border");
@@ -998,6 +1156,7 @@ mod words_tests {
             dy: 0,
             angle: 4.0,
             inner_is_second: true,
+            ..Fit::none()
         });
         assert_eq!(r.words_for(k, k, None, None), "rotated +4°");
         // the fit fell short: listed, not acted on
@@ -1008,6 +1167,7 @@ mod words_tests {
             dy: 0,
             angle: 0.0,
             inner_is_second: true,
+            ..Fit::none()
         });
         assert_eq!(r.words_for(k, k, None, None), "similar, unconfirmed");
     }
@@ -1045,6 +1205,7 @@ mod words_tests {
             dy: 0,
             angle: 0.0,
             inner_is_second: true,
+            ..Fit::none()
         });
         assert_eq!(d.words_for(k, k, None, None), "edited");
     }

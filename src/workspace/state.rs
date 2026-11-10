@@ -190,6 +190,8 @@ impl State {
             for m in &g.members {
                 let keep_choice = self.roles.get(&m.path) == Some(&m.role);
                 let on = match m.role {
+                    // another shot stays chosen only by the person's own `c`
+                    Role::Locked(Lock::Kin) if keep_choice => self.selected.contains(&m.path),
                     Role::Keeper | Role::Locked(_) => false,
                     Role::Act | Role::Hand if keep_choice => self.selected.contains(&m.path),
                     Role::Act => true,
@@ -289,13 +291,13 @@ impl State {
         let mut hand = 0;
         for g in &self.layout.groups {
             for m in &g.members {
-                if matches!(m.role, Role::Act | Role::Hand)
+                if matches!(m.role, Role::Act | Role::Hand | Role::Locked(Lock::Kin))
                     && self.selected.contains(&m.path)
                     && seen.insert(&m.path)
                 {
                     n += 1;
                     bytes += m.size;
-                    if m.role == Role::Hand {
+                    if m.role != Role::Act {
                         hand += 1;
                     }
                 }
@@ -311,6 +313,7 @@ impl State {
                 let mi = self.member(g, m);
                 match mi.role {
                     Role::Keeper => Mark::None,
+                    Role::Locked(Lock::Kin) if self.selected.contains(&mi.path) => Mark::On,
                     Role::Locked(_) => Mark::Lock,
                     _ if self.selected.contains(&mi.path) => Mark::On,
                     _ => Mark::Off,
@@ -347,7 +350,12 @@ impl State {
                     Some("the keeper stays; k on another file makes it the keeper".into())
             }
             Role::Locked(Lock::Kin) => {
-                self.message = Some("another shot: a different photograph, never moved".into())
+                if !self.selected.remove(&mi.path) {
+                    self.message = Some(
+                        "another shot: a different photograph; c chooses a group's other shots"
+                            .into(),
+                    )
+                }
             }
             Role::Locked(Lock::Raw) => {
                 self.message = Some("a camera RAW: never moved by the near tier".into())
@@ -387,6 +395,55 @@ impl State {
         for m in pick {
             self.selected.insert(m.path.clone());
         }
+    }
+
+    /// The other shots of a group (kin: another capture moment, or another
+    /// frame of the same second).
+    fn shots(&self, g: usize) -> Vec<PathBuf> {
+        self.layout.groups[g]
+            .members
+            .iter()
+            .filter(|m| m.role == Role::Locked(Lock::Kin))
+            .map(|m| m.path.clone())
+            .collect()
+    }
+
+    /// `c` (NF-05): a group's other shots in or out at once — a burst or a
+    /// series culled by the person, the keeper kept (`k` makes another
+    /// shot the keeper first). The only way another photograph is ever
+    /// chosen; the program never does. [CLAUDE, Phase 11]
+    fn toggle_shots(&mut self, g: usize) {
+        let shots = self.shots(g);
+        if shots.is_empty() {
+            self.message = Some("no other shots in this group".into());
+            return;
+        }
+        if shots.iter().any(|p| self.selected.contains(p)) {
+            for p in &shots {
+                self.selected.remove(p);
+            }
+            return;
+        }
+        for p in &shots {
+            self.selected.insert(p.clone());
+        }
+        self.message = Some(format!(
+            "{} other shot{} chosen by you: different photographs, the keeper stays",
+            shots.len(),
+            if shots.len() == 1 { "" } else { "s" }
+        ));
+    }
+
+    /// Chosen members that are other shots.
+    pub fn chosen_shots(&self) -> usize {
+        let mut seen: HashSet<&PathBuf> = HashSet::new();
+        self.layout
+            .groups
+            .iter()
+            .flat_map(|g| g.members.iter())
+            .filter(|m| m.role == Role::Locked(Lock::Kin) && self.selected.contains(&m.path))
+            .filter(|m| seen.insert(&m.path))
+            .count()
     }
 
     /// `a`: anything chosen → nothing; nothing chosen → the program's own
@@ -507,6 +564,13 @@ impl State {
                 }
                 Key::Char('a') => {
                     self.toggle_all();
+                    Effect::None
+                }
+                Key::Char('c') => {
+                    match self.rows.get(self.cursor).copied() {
+                        Some(Row::Head(g)) | Some(Row::Member(g, _)) => self.toggle_shots(g),
+                        None => {}
+                    }
                     Effect::None
                 }
                 Key::Char('k') => match self.rows.get(self.cursor).copied() {
@@ -710,15 +774,20 @@ impl State {
                 .map(|(a, b)| (a.to_string(), b.to_string()))
                 .collect()
         };
-        let nav = pairs(&[
+        let here = match self.rows.get(self.cursor) {
+            Some(Row::Head(g)) | Some(Row::Member(g, _)) => Some(*g),
+            None => None,
+        };
+        let mut nav = pairs(&[
             (&format!("{}{}", g.up, g.down), "move"),
             ("space", "select"),
             ("a", "all"),
             ("k", "keeper"),
-            ("v", "view"),
-            ("o", "reveal"),
-            ("g", "go to"),
         ]);
+        if here.is_some_and(|g| !self.shots(g).is_empty()) {
+            nav.push(("c".into(), "other shots".into()));
+        }
+        nav.extend(pairs(&[("v", "view"), ("o", "reveal"), ("g", "go to")]));
         out.push(fit_parts(t, " ", &nav, t.width));
         let bar = match &self.mode {
             Mode::Browse => {
@@ -748,6 +817,13 @@ impl State {
                 let mut what = format!("{} {} {dest}, {}", fmt_count(n), g.arrow, fmt_bytes(bytes));
                 if hand > 0 {
                     what.push_str(&format!(", {hand} by hand"));
+                }
+                let shots = self.chosen_shots();
+                if shots > 0 {
+                    what.push_str(&format!(
+                        ", {shots} other shot{}",
+                        if shots == 1 { "" } else { "s" }
+                    ));
                 }
                 fit_parts(
                     t,
@@ -835,6 +911,68 @@ mod tests {
     }
 
     #[test]
+    fn c_chooses_a_groups_other_shots_and_nothing_else_does() {
+        let mut st = State::new(layout(), 20);
+        let before = st.stats();
+        // a, space on the group, space on the shot: never the other shot
+        st.handle(Key::Char('a'));
+        st.handle(Key::Char('a'));
+        assert!(!st.selected.contains(&p("b_next.jpg")));
+        st.cursor = st.rows.iter().position(|r| *r == Row::Head(1)).unwrap();
+        for _ in 0..2 {
+            st.handle(Key::Space);
+            assert!(!st.selected.contains(&p("b_next.jpg")));
+        }
+        st.cursor = st
+            .rows
+            .iter()
+            .position(|r| *r == Row::Member(1, 3))
+            .unwrap();
+        st.handle(Key::Space);
+        assert!(!st.selected.contains(&p("b_next.jpg")));
+        assert_eq!(st.mark(Row::Member(1, 3)), Mark::Lock);
+        // c on any row of the group chooses its other shots, by hand
+        st.cursor = st
+            .rows
+            .iter()
+            .position(|r| *r == Row::Member(1, 1))
+            .unwrap();
+        st.handle(Key::Char('c'));
+        assert!(st.selected.contains(&p("b_next.jpg")));
+        assert_eq!(st.mark(Row::Member(1, 3)), Mark::On);
+        assert_eq!(st.chosen_shots(), 1);
+        assert_eq!(st.stats(), (before.0 + 1, before.1 + 290, before.2 + 1));
+        assert!(st
+            .message
+            .as_deref()
+            .unwrap()
+            .contains("1 other shot chosen by you"));
+        // the confirm names them
+        st.handle(Key::Char('m'));
+        let screen = st.screen(&theme(120), "t", &[], 12).join("\n");
+        assert!(screen.contains("1 other shot"), "{screen}");
+        st.handle(Key::Esc);
+        // kept through a relayout with the same roles; space takes it back out
+        st.relayout(layout());
+        assert!(st.selected.contains(&p("b_next.jpg")));
+        st.cursor = st
+            .rows
+            .iter()
+            .position(|r| *r == Row::Member(1, 3))
+            .unwrap();
+        st.handle(Key::Space);
+        assert!(!st.selected.contains(&p("b_next.jpg")));
+        // a group with no other shots says so; c again clears
+        st.cursor = st.rows.iter().position(|r| *r == Row::Head(0)).unwrap();
+        st.handle(Key::Char('c'));
+        assert!(st.message.as_deref().unwrap().contains("no other shots"));
+        st.cursor = st.rows.iter().position(|r| *r == Row::Head(1)).unwrap();
+        st.handle(Key::Char('c'));
+        st.handle(Key::Char('c'));
+        assert!(!st.selected.contains(&p("b_next.jpg")));
+    }
+
+    #[test]
     fn defaults_select_what_the_program_would_act_on() {
         let st = State::new(layout(), 20);
         assert_eq!(st.stats(), (2, 150, 0));
@@ -897,7 +1035,7 @@ mod tests {
         st.handle(Key::Down);
         st.handle(Key::Space);
         assert_eq!(st.stats().0, 3);
-        assert!(st.message.as_deref().unwrap().contains("never moved"));
+        assert!(st.message.as_deref().unwrap().contains("c chooses"));
         // a header with something on clears the group; again, confirmed only
         st.cursor = st.rows.iter().position(|r| *r == Row::Head(1)).unwrap();
         st.handle(Key::Space);

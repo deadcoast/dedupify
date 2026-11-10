@@ -29,10 +29,16 @@ copy at `deep 0.78  fit 1.00` — the member is an ordinary `near` and the
 commands act on it; when it does not (`forest.png`, `deep 0.76  fit 0.51`)
 it stays listed. Two independent families, the learned descriptor and
 spatial correlation, have then agreed; the descriptor's word alone never
-moves a file. The model's threshold was measured on procedural pictures
-where unrelated images score higher than unrelated photographs would, so
-it is a floor; the harness for a real library is
-`cargo test --release --test corpus -- --ignored measure_deep`.
+moves a file. The threshold was first measured on procedural pictures,
+where unrelated images score higher than unrelated photographs would;
+Phase 11 measured it on real labelled copies (INRIA Copydays, 5.44
+million unrelated pairs, none over 0.526; `docs/VERIFICATION.md` § Phase
+11). The listing threshold stays 0.70 — photographs of one subject from
+another position reach 0.88 — and under it, down to 0.60, the descriptor
+brings a member in only when the fit confirms it, and that member acts
+(crops to 40 % of the area: 46.5 → 91.7 % acted on). The harnesses are
+`cargo test --release --test corpus -- --ignored measure_deep` and
+`tests/real_copies.rs`.
 
 ## Install
 

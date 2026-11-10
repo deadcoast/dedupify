@@ -38,8 +38,32 @@ pub const ANGLES: [f32; 7] = [-6.0, -4.0, -2.0, 0.0, 2.0, 4.0, 6.0];
 pub const BLUR_NARROW: usize = 1;
 pub const BLUR_WIDE: usize = 8;
 /// Fit at or above this confirms a pair (measured, docs/VERIFICATION.md
-/// Phase 6).
+/// Phase 6; held in Phase 11 for the search with cells and mirror).
 pub const FIT_MIN: f32 = 0.92;
+/// The robust score's grid: the window at the best placement is cut into
+/// `GRID` × `GRID` cells, each correlated on its own (CORE-01, Phase 11).
+pub const GRID: usize = 4;
+/// Share of the textured cells set aside, worst first, before the
+/// robust score averages the rest: a caption bar, a sticker, a local
+/// retouch covers a few cells of a true copy. [CLAUDE, Phase 11]
+pub const TRIM: f32 = 0.25;
+
+/// What the search tries beyond the plain correlation (CORE-01, CORE-02).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Search {
+    /// Also score the best placement by its cells, worst quarter set
+    /// aside.
+    pub robust: bool,
+    /// Also search the mirror image of the second picture.
+    pub mirror: bool,
+}
+
+impl Search {
+    pub const PLAIN: Search = Search {
+        robust: false,
+        mirror: false,
+    };
+}
 
 /// An aspect-preserving luma thumbnail, values in [0, 255].
 #[derive(Debug, Clone)]
@@ -152,6 +176,19 @@ impl Thumb {
         Thumb { w, h, px }
     }
 
+    /// Left and right exchanged.
+    pub fn mirrored(&self) -> Thumb {
+        let mut px = Vec::with_capacity(self.px.len());
+        for y in 0..self.h {
+            px.extend(self.px[y * self.w..(y + 1) * self.w].iter().rev());
+        }
+        Thumb {
+            w: self.w,
+            h: self.h,
+            px,
+        }
+    }
+
     /// Half size (2×2 box), for the coarse pass.
     fn half(&self) -> Thumb {
         self.resized((self.w / 2).max(1), (self.h / 2).max(1))
@@ -209,6 +246,11 @@ pub struct Fit {
     pub angle: f32,
     /// True when the second argument was the inner picture.
     pub inner_is_second: bool,
+    /// The cells' score at the same placement (`TRIM` of them set aside);
+    /// -1 when not searched or too few cells carry texture.
+    pub robust: f32,
+    /// The second picture was searched as its mirror image.
+    pub mirrored: bool,
 }
 
 impl Fit {
@@ -220,20 +262,31 @@ impl Fit {
             dy: 0,
             angle: 0.0,
             inner_is_second: true,
+            robust: -1.0,
+            mirrored: false,
         }
     }
 
+    /// The score a pair is judged by: the plain correlation, or the cells'
+    /// when that is higher.
+    pub fn score(&self) -> f32 {
+        self.ncc.max(self.robust)
+    }
+
     pub fn confirmed(&self) -> bool {
-        self.ncc >= FIT_MIN
+        self.score() >= FIT_MIN
     }
 
     /// `fit 0.97  crop 80%`, `fit 0.95  rot +4°`, `fit 0.99` — the words a
     /// result line carries. Below `FIT_MIN` only the number is shown: a
     /// placement that did not fit is not a crop.
     pub fn label(&self) -> String {
-        let mut s = format!("fit {:.2}", self.ncc.max(0.0));
+        let mut s = format!("fit {:.2}", self.score().max(0.0));
         if !self.confirmed() {
             return s;
+        }
+        if self.mirrored {
+            s.push_str("  mirror");
         }
         if self.angle != 0.0 {
             s.push_str(&format!("  rot {:+.0}\u{b0}", self.angle));
@@ -285,6 +338,75 @@ fn ncc_at(outer: &Thumb, inner: &Thumb, dx: usize, dy: usize, margin: usize) -> 
     ((sab - sa * sb / n) / (va * vb).sqrt()) as f32
 }
 
+/// The robust score of `inner` at (dx, dy) in `outer`: the window (less
+/// `margin`) cut into `GRID` × `GRID` cells, each correlated on its own;
+/// cells with almost no texture (variance under a twentieth of the
+/// window's mean per cell, in either picture) carry no evidence and are
+/// left out; of the rest the worst `TRIM` are set aside and the others
+/// averaged. -1 when fewer than half the cells carry texture.
+fn ncc_cells(outer: &Thumb, inner: &Thumb, dx: usize, dy: usize, margin: usize) -> f32 {
+    let margin = if inner.w > 2 * margin + 4 && inner.h > 2 * margin + 4 {
+        margin
+    } else {
+        0
+    };
+    let (w, h) = (inner.w - 2 * margin, inner.h - 2 * margin);
+    if w < GRID * 4 || h < GRID * 4 {
+        return -1.0;
+    }
+    // per cell: n, sa, sb, saa, sbb, sab
+    let mut acc = vec![[0.0f64; 6]; GRID * GRID];
+    for y in 0..h {
+        let cy = y * GRID / h;
+        let orow = (dy + margin + y) * outer.w + dx + margin;
+        let irow = (margin + y) * inner.w + margin;
+        for x in 0..w {
+            let b = inner.px[irow + x];
+            if b.is_nan() {
+                continue;
+            }
+            let a = outer.px[orow + x] as f64;
+            let b = b as f64;
+            let c = &mut acc[cy * GRID + x * GRID / w];
+            c[0] += 1.0;
+            c[1] += a;
+            c[2] += b;
+            c[3] += a * a;
+            c[4] += b * b;
+            c[5] += a * b;
+        }
+    }
+    let var = |c: &[f64; 6]| {
+        let n = c[0].max(1.0);
+        ((c[3] - c[1] * c[1] / n) / n, (c[4] - c[2] * c[2] / n) / n)
+    };
+    let (mut ma, mut mb) = (0.0, 0.0);
+    for c in &acc {
+        let (va, vb) = var(c);
+        ma += va;
+        mb += vb;
+    }
+    let (ma, mb) = (ma / acc.len() as f64, mb / acc.len() as f64);
+    let mut cells: Vec<f32> = acc
+        .iter()
+        .filter(|c| c[0] >= 16.0)
+        .filter_map(|c| {
+            let (va, vb) = var(c);
+            if va < ma / 20.0 || vb < mb / 20.0 || va <= 1e-9 || vb <= 1e-9 {
+                return None;
+            }
+            let n = c[0];
+            Some(((c[5] - c[1] * c[2] / n) / n / (va * vb).sqrt()) as f32)
+        })
+        .collect();
+    if cells.len() * 2 < GRID * GRID {
+        return -1.0;
+    }
+    cells.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let keep = ((cells.len() as f32 * (1.0 - TRIM)).ceil() as usize).max(1);
+    cells[..keep].iter().sum::<f32>() / keep as f32
+}
+
 /// Scales searched: from 1.0 down to `SCALE_MIN` in 5 % steps.
 fn scales() -> Vec<f32> {
     let mut v = Vec::new();
@@ -298,7 +420,7 @@ fn scales() -> Vec<f32> {
 
 /// Best placement of `inner` inside `outer` over scales and offsets,
 /// coarse at half size then refined at full size around the best.
-fn best_containment(outer: &Thumb, inner: &Thumb) -> Fit {
+fn best_containment(outer: &Thumb, inner: &Thumb, robust: bool) -> Fit {
     let (o2, i2) = (outer.half(), inner.half());
     let (n2, w2r) = o2.radii();
     let o2b = o2.band_pass(n2, w2r);
@@ -321,8 +443,7 @@ fn best_containment(outer: &Thumb, inner: &Thumb) -> Fit {
                         scale: s,
                         dx: dx as i32,
                         dy: dy as i32,
-                        angle: 0.0,
-                        inner_is_second: true,
+                        ..Fit::none()
                     };
                 }
             }
@@ -357,23 +478,34 @@ fn best_containment(outer: &Thumb, inner: &Thumb) -> Fit {
                         scale: s,
                         dx,
                         dy,
-                        angle: 0.0,
-                        inner_is_second: true,
+                        ..Fit::none()
                     };
                 }
             }
         }
     }
-    if refined.ncc > best.ncc {
-        refined
-    } else {
-        best
+    let refined_won = refined.ncc > best.ncc;
+    let mut out = if refined_won { refined } else { best };
+    if robust {
+        // the cells at the chosen placement, at the size it was found at
+        out.robust = if refined_won {
+            let w = ((outer.w as f32 * out.scale).round() as usize).max(8);
+            let h = ((w as f32 * aspect).round() as usize).max(8);
+            let win = inner.resized(w, h).band_pass(n1, w1r);
+            ncc_cells(&ob, &win, out.dx as usize, out.dy as usize, w1r)
+        } else {
+            let w2 = ((o2.w as f32 * out.scale).round() as usize).max(4);
+            let h2 = ((w2 as f32 * aspect).round() as usize).max(4);
+            let win = i2.resized(w2, h2).band_pass(n2, w2r);
+            ncc_cells(&o2b, &win, out.dx as usize, out.dy as usize, w2r)
+        };
     }
+    out
 }
 
 /// Small rotations of `inner` against `outer` at full frame (both
 /// resized to the outer's size), offsets ±2 px.
-fn best_rotation(outer: &Thumb, inner: &Thumb) -> Fit {
+fn best_rotation(outer: &Thumb, inner: &Thumb, robust: bool) -> Fit {
     let (n1, w1r) = outer.radii();
     let ob = outer.band_pass(n1, w1r);
     let same = inner.resized(outer.w, outer.h).band_pass(n1, w1r);
@@ -388,10 +520,13 @@ fn best_rotation(outer: &Thumb, inner: &Thumb) -> Fit {
             best = Fit {
                 ncc: c,
                 scale: 1.0,
-                dx: 0,
-                dy: 0,
                 angle: deg,
-                inner_is_second: true,
+                robust: if robust {
+                    ncc_cells(&ob, &rot, 0, 0, w1r)
+                } else {
+                    -1.0
+                },
+                ..Fit::none()
             };
         }
     }
@@ -400,22 +535,19 @@ fn best_rotation(outer: &Thumb, inner: &Thumb) -> Fit {
 
 /// `inner` stretched onto `outer`'s whole frame, aspect ignored (a
 /// squeezed or stretched copy).
-fn stretched(outer: &Thumb, inner: &Thumb) -> Fit {
+fn stretched(outer: &Thumb, inner: &Thumb, robust: bool) -> Fit {
     let (n1, w1r) = outer.radii();
-    let c = ncc_at(
-        &outer.band_pass(n1, w1r),
-        &inner.resized(outer.w, outer.h).band_pass(n1, w1r),
-        0,
-        0,
-        w1r,
-    );
+    let ob = outer.band_pass(n1, w1r);
+    let ib = inner.resized(outer.w, outer.h).band_pass(n1, w1r);
     Fit {
-        ncc: c,
+        ncc: ncc_at(&ob, &ib, 0, 0, w1r),
         scale: 1.0,
-        dx: 0,
-        dy: 0,
-        angle: 0.0,
-        inner_is_second: true,
+        robust: if robust {
+            ncc_cells(&ob, &ib, 0, 0, w1r)
+        } else {
+            -1.0
+        },
+        ..Fit::none()
     }
 }
 
@@ -423,15 +555,51 @@ fn stretched(outer: &Thumb, inner: &Thumb) -> Fit {
 /// `b`, a stretch either way, and small rotations either way. Every
 /// comparison band-passes both sides at the containing picture's scale.
 pub fn fit(a: &Thumb, b: &Thumb) -> Fit {
-    let mut best = best_containment(a, b);
+    fit_with(a, b, SEARCH)
+}
+
+/// The search `fit` ships with: the cells' score and the mirror image too
+/// (CORE-01, CORE-02; VERIFICATION § Phase 11). Measured on real pictures
+/// against the plain search: a caption bar over the lower 15 % confirms at
+/// 98 % instead of 20 %, a mirrored crop at 97 % instead of 3 %; among the
+/// pairs the hashes or the descriptor admit, the closest a photograph of
+/// the same subject from another position comes is 0.823 (two poses of
+/// one chessboard). The fit alone is less specific
+/// for it (unrelated photographs at 0.92 or more: 13 of 3,062 instead of
+/// 3), which is why it is only ever asked about a pair a first family
+/// admitted.
+pub const SEARCH: Search = Search {
+    robust: true,
+    mirror: true,
+};
+
+/// `fit` with a chosen search: the plain one, the cells' score, the
+/// mirror image, or both. Placements are chosen by the plain correlation;
+/// the pair's score is the best `Fit::score` over them.
+pub fn fit_with(a: &Thumb, b: &Thumb, search: Search) -> Fit {
+    let mut best = one_way(a, b, search.robust);
+    if search.mirror {
+        let m = one_way(a, &b.mirrored(), search.robust);
+        if m.score() > best.score() {
+            best = Fit {
+                mirrored: true,
+                ..m
+            };
+        }
+    }
+    best
+}
+
+fn one_way(a: &Thumb, b: &Thumb, robust: bool) -> Fit {
+    let mut best = best_containment(a, b, robust);
     for (f, second) in [
-        (best_containment(b, a), false),
-        (stretched(a, b), true),
-        (stretched(b, a), false),
-        (best_rotation(a, b), true),
-        (best_rotation(b, a), false),
+        (best_containment(b, a, robust), false),
+        (stretched(a, b, robust), true),
+        (stretched(b, a, robust), false),
+        (best_rotation(a, b, robust), true),
+        (best_rotation(b, a, robust), false),
     ] {
-        if f.ncc > best.ncc {
+        if f.score() > best.score() {
             best = Fit {
                 inner_is_second: second,
                 ..f
@@ -531,7 +699,38 @@ mod tests {
     #[test]
     fn different_pictures_do_not_fit() {
         let f = fit(&thumb(&picture(5)), &thumb(&picture(9)));
-        assert!(f.ncc < FIT_MIN, "{f:?}");
+        assert!(!f.confirmed(), "{f:?}");
+    }
+
+    #[test]
+    fn a_mirrored_crop_and_a_caption_bar_are_found() {
+        let a = picture(7);
+        let (w, h) = (a.width(), a.height());
+        let mirrored = image::imageops::flip_horizontal(&a);
+        let crop =
+            image::imageops::crop_imm(&mirrored, w / 10, h / 10, w * 8 / 10, h * 8 / 10).to_image();
+        let f = fit(&thumb(&a), &thumb(&crop));
+        assert!(f.confirmed() && f.mirrored, "{f:?}");
+        assert!(!fit_with(&thumb(&a), &thumb(&crop), Search::PLAIN).confirmed());
+        // a dark caption bar with light text over the lower 15 %
+        let mut cap = a.clone();
+        for y in h - h * 15 / 100..h {
+            for x in 0..w {
+                let text = y % 9 < 5 && (x / 7) % 3 != 0;
+                cap.put_pixel(
+                    x,
+                    y,
+                    if text {
+                        Rgb([235, 235, 235])
+                    } else {
+                        Rgb([18, 18, 22])
+                    },
+                );
+            }
+        }
+        let f = fit(&thumb(&a), &thumb(&cap));
+        assert!(f.confirmed() && f.robust > f.ncc, "{f:?}");
+        assert!(f.label().starts_with("fit "), "{}", f.label());
     }
 
     #[test]

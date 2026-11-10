@@ -32,11 +32,26 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 /// Cosine (dot product of unit vectors) at or above which two images are
 /// grouped as edited copies. Measured on the generated corpus (docs/
 /// VERIFICATION.md §Phase 4): 0 false positives in 33,540 negative pairs
-/// whose maximum was 0.669; 0.65 let 4 through, 0.60 let 127 through. The
-/// corpus negatives are same-texture procedural pictures and score far
-/// higher than unrelated photographs would, so the margin here is the
-/// floor. The deep tier only groups; it never bins (see `near::Relation`).
+/// whose maximum was 0.669; 0.65 let 4 through, 0.60 let 127 through. On
+/// real photographs (Phase 11) unrelated pairs top out at 0.526 in 5.44
+/// million, while photographs of one subject from another angle reach
+/// 0.88: the bar stays where listing them as similar is rare. The deep
+/// tier alone only lists; it acts with the fit (see `near::Relation`).
 pub const DEEP_MIN: f32 = 0.70;
+
+/// Under `DEEP_MIN`, down to this cosine, a pair enters a group only when
+/// the geometric fit confirms it as well — and then as a confirmed copy,
+/// never as a listed one (CORE-04, Phase 11). Measured on real labelled
+/// copies (INRIA Copydays, docs/VERIFICATION.md § Phase 11): no pair of
+/// 5.44 million unrelated real photographs reaches 0.55 (the closest,
+/// two different photographs both at JPEG quality 5–15, 0.526);
+/// photographs of one subject from another position (a chessboard in 13
+/// poses from two cameras) reach 0.88, and in the band fit at most 0.787
+/// under `geometry::SEARCH`, so they stay out; copies cropped to 40 % of
+/// their area act at 91.7 % instead of 46.5 %. In the band a single
+/// joins a keeper or a partner only after every pair at `DEEP_MIN` is
+/// made (`near::group`).
+pub const DEEP_FIT_MIN: f32 = 0.60;
 
 pub type Embedding = [f32; DIM];
 

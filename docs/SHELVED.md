@@ -18,24 +18,11 @@ Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
 
 ---
 
-## Phase 10 — formats and filesystems   `[done]` 2026-11-10 — see PLAN.md § Phase 10, VERIFICATION.md § Phase 10
+## Phase 11 — matching depth   `[done]` 2026-11-10 — see PLAN.md § Phase 11, VERIFICATION.md § Phase 11
 
-Items 9–11 are built; their Windows run was skipped and they wait in
-Phase 12 (below) for their Windows verification.
-
-1. **TECH-01** `decode.rs` owning every decoder
-2. **NF-01** HEIC / HEIF / AVIF through ffmpeg, EXIF from the container
-3. **NF-02** RAW stills through their embedded previews; RAW + JPEG pairs
-4. **CORE-05** cross-volume `milk` (copy, verify, delete; journaled)
-5. **SC-07** typed action errors (the workspace offers retry / fallback)
-6. **QOL-06** `--skip` exclusions, remembered in the app dir
-7. **QOL-08** `--min` size floor
-8. **QOL-09** doctor: HEIC decode, `_milked` volume, model SHA-256
-9. **QOL-10** Windows console colour verified (screenshot in VERIFICATION)
-10. **TECH-07** Ctrl-C e2e on Windows
-11. **SC-08** UTF-8 Windows logs, no log churn in commits
-
-## Phase 11 — matching depth   `[todo]`
+Item 8 delivered as the person's own cull (`c`): the "keep the sharpest"
+option it named was measured and not shipped. Item 9 measured and not
+shipped (the reduced decode stays in its harness).
 
 1. **CORE-04** deep threshold on real labelled copies
 2. **CORE-08** capture-moment rule on a real camera roll (needs NF-01)
@@ -48,7 +35,7 @@ Phase 12 (below) for their Windows verification.
 9. **TECH-02** DCT-domain JPEG downscale, re-measured against conformance
 10. **QOL-07** ETA on long stages
 
-## Phase 12 — structure and CI   `[shelved]`
+## Phase 12 — structure and CI   `[todo]`
 
 1. **SC-02** split `actions.rs` (scan / plan / act)
 2. **SC-03** split `render.rs` by screen

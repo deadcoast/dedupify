@@ -1,6 +1,7 @@
 //! Exact-duplicate pipeline (docs/RESEARCH.md §1.3):
 //!
-//! size → sample (first + last 64 KiB) → full BLAKE3 → [verify bytes]
+//! size → sample (first + last 64 KiB, and the middle 64 KiB of a file
+//! over 1 GiB) → full BLAKE3 → [verify bytes]
 //!
 //! Every stage drops singletons before the next stage reads anything, so
 //! bytes read stay close to the bytes that are actually duplicated.
@@ -17,6 +18,13 @@ use crate::walk::Candidate;
 
 /// Bytes hashed from each end of a file at the sample stage.
 pub const WINDOW: u64 = 64 * 1024;
+/// Files larger than this also hash a window from their middle at the
+/// sample stage (CORE-06, Phase 11): disk images, archives and databases
+/// of one size often share a header and a trailer, and two that differ
+/// only inside would each be read in full, or reported LIKELY by
+/// `--quick-search`. One more 64 KiB read against a full read of a
+/// gigabyte. [CLAUDE: the size, from IDENTIFIED]
+pub const MID_FROM: u64 = 1 << 30;
 /// Files at or above this size hash with BLAKE3's internal rayon split
 /// (the paper notes threading overhead dominates well below this).
 pub const RAYON_THRESHOLD: u64 = 1 << 20;
@@ -263,14 +271,21 @@ fn collapse_hardlinks(v: &mut Vec<Candidate>) {
 pub fn sample_bytes(size: u64) -> u64 {
     if size <= 2 * WINDOW {
         size
+    } else if size > MID_FROM {
+        3 * WINDOW
     } else {
         2 * WINDOW
     }
 }
 
-/// BLAKE3 over the first and last `WINDOW` bytes (whole file when it is
-/// no larger than both windows together).
+/// BLAKE3 over the first and last `WINDOW` bytes, and the middle
+/// `WINDOW` of a file over `MID_FROM` (the whole file when it is no
+/// larger than both ends together).
 pub fn sample_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
+    sample_hash_from(path, size, MID_FROM)
+}
+
+fn sample_hash_from(path: &Path, size: u64, mid_from: u64) -> io::Result<[u8; 32]> {
     let mut f = File::open(path)?;
     let mut hasher = blake3::Hasher::new();
     if size <= 2 * WINDOW {
@@ -281,6 +296,11 @@ pub fn sample_hash(path: &Path, size: u64) -> io::Result<[u8; 32]> {
         let mut buf = vec![0u8; WINDOW as usize];
         f.read_exact(&mut buf)?;
         hasher.update(&buf);
+        if size > mid_from {
+            f.seek(SeekFrom::Start(size / 2 - WINDOW / 2))?;
+            f.read_exact(&mut buf)?;
+            hasher.update(&buf);
+        }
         f.seek(SeekFrom::End(-(WINDOW as i64)))?;
         f.read_exact(&mut buf)?;
         hasher.update(&buf);
@@ -426,6 +446,29 @@ mod tests {
         assert_eq!(g[0].members.len(), 2);
         assert_eq!(g[0].reclaimable(), len as u64);
         assert_eq!(s.bytes_hashed, 3 * len as u64);
+    }
+
+    #[test]
+    fn a_large_file_is_sampled_in_the_middle_too() {
+        let d = tempfile::tempdir().unwrap();
+        let len = (4 * WINDOW) as usize;
+        let base = big(3, len);
+        let mut mid = base.clone();
+        mid[len / 2] ^= 0xff; // same head, same tail, different middle
+        let mut off = base.clone();
+        // between the head window and the middle one: [0, 64K) [96K, 160K) [192K, 256K)
+        off[(WINDOW + WINDOW / 4) as usize] ^= 0xff;
+        mk(d.path(), "a.bin", &base);
+        mk(d.path(), "mid.bin", &mid);
+        mk(d.path(), "off.bin", &off);
+        let h = |n: &str, from: u64| sample_hash_from(&d.path().join(n), len as u64, from).unwrap();
+        // ends only: all three look alike
+        assert_eq!(h("a.bin", u64::MAX), h("mid.bin", u64::MAX));
+        // over the size: the middle window tells the edited middle apart
+        assert_ne!(h("a.bin", 0), h("mid.bin", 0));
+        assert_eq!(h("a.bin", 0), h("off.bin", 0));
+        assert_eq!(sample_bytes(MID_FROM), 2 * WINDOW);
+        assert_eq!(sample_bytes(MID_FROM + 1), 3 * WINDOW);
     }
 
     #[test]

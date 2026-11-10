@@ -205,6 +205,14 @@ pub fn planes_from_image_with(img: &DynamicImage, prep: PdqPrep) -> (Vec<f32>, P
     (grid, p)
 }
 
+/// The signature of a picture decoded reduced: `full` is the full
+/// picture's upright size, which the signature records (the reduced JPEG
+/// route measured in `tests/decode_reduced.rs`, TECH-02, not shipped).
+pub fn signature_full(img: &DynamicImage, full: (u32, u32)) -> Signature {
+    let (grid, p) = planes_from_image(img);
+    signature_from_planes(&grid, &p, full.0, full.1)
+}
+
 /// Signature with a chosen PDQ preparation (the measurement harness).
 pub fn signature_from_image_with(img: &DynamicImage, prep: PdqPrep) -> Signature {
     let (grid, p) = planes_from_image_with(img, prep);

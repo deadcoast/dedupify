@@ -69,6 +69,43 @@ pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
 
+/// Break plain text at spaces into lines of at most `first` cells, then
+/// `rest` cells. The spaces at a break are dropped; runs of spaces inside
+/// a line are kept (the three-space separators of a footer). A word wider
+/// than its line stands alone on it, uncut: a path or a command is never
+/// split. [CLAUDE, Phase 11]
+pub fn wrap_words(s: &str, first: usize, rest: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut gap = String::new();
+    let limit = |n: usize| if n == 0 { first } else { rest };
+    for (i, part) in s.split(' ').enumerate() {
+        if part.is_empty() {
+            if i > 0 {
+                gap.push(' ');
+            }
+            continue;
+        }
+        if i > 0 {
+            gap.push(' ');
+        }
+        if line.is_empty() {
+            line.push_str(part);
+        } else if width(&line) + width(&gap) + width(part) <= limit(lines.len()) {
+            line.push_str(&gap);
+            line.push_str(part);
+        } else {
+            lines.push(std::mem::take(&mut line));
+            line.push_str(part);
+        }
+        gap.clear();
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 /// Display width of text that may carry ANSI SGR sequences (`ESC [ … m`),
 /// which take no cells.
 pub fn visible_width(s: &str) -> usize {
@@ -399,6 +436,36 @@ mod tests {
         assert_eq!(shorten_middle("short", 24, "…"), "short");
         let ascii = shorten_middle(s, 24, "...");
         assert!(width(&ascii) <= 24, "{ascii}");
+    }
+
+    #[test]
+    fn wrap_words_breaks_at_spaces_and_keeps_gaps() {
+        let s =
+            "3 by hand: chosen in the workspace, confirmed by your look, not by a second family";
+        let v = wrap_words(s, 40, 38);
+        assert!(
+            v.iter()
+                .enumerate()
+                .all(|(i, l)| width(l) <= if i == 0 { 40 } else { 38 }),
+            "{v:?}"
+        );
+        assert_eq!(v.join(" "), s);
+        // the three-space separators stay inside a line, go at a break
+        assert_eq!(
+            wrap_words("4 moved   2.05 MB", 80, 80),
+            vec!["4 moved   2.05 MB"]
+        );
+        assert_eq!(
+            wrap_words("4 moved   2.05 MB", 8, 8),
+            vec!["4 moved", "2.05 MB"]
+        );
+        // a word wider than the line is not cut
+        assert_eq!(
+            wrap_words("undo C:\\a\\very\\long\\path", 6, 6),
+            vec!["undo", "C:\\a\\very\\long\\path"]
+        );
+        assert_eq!(wrap_words("", 10, 10), vec![""]);
+        assert_eq!(wrap_words("short", 10, 10), vec!["short"]);
     }
 
     #[test]

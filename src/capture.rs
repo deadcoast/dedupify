@@ -36,7 +36,7 @@ impl Capture {
             return false;
         }
         match (&self.subsec, &other.subsec) {
-            (Some(a), Some(b)) => a.trim_end_matches('0') == b.trim_end_matches('0'),
+            (Some(a), Some(b)) => fractions_agree(a, b),
             _ => true,
         }
     }
@@ -48,6 +48,56 @@ impl Capture {
             _ => self.datetime.clone(),
         }
     }
+}
+
+/// Two recorded fractions of a second agree when the finer one, cut or
+/// rounded to the coarser one's digits, gives the coarser one: `12` and
+/// `120` are one value, and a camera's `117280` is an exporter's `117` or
+/// `1`, while `118`, `2` and `450` are other frames. A precision
+/// difference is never evidence of another moment. Fields that are not
+/// all digits must match exactly. Only the first nine digits count.
+fn fractions_agree(a: &str, b: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    if !digits(a) || !digits(b) {
+        return a == b;
+    }
+    let (a, b) = (&a[..a.len().min(9)], &b[..b.len().min(9)]);
+    let (fine, coarse) = if a.len() >= b.len() { (a, b) } else { (b, a) };
+    let p = 10u64.pow((fine.len() - coarse.len()) as u32);
+    let (f, c): (u64, u64) = (fine.parse().unwrap_or(0), coarse.parse().unwrap_or(0));
+    c == f / p || c == (f + p / 2) / p
+}
+
+/// `YYYY-MM-DD HH:MM:SS` from an EXIF date: the standard
+/// `YYYY:MM:DD HH:MM:SS`, and the dots, dashes or slashes and the doubled
+/// space some cameras write instead (a Samsung NV10:
+/// `2008.07.10  15:16:55`). `None` for a clock that was never set (zeros,
+/// blanks) or anything else.
+fn moment_of(raw: &str) -> Option<String> {
+    let b = raw.as_bytes();
+    let d = |i: usize| b.get(i).is_some_and(u8::is_ascii_digit);
+    let sep = b.get(4).copied()?;
+    let date = (0..4).all(d)
+        && matches!(sep, b':' | b'.' | b'-' | b'/')
+        && b.get(7) == Some(&sep)
+        && [5, 6, 8, 9].into_iter().all(d);
+    if !date || raw.starts_with("0000") {
+        // a camera that has not been set writes zeros; that is not a time
+        return None;
+    }
+    let time = raw[10..].trim_start_matches([' ', 'T']);
+    let t = time.as_bytes();
+    let td = |i: usize| t.get(i).is_some_and(u8::is_ascii_digit);
+    if !([0, 1, 3, 4, 6, 7].into_iter().all(td) && t[2] == b':' && t[5] == b':') {
+        return None;
+    }
+    Some(format!(
+        "{}-{}-{} {}",
+        &raw[..4],
+        &raw[5..7],
+        &raw[8..10],
+        &time[..8]
+    ))
 }
 
 /// Read the capture time, if the file carries one. Any failure — no
@@ -81,13 +131,10 @@ fn ascii(e: &Exif, number: u16) -> Option<String> {
 /// `YYYY-MM-DD HH:MM:SS`, and `SubSecTimeOriginal` when present.
 pub fn from_exif(e: &Exif) -> Option<Capture> {
     let raw = ascii(e, Tag::DateTimeOriginal.number())?;
-    // EXIF writes `YYYY:MM:DD HH:MM:SS`; the date's colons become dashes
-    let b = raw.as_bytes();
-    if !raw.is_ascii() || b.len() < 19 || b[4] != b':' || b[7] != b':' || raw.starts_with("0000") {
-        // a camera that has not been set writes zeros; that is not a time
+    if !raw.is_ascii() {
         return None;
     }
-    let datetime = format!("{}-{}-{}", &raw[..4], &raw[5..7], &raw[8..19]);
+    let datetime = moment_of(&raw)?;
     let subsec = ascii(e, Tag::SubSecTimeOriginal.number()).filter(|s| !s.is_empty());
     Some(Capture { datetime, subsec })
 }
@@ -119,6 +166,61 @@ mod tests {
         let b = cap("2019:06:12 10:11:12", None);
         assert!(a.same_moment(&b));
         assert_eq!(different_moments(Some(&a), Some(&b)), Some(false));
+    }
+
+    #[test]
+    fn a_coarser_fraction_is_the_same_moment() {
+        let cam = cap("2016-07-27 18:59:22", Some("117280"));
+        // cut or rounded to fewer digits: 0.117280 is 0.117, 0.12, 0.1
+        for export in ["117", "11728", "12", "11", "1", "1172800"] {
+            assert!(
+                cam.same_moment(&cap("2016-07-27 18:59:22", Some(export))),
+                "{export}"
+            );
+        }
+        // a tenth of a second apart, at any precision, is another frame
+        for other in ["118", "217", "217280", "2", "016", "13", "10"] {
+            assert!(
+                !cam.same_moment(&cap("2016-07-27 18:59:22", Some(other))),
+                "{other}"
+            );
+        }
+        assert!(cap("x", Some("12")).same_moment(&cap("x", Some("120"))));
+        assert!(!cap("x", Some("05")).same_moment(&cap("x", Some("5"))));
+        assert!(!cap("x", Some("12")).same_moment(&cap("x", Some("13"))));
+        assert!(!cap("x", Some("1a")).same_moment(&cap("x", Some("1b"))));
+    }
+
+    #[test]
+    fn camera_date_forms() {
+        let m = |s: &str| moment_of(s);
+        assert_eq!(
+            m("2019:06:12 10:11:12").as_deref(),
+            Some("2019-06-12 10:11:12")
+        );
+        // Samsung NV10 (metadata-extractor-images)
+        assert_eq!(
+            m("2008.07.10  15:16:55").as_deref(),
+            Some("2008-07-10 15:16:55")
+        );
+        assert_eq!(
+            m("2008-07-10T15:16:55").as_deref(),
+            Some("2008-07-10 15:16:55")
+        );
+        assert_eq!(
+            m("2019:06:12 10:11:12\0").as_deref(),
+            Some("2019-06-12 10:11:12")
+        );
+        for unset in [
+            "0000:00:00 00:00:00",
+            "    :  :     :  :  ",
+            ":  :     :  :",
+            "",
+            "2019:06:12",
+            "2019:06.12 10:11:12",
+        ] {
+            assert_eq!(m(unset), None, "{unset:?}");
+        }
     }
 
     #[test]

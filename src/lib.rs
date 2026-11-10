@@ -23,6 +23,7 @@ pub mod deep {
     pub const MODEL_BYTES: u64 = 98_156_202;
     pub const DIM: usize = 512;
     pub const DEEP_MIN: f32 = 0.70;
+    pub const DEEP_FIT_MIN: f32 = 0.60;
     pub type Embedding = [f32; DIM];
     pub struct Deep;
     #[derive(Debug)]

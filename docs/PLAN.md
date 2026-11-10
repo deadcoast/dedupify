@@ -289,14 +289,47 @@ What it became:
   path column takes what its own columns leave, and the listing gives up
   the least it can when the width is short (CLI §3).
 
-## Phase 11 — matching depth   ← in progress (TODO.md)
+## Phase 11 — matching depth   ← delivered 2026-11-10
 
-The carried measurement debts and the engine's known misses: robust and
-mirrored fit, non-black bars, the deep threshold and the capture-moment
-rule on real labelled data, provenance-aware keepers. Items: SHELVED.md
-§ Phase 11.
+The carried measurement debts and the engine's known misses, measured on
+real data — INRIA Copydays, Google's HDR+ bursts, 409 real cameras'
+metadata, the owner's sample tree (VERIFICATION § Phase 11):
 
-## Phase 12 — structure and CI   ← planned
+- **CORE-04** the deep threshold on real labelled copies: unrelated
+  photographs top out at cosine 0.526 in 5.44 million pairs; `DEEP_MIN`
+  stays 0.70 (the descriptor alone lists); a band down to
+  `DEEP_FIT_MIN = 0.60` groups a pair only when the fit confirms it, and
+  then it acts (crops to 40 % of the area 46.5 → 91.7 %); the band waits
+  until every pair at 0.70 is made.
+- **CORE-01, CORE-02** the fit also scores its cells (4 × 4, the worst
+  quarter set aside) and searches the mirror image: a caption bar 20 →
+  98 %, a mirrored crop 3 → 97 %; `FIT_MIN` held at 0.92.
+- **CORE-08** fractions of a second agree at any precision (`117280`
+  is `117`); a burst's frames — one moment, names a camera numbered apart
+  — are `another shot, same second` (`kin`); dates with dots, dashes or
+  slashes are read.
+- **CORE-03** bars of any flat colour: when the black pass finds none, a
+  second reads the keyframes' detail along each edge band; white, grey
+  and dark-blue pillarboxes found in 75 of 75 real copies, a blurred
+  copy of the picture in 7 of 25, no bars in any of 79 clips without.
+- **CORE-06** a third 64 KiB sample at the middle of a file over 1 GiB.
+- **CORE-07** the keeper is the file not named or filed as a copy, then
+  the oldest; near and video groups put the same marks after their own
+  criteria (RESEARCH §5).
+- **NF-05** `c` in the workspace chooses a group's other shots, by hand,
+  to cull a burst; the "keep the sharpest" option was measured against
+  HDR+'s own choice of frame (40 % agreement, the first frame 62 %) and
+  not shipped.
+- **TECH-02** a JPEG decoded reduced inside its DCT, measured on real
+  phone and camera JPEGs and not shipped: 1.3× faster at 12 MP and no
+  faster under 9, and a file's own PDQ moved up to 22 bits, with no
+  margin gained against its copies; the route stays in its harness.
+- **QOL-07** DECODE and FRAMES show the time left once they have run 5 s.
+- Found while verifying: footer notes break at the width instead of
+  running past it; the `~` legend no longer calls a by-hand row
+  confirmed; the near policy label fits 80 columns.
+
+## Phase 12 — structure and CI   ← in progress (TODO.md)
 
 The code shaped for what it became: actions/render/video split, a shared
 group interface, the `unwrap()` audit, in-tree benchmarks, pseudo-terminal
@@ -328,8 +361,9 @@ pass runs.
   that state different capture moments are never acted on, and neither is
   a camera RAW by the near tier (Phase 10). In the workspace a person may
   choose a listed file by hand — their look is the second family for that
-  file, and every line and footer says so; another capture moment and a
-  RAW cannot be chosen.
+  file, and every line and footer says so. A RAW cannot be chosen;
+  another shot (another capture moment, or another frame of its second)
+  only all together through `c`, a person culling a burst (Phase 11).
 - A move never leaves two files or none: across volumes it is a verified
   copy whose original is deleted last (Phase 10).
 - New flags need a reason stronger than convenience; the menu stays at five

@@ -507,7 +507,7 @@ pub fn video_frame(path: &Path, duration: f64) -> Option<DynamicImage> {
 }
 
 /// Binary PPM frames laid end to end (`P6 w h 255`, then w·h·3 bytes).
-fn ppm_frames(b: &[u8]) -> Option<Vec<RgbImage>> {
+pub(crate) fn ppm_frames(b: &[u8]) -> Option<Vec<RgbImage>> {
     let mut out = Vec::new();
     let mut i = 0;
     let field = |i: &mut usize| -> Option<u32> {

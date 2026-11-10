@@ -130,8 +130,10 @@ fn listing_lines(
 
 /// The paths of `sel` as action items, by-hand ones marked.
 fn chosen_items<'a>(f: &'a Found, sel: &HashSet<PathBuf>) -> Vec<actions::Item<'a>> {
+    // the other shots a person chose with `c` come only from here
     actions::items(f)
         .into_iter()
+        .chain(actions::shot_items(f))
         .filter(|it| sel.contains(it.path))
         .map(|mut it| {
             it.by_hand = !it.actionable();

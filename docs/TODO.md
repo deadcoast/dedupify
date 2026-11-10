@@ -1,35 +1,38 @@
-# TODO — Phase 11: matching depth
+# TODO — Phase 12: structure and CI
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 11 · items: `SHELVED.md` § Phase 11 · source:
-`IDENTIFIED.md` § 4.3–4.5 (IDs below). Build order top to bottom. Previous
-milestone: Phase 10, delivered 2026-11-10 (`SHELVED.md` § Phase 10 `[done]`;
-its three Windows-only verifications wait in § Phase 12).
+Milestone: `PLAN.md` § Phase 12 · items: `SHELVED.md` § Phase 12 · source:
+`IDENTIFIED.md` § 4.2, 4.3, 4.5 (IDs below). Build order top to bottom. Previous
+milestone: Phase 11, delivered 2026-11-10 (`SHELVED.md` § Phase 11 `[done]`).
 
-- [ ] **CORE-04** deep threshold on real labelled copies
-- [ ] **CORE-08** capture-moment rule on a real camera roll (needs NF-01)
-- [ ] **CORE-01** robust (trimmed / rank) NCC in the fit
-- [ ] **CORE-02** mirror search in the fit
-- [ ] **CORE-03** non-black video bars
-- [ ] **CORE-06** mid-file sample for files over 1 GB
-- [ ] **CORE-07** provenance-aware keeper policy
-- [ ] **NF-05** burst / series handling, keep the sharpest
-- [ ] **TECH-02** DCT-domain JPEG downscale, re-measured against conformance
-- [ ] **QOL-07** ETA on long stages
+- [ ] **SC-02** split `actions.rs` (scan / plan / act)
+- [ ] **SC-03** split `render.rs` by screen
+- [ ] **TECH-06** split `video.rs`
+- [ ] **SC-05** `GroupView` trait over the three group types
+- [ ] **SC-06** `unwrap()` audit
+- [ ] **TECH-05** in-tree benchmarks on fixed corpora
+- [ ] **TECH-04** ConPTY pseudo-terminal tests on Windows
+- [ ] **TECH-08** CI matrix (ubuntu, windows, ffmpeg)
+- [ ] **TECH-07** Ctrl-C e2e on Windows — built in Phase 10; verified by a
+  Windows pass with a console present
+- [ ] **SC-08** UTF-8 Windows logs — built in Phase 10; read from the next
+  `runs/win/RUN_VERIFY.cmd`
+- [ ] **QOL-10** Windows console colour — built in Phase 10; the screenshot
+  from the next `runs/win/RUN_VERIFY.cmd` goes into VERIFICATION
 
-Done when: every box ticked, the suite green on Linux (with the Windows
-type-check and clippy; a Windows run if the phase touches Windows-only
-code), every new or moved threshold measured on a corpus named in
-`VERIFICATION` § Phase 11, and `PLAN.md` marks Phase 11 delivered.
+Done when: every box ticked, the suite green on Linux and in the CI
+matrix on Windows, the three Phase 10 items verified on Windows with a
+console present, `VERIFICATION` § Phase 12 written, and `PLAN.md` marks
+Phase 12 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 11 `[done]`, then
-rewrite this file from the next `[shelved]` section of `SHELVED.md`
-(Phase 12 — structure and CI). If SHELVED has no `[shelved]` section left,
-run the IDENTIFIED workflow instead.
+When this list is complete: mark `SHELVED.md` § Phase 12 `[done]`, then
+rewrite this file from the next `[shelved]` section of `SHELVED.md`. If
+SHELVED has no `[shelved]` section left (Phase 12 is the last planned
+milestone), run the IDENTIFIED workflow instead.

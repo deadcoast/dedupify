@@ -156,7 +156,8 @@ cells narrower, with the cursor `▸` and a mark before it:
 | `■` | will be acted on |
 | `□` | could be, is not: deselected, or grouped and not confirmed (off until chosen) |
 | `◧` | a group with some of its members chosen |
-| `·` | another capture moment, or a camera RAW under another keeper: never acted on, not even by hand |
+| `·` | another shot — another capture moment, or another frame of the same second: never acted on by the program; `c` chooses a group's other shots by hand |
+| `·` | a camera RAW under another keeper: never acted on, not even by hand |
 | (none) | the keeper |
 
 By default the selection is exactly what `milk` and `purge` act on from
@@ -169,12 +170,27 @@ person's look at the two files (`v`) is the second family for the files
 they choose. A file listed in two groups (the keeper of an exact group
 that stands for it in a near group, `+GROUP` on its line) counts once.
 
+Culling a burst (Phase 11, NF-05) **[CLAUDE]**: the other shots of a
+group (`kin`) are different photographs, so nothing the program does
+takes one — not its rule, not `space` on the group's header, not `a`.
+`c` on a group that has them chooses all of them at once, by hand
+(`3 other shots chosen by you: different photographs, the keeper stays`);
+`c` again, or `space` on one, lets them go. The keeper is the shot that
+stays: `k` first to keep another. The bar shows `c other shots` only on
+such a group, the confirm bar counts them (`milk 4 → _milked, 2.05 MB,
+3 by hand, 3 other shots`), and each prints `by hand` on its action
+line. Which frame of a burst is the sharpest is left to the person's
+look (`v`): a sharpness measure was tried against a burst pipeline's own
+choice of frame and did no better than taking the first (VERIFICATION
+§ Phase 11).
+
 | key | what happens |
 |---|---|
 | `↑` `↓`, PgUp PgDn, Home End | move the cursor; the window scrolls, and a group's header comes into view with its first member |
 | `space` | on a file: choose it or not; on a header: anything chosen → nothing, nothing chosen → the group's confirmed members (or, when it has none, the rest, by hand) |
 | `a` | anything chosen → nothing; nothing chosen → the program's own choice |
 | `k` | on a file: it becomes the group's keeper; the group is re-related to it (the geometric fit included where the cheaper evidence leaves the question open) and reprinted; choices on members whose role did not change are kept |
+| `c` | on a group with other shots (`kin`): choose them all, by hand; again: let them go (Phase 11) |
 | `v` | the keeper beside the file under the cursor, drawn in the terminal (sixel, kitty or iTerm2 graphics; a video shows the frame a third of the way in), with both paths and the file's words; any key back, `o` reveals the member. Where the terminal draws no pictures, both files open in the system viewer |
 | `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
 | `g` | type a group's number, enter: the group at the top of the window |
@@ -285,7 +301,9 @@ Rules the renderer enforces:
   further.
   A stage line drops its rightmost segments rather than wrap (the in-place
   redraw cannot clear a wrapped line). A totals line whose policy part does
-  not fit moves that part to an indented second line.
+  not fit moves that part to an indented second line; a footer note longer
+  than the width breaks at a space and goes on indented under itself
+  (Phase 11), a path or command in it never cut.
 - Colour: truecolour when the terminal is a TTY and `NO_COLOR` is unset;
   plain text otherwise. Windows virtual-terminal mode is enabled through
   crossterm at start.
@@ -296,6 +314,11 @@ Rules the renderer enforces:
   journal id is UTC.
 - Progress is redrawn in place on one line per stage; a finished stage
   leaves its final line behind, so the scrollback reads as a record.
+  DECODE and FRAMES, the stages that run for minutes on a large library,
+  add the time left once they have run 5 s (`about 2 m 30 s left`),
+  from the files done so far at the rate so far, rounded up to 5 s under
+  a minute, 30 s under ten, then whole minutes (Phase 11, QOL-07); the
+  other stages read and hash at disk speed and are not estimated.
 - No background fills. Frames are single-weight `━`/`─` rules; a frame rule
   is the edge of its panel, nothing extends past it.
 
@@ -327,7 +350,8 @@ Result layout (`find`):
    dupe  backup\IMG_0041.jpg
    dupe  backup\old\IMG_0041 (1).jpg
  ───────────────────────────────────────────────────────────────
- 612 groups   1,159 duplicates   11.4 GB reclaimable   keep: oldest copy
+ 612 groups   1,159 duplicates   11.4 GB reclaimable
+   keep: not named or filed as a copy, then oldest
  next   dedupe milk D:\pics .     move duplicates into D:\pics\_milked
         dedupe purge D:\pics .    send duplicates to the Recycle Bin
 ```
@@ -359,10 +383,10 @@ Near groups follow the exact groups and continue the numbering:
    near  photos\beach_small.jpg            500×375    10.6 KB  resized 50%             d  0  p  0  q   4
    kin   photos\beach_next.jpg             1000×750   440 KB   another shot, 14:02:11  d  1  p  2  q   6
  ───────────────────────────────────────────────────────────────
- 2 groups   3 duplicates   646 KB reclaimable   keep: oldest copy
- 1 kin   taken at a different moment: another photograph, left alone
+ 2 groups   3 duplicates   646 KB reclaimable   keep: not named or filed as a copy, then oldest
+ 1 kin   another shot: another moment, or another frame of its second; left alone
  1 near group   4 similar   542 KB reclaimable
-   keep: shared moment, most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
+   keep: shared moment, the RAW, most matched, most pixels, not a copy   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
 ```
 
 The header counts the members beside the keeper, as the totals line does
@@ -376,7 +400,9 @@ border`, `rotated 90°`, `rotated +4°`, `mirrored`, `flipped`, `rotated
 and mirrored`, `edited` (in through the descriptor and the fit), `looks
 alike` (the descriptor's word alone — listed, left in place), `another
 shot, 14:02:11` (a different capture moment; the day instead of the time
-when the day differs), `similar, unconfirmed` (the two hashes grouped it,
+when the day differs), `another shot, same second` (one capture moment,
+the names numbered apart by the camera — `IMG_0012`, `IMG_0013` — a
+burst frame; Phase 11), `similar, unconfirmed` (the two hashes grouped it,
 nothing confirmed it — listed, left in place). Two words at most. The
 words are plain when the member will act and in the info colour when it
 stays.
@@ -385,15 +411,23 @@ The evidence follows, dim: `d` and `p` are the dHash and pHash distances
 to the keeper (of 64 bits), `q` the PDQ distance (of 256); `deep 0.83`
 appears when the optional model is installed (`docs/DEEP.md`) and is the
 SSCD cosine to the keeper; `fit 1.00` the geometric fit (RESEARCH §2.7)
-where it was consulted. The numbers are the first column to go when the
+where it was consulted — the better of the whole picture's correlation
+and its cells' (a caption bar or a sticker sinks the one, not the other),
+searched the right way round and mirrored; a member it found mirrored
+says `mirrored` (Phase 11). The numbers are the first column to go when the
 width is short (the path keeps 32 cells before they do, 18 before the
 dimensions go); `+GROUP 002` says the member is itself the keeper of an
 exact group, whose copies are listed there. A member the deep tier alone
-brought in prints with the verb `deep`; one the fit then confirmed prints
-as `near` and acts. A member whose EXIF capture moment differs from the
-keeper's prints with the verb `kin`; `milk` and `purge` leave `deep` and
-`kin` members in place and the totals lines say how many of each there
-are.
+brought in (cosine ≥ 0.70) prints with the verb `deep`; one the fit then
+confirmed prints as `near` and acts. Under 0.70, down to 0.60, the
+descriptor brings a member in only when the fit confirms it, and it then
+prints as `near` and acts; one the fit does not confirm is not listed
+(Phase 11; the totals line reads `deep ≥0.70 lists, ≥0.60 with the fit`).
+A member whose EXIF capture moment differs from the keeper's, or that is
+another frame of the same second, prints with the verb `kin`; `milk` and
+`purge` leave `deep` and `kin` members in place and the totals lines say
+how many of each there are. In the workspace, `c` chooses a group's `kin`
+by hand (§2a).
 
 Video groups follow, numbered on:
 
@@ -411,16 +445,20 @@ Video groups follow, numbered on:
 
 The words first, as for images: `re-encoded`, `scaled 768→480` (picture
 widths, inside any bars), `trimmed 0:30 of 1:20`, `longer, 1:20 of 1:30`,
-`pillarboxed` / `letterboxed` (black bars around the member's picture the
-keeper has none of; the frames were compared inside them, which is why
-the dimensions in the two columns need not agree), `bars removed`,
+`pillarboxed` / `letterboxed` (bars around the member's picture the
+keeper has none of — black, or since Phase 11 any flat colour, and a
+blurred, enlarged copy of the picture itself where it is much flatter
+than the picture (platforms post a portrait clip that way); the frames
+were compared inside them, which is why the
+dimensions in the two columns need not agree), `bars removed`,
 `mirrored`, `rotated 90°`, `similar, unconfirmed`. Then, dim, the
 evidence: `d p q` are the medians over twelve sampled frames at fixed
 fractions of the duration; `tmk` is the TMK level-2 score, `-` when the
 mean features disagree so strongly that the offset search is skipped (a
 mirror, or different content — the frames carry those). The keeper's
 "most pixels" counts the picture inside the bars, and at a tie the file
-without bars stays. The DECODE/MATCH and FRAMES/MATCH stage lines report
+without bars stays; then the higher bitrate, then the file not named or
+filed as a copy, then the oldest. The DECODE/MATCH and FRAMES/MATCH stage lines report
 images hashed, undecodable, flat-and-skipped, videos hashed, frames,
 similar pairs and files grouped.
 

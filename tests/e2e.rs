@@ -889,34 +889,39 @@ fn milk_img_moves_near_duplicates_and_undo_restores() {
     assert_eq!(files(&fx.root), before);
 }
 
+/// The beach with a dark caption bar over its lower `share`.
+fn with_caption_bar(fx: &Fx, share: f32, name: &str) {
+    let mut edited = image::open(fx.root.join("photos/beach.png"))
+        .unwrap()
+        .to_rgb8();
+    let (w, h) = (edited.width(), edited.height());
+    for y in (h as f32 * (1.0 - share)) as u32..h {
+        for x in 0..w {
+            edited.put_pixel(x, y, image::Rgb([40, 40, 48]));
+        }
+    }
+    put(&fx.root, name, &png_bytes(&edited));
+}
+
 /// A near duplicate the two hashes group but nothing confirms stays where
 /// it is for `milk` as well as `purge`: a photograph of the same scene
 /// from another position is the measured case (VERIFICATION.md, Phase 6).
 #[test]
 fn milk_leaves_unconfirmed_near_duplicates_in_place() {
     let fx = fixture_with_photos();
-    // the beach with a caption bar over its lower 15 %: the two hashes
-    // still land inside their thresholds (d 5, p 14), PDQ (q 36) and the
-    // fit (0.78) do not — measured with examples/fit_diag.rs
-    let beach = image::open(fx.root.join("photos/beach.png"))
-        .unwrap()
-        .to_rgb8();
-    let mut edited = beach.clone();
-    let (w, h) = (edited.width(), edited.height());
-    for y in (h as f32 * 0.85) as u32..h {
-        for x in 0..w {
-            edited.put_pixel(x, y, image::Rgb([40, 40, 48]));
-        }
-    }
-    put(&fx.root, "photos/beach_bar.png", &png_bytes(&edited));
+    // the beach with a caption bar over its lower 35 %: the two hashes
+    // still land inside their thresholds (d 7, p 14), PDQ (q 48) and the
+    // fit (0.90, its cells included) do not. Until Phase 11 a 15 % bar
+    // was this test's case; the fit's cells now confirm that one (below).
+    with_caption_bar(&fx, 0.35, "photos/beach_bar.png");
     let (code, out, _) = run(&fx, &["find", ".", "img"]);
     assert_eq!(code, 0, "{out}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("beach_bar.png"))
+        .unwrap_or_else(|| panic!("the hashes group it\n{out}"));
     assert!(
-        out.contains("near  photos/beach_bar.png") || out.contains("near  photos\\beach_bar.png"),
-        "the hashes group it\n{out}"
-    );
-    assert!(
-        out.contains("q  36") && out.contains("fit 0.7"),
+        line.contains("similar, unconfirmed") && line.contains("q  48") && line.contains("fit 0.9"),
         "PDQ over, fit under\n{out}"
     );
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);
@@ -934,6 +939,33 @@ fn milk_leaves_unconfirmed_near_duplicates_in_place() {
     assert!(
         !fx.root.join("photos/beach_small.jpg").exists(),
         "confirmed members still move\n{out}"
+    );
+}
+
+/// A caption bar over a fifth of the picture leaves the rest of a true copy
+/// identical: the fit's cells, the worst quarter set aside, confirm it
+/// where the whole picture's correlation could not (Phase 11, CORE-01).
+#[test]
+fn a_caption_bar_is_confirmed_by_the_fits_cells() {
+    let fx = fixture_with_photos();
+    with_caption_bar(&fx, 0.15, "photos/beach_bar.png");
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    let line = out
+        .lines()
+        .find(|l| l.contains("beach_bar.png"))
+        .unwrap_or_else(|| panic!("the hashes group it\n{out}"));
+    // PDQ is over (q 36); the plain correlation was 0.78
+    assert!(
+        line.contains("near copy") && line.contains("q  36") && line.contains("fit 1.00"),
+        "{out}"
+    );
+    let (code, out, _) = run(&fx, &["milk", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!fx.root.join("photos/beach_bar.png").exists(), "{out}");
+    assert!(
+        fx.root.join("_milked/photos/beach_bar.png").exists(),
+        "{out}"
     );
 }
 

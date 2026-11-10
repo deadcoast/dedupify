@@ -107,7 +107,7 @@ pub fn page(r: &Renderer) {
         ),
         row(
             p(&fit("keep", 8)),
-            "oldest copy stays; shallower, then shorter name breaks ties",
+            "a file not named or filed as a copy stays; then the oldest",
         ),
         row(
             p(&fit("ctrl-c", 8)),

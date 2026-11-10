@@ -56,6 +56,13 @@ The staged filter avoids most of it:
    are dropped. Media containers put headers at the front (JPEG SOI/APP1,
    PNG IHDR, MP4 `ftyp`/`moov` at front or back), so sampling both ends
    separates most non-duplicates of equal size without reading the body.
+   A file over 1 GiB also hashes the 64 KiB at its middle **[CLAUDE,
+   Phase 11, CORE-06]**: disk images, archives and databases of one
+   size share their header and trailer, so two that differ only inside
+   agreed on both ends and were each read in full — or reported *likely*
+   by `--quick-search`. The third window costs one 64 KiB read against a
+   full read of at least a gigabyte; an edit between the windows is still
+   left to the full hash (measured: VERIFICATION § Phase 11, CORE-06).
 3. **Full hash.** Remaining candidates get a full BLAKE3. Equal hash ⇒
    duplicate group.
 4. **Verify** (only for `purge`): byte-for-byte compare of each duplicate
@@ -65,7 +72,8 @@ The staged filter avoids most of it:
 
 Expected bytes read: let S = total bytes, D = bytes in files that share a
 size, F = bytes in files that also share a sample. Stage 2 reads
-≤ 128 KiB × |size-sharing files|; stage 3 reads F. For a media library where
+≤ 128 KiB × |size-sharing files| (192 KiB for each over 1 GiB); stage 3
+reads F. For a media library where
 most same-size pairs are genuine copies, F ≈ D ≈ reclaimable bytes × 2, which
 is far below S.
 
@@ -266,6 +274,22 @@ have blocked 62 % of confirmations for no measured benefit. Flat images
 are already excluded from the near pass by the gradient gate
 (`QUALITY_MIN`).
 
+**A reduced JPEG decode — Phase 11 (TECH-02), measured, not shipped.**
+JPEG can decode at 1/2, 1/4 or 1/8 inside its inverse DCT, so a large
+photo never has to exist at full size. Through `jpeg-decoder` (the
+largest reduction that keeps the short side ≥ 576) it was no faster on
+pictures of 9 megapixels and under, 1.3× faster on 12-megapixel phone
+photos, and held 0.7 MP a file instead of 11.9; but a file's own PDQ
+moved up to 22 bits from the full decode's, and against copies a
+library holds it gained no margin, only moved it — a half-size copy came
+closer, a full-size PNG export of the same JPEG went from 0 bits to 22
+(VERIFICATION § Phase 11). The working size is what both routes must
+agree on before the memory saving is worth taking. The same measurement
+found the shipped route's own soft spot: a 12 MP photo and its 70 %,
+half or quarter copies are up to 22–24 PDQ bits apart (95th percentile
+10), within 31 but with 7 bits to spare, because the box prefilter's
+integer factor gives copies of different sizes different working sizes.
+
 ### 2.6 The deep tier — Phase 4, optional **[CLAUDE]**
 
 Learned descriptors are the frontier for crops, rotations and heavy edits.
@@ -315,13 +339,53 @@ number that admitted it. Deep-only members print with the verb `deep`,
 its original and would have taken the keeper seat under "most pixels". The
 near keeper is now the member with the most direct 64-bit matches inside
 the group (the hub — derivatives resemble the original more than each
-other), then most pixels, then oldest, then largest file.
+other), then most pixels, then oldest, then largest file (Phase 11 put
+the copy marks of §5 before "oldest").
 
 Cost: ~0.3 s per image on two cores through tract; the binary grows from
 2.9 MB to 25.6 MB with the tier compiled in (`--no-default-features`
 builds without it). ONNX Runtime was not used because its prebuilt
 binaries are not on crates.io and would have to be installed beside the
 executable; whether it would be faster here was not measured.
+
+**Real labelled copies — Phase 11 (CORE-04).** The procedural corpus
+was the floor, as said; Phase 11 measured on real photographs
+(`tests/real_copies.rs`, 3,310 embeddings): INRIA Copydays (Jégou,
+Douze & Schmid, ECCV 2008 — 157 holiday photographs and 229 copies made
+by hand: print and scan, paint, blur, perspective, collage), with its
+JPEG series (quality 75 down to 3) and crop series (10 to 80 % of the
+surface removed) regenerated from the originals at its own levels, and
+the 98-picture real set of §2.7 as outside negatives.
+
+- Unrelated photographs: 5,440,359 pairs, median cosine 0.007, 99th
+  percentile 0.133, 99.9th 0.219, maximum **0.526** (two different
+  photographs, both re-encoded at JPEG quality 5–15). None reaches 0.55.
+- Copies at 0.70: JPEG at quality 10 and above 93–100 %; crops removing
+  up to half the surface ≥ 92.4 %, 60 % removed 47.1 %, 70 % removed
+  5.1 %; the hand-made copies 15.3 % (the hashes alone find 12 of the
+  229, PDQ 2).
+- Photographs of one subject from another position are the near miss:
+  the real set's chessboard (13 poses from two cameras) reaches 0.88
+  between poses, a stereo pair of one plant 0.91. Above 0.70 they were
+  already listed and never acted on.
+
+So `DEEP_MIN` stays 0.70 for listing; the measurement supports a band
+under it instead, where the descriptor's word is not enough to list but
+is enough to ask the fit. `DEEP_FIT_MIN = 0.60` **[CLAUDE, Phase 11]**: a
+pair in [0.60, 0.70) enters a group only when the fit (§2.7, with the
+Phase 11 search) confirms it at 0.92 — and then two families agree and it
+acts; unconfirmed, it is dropped, not listed. On Copydays, the rule
+"descriptor and fit" (plain fit, as measured) acts on 74.0 % of the
+3,055 regenerated and hand-made copies at 0.70 and 82.1 % with the band:
+40 %-of-area crops 46.5 → 91.7 %, 30 % 5.1 → 56.1 %, JPEG quality 3
+43.3 → 65.0 %, hand-made 9.2 → 13.1 %. No unrelated pair is in the band;
+on the real set, 81 pairs are, and the only two the fit confirms are true
+derivatives (`lena_tmpl`, a local edit of `lena`, 1.000; the OpenCV logo
+on another background, 0.946); the closest photograph of the same
+subject, two chessboard poses, fits at 0.787. The band waits its turn:
+a picture joins a keeper or a partner under 0.70 only after every pair
+at 0.70 is made, best cosine first, so an attachment the fit may still
+drop never takes a picture from a pair that lists (`tests/deep_band.rs`).
 
 ### 2.7 The geometric fit — Phase 6 **[CLAUDE]**
 
@@ -405,6 +469,44 @@ letterboxed copy the hashes miss (p 20) is admitted by the descriptor
 (0.78) and confirmed by the fit (1.00); `forest.png` (0.76, fit 0.51)
 stays listed.
 
+**Cells and the mirror — Phase 11 (CORE-01, CORE-02) [CLAUDE].** One
+correlation over the whole window is sunk by a local change: a caption
+bar over a fifth of the picture, a sticker, a retouched patch leave the
+rest of a true copy identical and still pull ρ under 0.92. And a mirrored
+copy correlates with its original at 0.3–0.5. Two additions to the
+search, both at the placement the plain correlation chose (the search
+itself is unchanged):
+
+- **Cells** (`ncc_cells`): the window is cut into a 4 × 4 grid and each
+  cell correlated on its own. A cell with almost no texture (variance
+  under a twentieth of the mean cell's, in either picture) carries no
+  evidence and is left out; of the rest the worst quarter is set aside
+  and the others averaged — a trimmed mean, the robust estimator for a
+  minority of outliers. Fewer than half the cells textured: no score.
+- **Mirror**: the second picture is searched again left-to-right
+  reversed, and the better of the two searches is kept (`mirror` on the
+  line when it won).
+
+The pair's score is the higher of the plain ρ and the cells' score, so
+the new search never scores a pair lower than the old one did.
+
+Measured (`tests/fit_measure.rs`; VERIFICATION § Phase 11): on the real
+set's 60 pictures under 21 perturbations, recall at 0.92 goes from
+88.1 % (plain) to 93.0 % (both); a caption bar over the lower 15 % from
+20.0 % to 98.3 % (the cells); a mirrored crop to 80 % of the area from
+3.3 % to 96.7 % (the mirror); the ELA pair from 0.766 to 0.885 (still
+under, and listed); Copydays' hand-made copies from 20.5 % to 24.5 %.
+What it costs in specificity: over every fourth pair of Copydays
+originals (3,062 unrelated photographs) 13 reach 0.92 instead of 3
+(maximum 0.969 against 0.947), and on the real set, where every pair of
+distinct files was scored, the only unrelated pair added above 0.92 is
+two text images (0.933, mirror). That is acceptable only because the fit
+never decides alone: it is asked about a pair the hashes grouped or the
+descriptor admitted, and among those the closest a photograph of one
+subject from another position comes under the new search is 0.823 (two
+poses of one chessboard, `right11` and `right14`). Cost: 33 ms a pair
+against 20 ms (thumbnails in hand). `FIT_MIN` stays 0.92.
+
 ### 2.8 Capture moment — Phase 6 **[CLAUDE]**
 
 Two photographs taken at different moments are two photographs, however
@@ -432,6 +534,44 @@ The real-photograph set used here carries no EXIF, so the rule is
 verified on synthesised capture times (`capture.rs` builds a JPEG with an
 EXIF segment in its tests; `tests/e2e.rs` stamps the fixture) and not yet
 on a camera roll.
+
+**On real cameras — Phase 11 (CORE-08) [CLAUDE].** Two sources: the
+metadata dumps of `drewnoakes/metadata-extractor-images` (409 files from
+real cameras and phones) and Google's HDR+ burst dataset (Hasinoff et
+al., SIGGRAPH Asia 2016; every frame of a burst as the phone wrote it).
+What they showed, and what changed:
+
+- *Fractions are written at many precisions.* Of 362 files with a
+  `DateTimeOriginal`, 75 (21 %) carry `SubSecTimeOriginal`, in 2, 3, 4
+  or 6 digits; ten write `00`. An exporter may keep fewer digits than
+  the camera: the phone's `117280` becomes `117` or `12`. The old rule
+  (trailing zeros trimmed, then equal) called those another moment —
+  a copy became `kin` and stayed. Now two fractions agree when the
+  finer one, cut or rounded to the coarser one's digits, gives the
+  coarser one (`fractions_agree`): `117280` agrees with `117`, `11728`,
+  `12`, `11`, `1`; disagrees with `118`, `217`, `2`. A difference in
+  precision is never evidence of another moment.
+- *Bursts share their second, and often their fraction.* The four
+  frames of an HDR+ burst all state `2016:07:27 18:59:22` and SubSec
+  `117280`: the phone stamps the burst, not the frame. A camera that
+  writes no fraction does the same at one-second resolution. By the
+  capture rule alone, those frames were one moment, so the near tier
+  read them as re-encodes of one picture, and `milk` would have moved
+  three of the four frames (1.71 MB) as duplicates. A burst's frames differ in name instead: a camera
+  numbers them (`IMG_0012`…`IMG_0015`, `payload_N000`…`N003`), while a
+  copy changes the name's shape (`IMG_0012 (1)`, `IMG_0012 - Copy`) and
+  a conversion keeps the number (`IMG_0012.png`). So two files of one
+  moment whose names are equal once every run of digits is set aside,
+  with a number different (`numbered_apart`), are another frame of that
+  second: `kin`, worded `another shot, same second`, never acted on.
+- *Dates are not always colon-separated.* One camera (a Samsung NV10)
+  writes `2008.07.10  15:16:55`; the old parser required colons and lost
+  it. Dots, dashes and slashes are read, and a `T` or doubled space
+  before the time; an unset clock (zeros, blanks) is still no time.
+
+The limits stay on the conservative side: a camera roll renumbered on
+import (two copies of one frame under two numbers) shows the copy as a
+frame — `kin`, left in place.
 
 ### 2.9 HEIF, HEIC and AVIF — Phase 10 **[CLAUDE]**
 
@@ -727,8 +867,8 @@ scale, so the hashes see the picture at full resolution; the file's own
 dimensions stay in the listing and a `bars` mark on the line says the
 frames were compared inside them. Limit 24/255 is ffmpeg's default:
 limited-range black is 16 and compression noise on a bar stays well
-under 24. Non-black bars (white, blurred-copy "ambient" bars) are not
-detected; the same file's dims are what the listing shows regardless.
+under 24. Non-black bars are left to a second pass (Phase 11, below);
+the same file's dims are what the listing shows regardless.
 
 The video keeper order counts the picture's pixels, not the file's —
 inside the bars when there are any — and at equal pictures keeps the
@@ -745,6 +885,40 @@ that were one clip become one group. On the real AVI set, which has no
 bars, nothing changes. The pass costs 15 % of the frame stage on h264
 clips with keyframes every few seconds, and 32 % on all-intra AVI, where
 every frame is a keyframe.
+
+**Bars of any colour — Phase 11 (CORE-03) [CLAUDE].** Platforms post a
+portrait clip in a landscape frame between white or coloured bars, or
+over a blurred, enlarged copy of itself ("ambient"); `cropdetect` sees
+none of these. When the black pass finds nothing, a second pass reads
+up to 16 keyframes at 256 wide (`-skip_frame nokey`, each keyframe once)
+and measures *detail*: for each column the mean step between vertically
+adjacent pixels, for each row between horizontally adjacent ones — along
+the band, so a bar's own edge never counts as the bar's detail. A frame
+whose picture (the middle half of the columns or rows) has almost none
+— a fade, a black frame — is set aside. Two edge bands are bars when, in
+every remaining frame, each of their lines has under `FLAT_RATIO` (0.25)
+of the picture's median detail; the two bands are within 2 % of the side
+of each other, leave a quarter of the side, and the picture starts at
+once — its first line, or the next when the edge falls inside a sampled
+pixel, carries `FLAT_START` (0.4) of the picture's detail — so a sky or
+a wall that fades into texture is not a bar.
+
+Measured on the 25 real clips of Phases 7 and 10, each made a portrait
+and framed four ways, and on the 79 clips, re-encodes and portraits that
+have no bars (`tests/bars_measure.rs` and a ratio sweep; VERIFICATION §
+Phase 11): white, grey and dark-blue pillarboxes are found in all 75
+copies, and cropping to the picture takes the copy from TMK level 2
+0.00 against its original to 0.98–1.00 in 70 of them (0.88–0.89, still
+grouped, in the rest); a white letterbox where the clip leaves one, in 5
+of 6; the blurred "ambient" bars in 7 of 25 — only where the picture
+has much more detail than its blurred copy; in 5 others the black pass
+takes a darkened blurred bar for black and crops wrongly, as it did
+before. Of the 79 clips without bars, none shows any at the shipped
+0.25 and 0.4; the first to show some does at a ratio of 0.33 (start 0.5)
+or a start share of 0.3 (ratio 0.25) — a thermal camera's fixed overlay
+strips, and a 190 × 240 sample clip. The
+pass costs 16 % of the frame stage on those 29 clips (25 s → 29 s), whose
+groups and words are unchanged.
 
 Audio fingerprinting (Chromaprint) is out of scope.
 
@@ -793,11 +967,39 @@ added to a user's directory except the `_milked` folder the spec defines.
 ## 5. Keeper selection
 
 Within a group, one file stays and the rest are duplicates. Policy
-**[CLAUDE]**: keep the file with the earliest modification time (the original
+**[CLAUDE]**: keep the file whose name and folders do not mark it as a
+copy (Phase 11, below); then the earliest modification time (the original
 is older than its copies); tie → fewest path components (the copy in a
 nested `backup/old/` folder is the duplicate); tie → shorter name; tie →
 lexicographic path. The policy is printed in every result footer so it is
-never hidden. The date on a `keep` line is the local calendar date of that
+never hidden.
+
+**Provenance — Phase 11 (CORE-07) [CLAUDE].** A modification time is when
+a file was last written, and a download, a sync or a copy tool writes it
+anew: a copy can be "older" than its original. On the owner's Windows
+sample tree (`winsample`, VERIFICATION § Phase 11) the times put
+`exports\graf1_mirror.png` in the keeper seat over the original, and with
+the copies made older than their originals (as a restore from backup does)
+"oldest" kept six copies. A copy's name and folder are written by the
+tool that made it, and they say what it is. `keeper::derived` counts the
+marks: one for a copy's name — `x (1)`, `x(2)`, `x - Copy`, `x copy`,
+`x_copy`, `Copy of x`, `x-export`, `x-edited` (whole words, case ignored;
+`copyright.jpg` is not one) — and one for each folder on the path named
+`export(s)`, `exported`, `download(s)`, `temp`, `tmp`, `cache`,
+`thumbnails`, `thumbs`, `backup(s)` or `copies`. Folders are counted, not
+merely noticed: a scan inside `Downloads` or a temporary folder marks
+every file of a group alike, and the `exports` below still tells the copy
+from the original. Fewer marks keep; at equal marks, the times decide as
+before. On the sample tree the keepers become the thirteen originals,
+whatever the times say.
+
+Near and video groups put the same count after their own criteria
+(near: shared moment, the RAW, most matched, most pixels; video:
+longest, most pixels inside the bars, no bars, bitrate), where the old
+order went straight to the time: `IMG_0012 (1).jpg`, a copy of
+`IMG_0012.jpg` with the same pixels and the same matches, no longer takes
+the seat when its time is the earlier one (a folder copied in name order
+writes it first). The date on a `keep` line is the local calendar date of that
 modification time (Phase 5), the same day Explorer shows; the comparison
 itself uses the full timestamp.
 

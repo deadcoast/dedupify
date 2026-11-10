@@ -15,7 +15,7 @@ use crate::perceptual::{DHASH_MAX, PHASH_MAX};
 use crate::theme::{Role, Theme};
 use crate::util::{
     counted, fit, fmt_bytes, fmt_clock, fmt_count, fmt_date, fmt_duration, join_fit, plural,
-    rel_display, shorten_middle, under_root, visible_width, width,
+    rel_display, shorten_middle, under_root, visible_width, width, wrap_words,
 };
 use crate::video::{VideoGroup, VideoStats, LEVEL2_CONFIRM, LEVEL2_MIN, VIDEO_POLICY_LABEL};
 use crate::walk::ScanStats;
@@ -203,6 +203,46 @@ impl LiveProgress {
         }
         let _ = out.flush();
     }
+}
+
+/// Seconds a stage runs before it estimates the rest: the first files
+/// carry the start-up (decoder, model, pool) and say little about the
+/// rate. [CLAUDE, Phase 11]
+const ETA_AFTER: f64 = 5.0;
+
+/// `about 40 s left`, from the stage's running rate (QOL-07, Phase 11):
+/// the time so far times the share still to do. Only DECODE and FRAMES,
+/// whose items cost about the same; HASH and VERIFY take the largest
+/// files first, so a count would overstate the rest. Rounded so the
+/// number does not flicker: to 5 s under a minute, to 30 s under ten, to
+/// the minute above. `None` before `ETA_AFTER`, or with under 3 s left.
+fn eta_text(stage: Stage, elapsed: Duration, done: u64, total: u64) -> Option<String> {
+    if !matches!(stage, Stage::Decode | Stage::Frames) || done == 0 || done >= total {
+        return None;
+    }
+    let spent = elapsed.as_secs_f64();
+    if spent < ETA_AFTER {
+        return None;
+    }
+    let left = spent * (total - done) as f64 / done as f64;
+    if left < 3.0 {
+        return None;
+    }
+    let up = |v: f64, step: f64| ((v / step).ceil() * step) as u64;
+    Some(if left < 60.0 {
+        format!("about {} s left", up(left, 5.0))
+    } else if left < 600.0 {
+        let s = up(left, 30.0);
+        match s % 60 {
+            0 => format!("about {} m left", s / 60),
+            _ => format!("about {} m 30 s left", s / 60),
+        }
+    } else if left < 3600.0 {
+        format!("about {} m left", up(left, 60.0) / 60)
+    } else {
+        let m = up(left, 60.0) / 60;
+        format!("about {} h {:02} m left", m / 60, m % 60)
+    })
 }
 
 fn sweep(t: &Theme, ticks: u64) -> String {
@@ -425,6 +465,10 @@ impl Progress for LiveProgress {
                 self.theme.paint(Role::Info, &fmt_count(done)),
                 self.theme.paint(Role::Dupe, &fmt_count(total))
             );
+            if let Some(eta) = eta_text(stage, c.started.elapsed(), done, total) {
+                c.text.push_str("   ");
+                c.text.push_str(&self.theme.paint(Role::Dupe, &eta));
+            }
         }
         st.ticks += 1;
         self.draw(&mut st, false);
@@ -1174,7 +1218,7 @@ impl Renderer {
                 vec![format!("{} kin", t.paint_bold(Role::Info, &fmt_count(kin)))],
                 vec![t.paint(
                     Role::Dupe,
-                    "taken at a different moment: another photograph, left alone",
+                    "another shot: another moment, or another frame of its second; left alone",
                 )],
             );
         }
@@ -1207,7 +1251,12 @@ impl Renderer {
             .flat_map(|g| g.members.iter())
             .any(|m| m.relation.is_some_and(|r| r.deep.is_some()));
         let deep_txt = if deep_on {
-            format!("  deep {}{:.2} lists", t.glyphs.ge, crate::deep::DEEP_MIN)
+            format!(
+                "  deep {ge}{:.2} lists, {ge}{:.2} with the fit",
+                crate::deep::DEEP_MIN,
+                crate::deep::DEEP_FIT_MIN,
+                ge = t.glyphs.ge
+            )
         } else {
             String::new()
         };
@@ -1443,8 +1492,15 @@ impl Renderer {
         self.hint("undo", &cmd, "reverses this change");
     }
 
+    /// A footer note. Longer than the width, it breaks at spaces and goes
+    /// on indented under itself, as a totals line does.
     pub fn note(&self, role: Role, s: &str) {
-        self.line(&format!(" {}", self.theme.paint(role, s)));
+        let max = self.theme.width.saturating_sub(1);
+        let lines = wrap_words(s, max.saturating_sub(1), max.saturating_sub(3));
+        for (i, l) in lines.iter().enumerate() {
+            let lead = if i == 0 { " " } else { "   " };
+            self.line(&format!("{lead}{}", self.theme.paint(role, l)));
+        }
     }
 
     /// A note whose second part may drop to an indented line when the width
@@ -1477,5 +1533,51 @@ impl Renderer {
             t.paint(Role::Plate, msg)
         );
         let _ = writeln!(out, "         {}", t.paint(Role::Dupe, "dedupe --help"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn estimates_only_long_even_stages_and_rounds_them() {
+        let s = Duration::from_secs_f64;
+        // a fifth done in 5 s: 20 s left, rounded up to 5 s
+        assert_eq!(
+            eta_text(Stage::Decode, s(5.0), 20, 100).as_deref(),
+            Some("about 20 s left")
+        );
+        assert_eq!(
+            eta_text(Stage::Frames, s(6.0), 10, 100).as_deref(),
+            Some("about 55 s left")
+        );
+        assert_eq!(
+            eta_text(Stage::Frames, s(6.0), 10, 120).as_deref(),
+            Some("about 1 m 30 s left")
+        );
+        assert_eq!(
+            eta_text(Stage::Decode, s(12.0), 10, 60).as_deref(),
+            Some("about 1 m left")
+        );
+        assert_eq!(
+            eta_text(Stage::Decode, s(10.0), 10, 200).as_deref(),
+            Some("about 3 m 30 s left")
+        );
+        assert_eq!(
+            eta_text(Stage::Decode, s(60.0), 10, 200).as_deref(),
+            Some("about 19 m left")
+        );
+        assert_eq!(
+            eta_text(Stage::Decode, s(600.0), 100, 1000).as_deref(),
+            Some("about 1 h 30 m left")
+        );
+        // too early, nearly done, nothing done, or a stage that sorts by size
+        assert_eq!(eta_text(Stage::Decode, s(4.9), 20, 100), None);
+        assert_eq!(eta_text(Stage::Decode, s(60.0), 99, 100), None);
+        assert_eq!(eta_text(Stage::Decode, s(60.0), 0, 100), None);
+        assert_eq!(eta_text(Stage::Decode, s(60.0), 100, 100), None);
+        assert_eq!(eta_text(Stage::Hash, s(60.0), 10, 100), None);
+        assert_eq!(eta_text(Stage::Verify, s(60.0), 10, 100), None);
     }
 }

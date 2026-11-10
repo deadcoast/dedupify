@@ -502,8 +502,6 @@ pub(crate) fn items(f: &Found) -> Vec<Item<'_>> {
     v
 }
 
-/// The footer line for items a person chose although the program's own
-/// evidence did not confirm them.
 /// RAW + JPEG pairs left together, for the footer.
 fn pair_note(r: &Renderer, n: u64) {
     if n > 0 {
@@ -517,6 +515,55 @@ fn pair_note(r: &Renderer, n: u64) {
     }
 }
 
+/// The other shots of the near groups — another capture moment, or another
+/// frame of the same second — for a person culling a burst in the
+/// workspace (`c`, NF-05). They are never in `items`, so no command and no
+/// rule of the program ever takes one; only this person's choice does,
+/// and each is printed `by hand`.
+pub(crate) fn shot_items(f: &Found) -> Vec<Item<'_>> {
+    let mut v = Vec::new();
+    for g in &f.near {
+        let k = &g.members[0].hashed;
+        for m in &g.members[1..] {
+            let Some(rel) = m.relation else { continue };
+            if !rel.kin || rel.raw || rel.pair {
+                continue;
+            }
+            v.push(Item {
+                path: &m.hashed.rep.cand.path,
+                size: m.hashed.rep.cand.size,
+                keeper: &k.rep.cand.path,
+                near: Some(format!("{}  {}", rel.words(k, &m.hashed), rel.numbers())),
+                near_confirmed: Some(false),
+                near_reason: rel.unconfirmed_reason(),
+                hash: format!(
+                    "near:{:016x}:{}",
+                    m.hashed.sig.dhash[0],
+                    crate::pdq::hex(&m.hashed.sig.pdq[0])
+                ),
+                listed: true,
+                by_hand: true,
+                pair: false,
+            });
+        }
+    }
+    v
+}
+
+/// The legend of the `~` rows. A row a person chose by hand carries `~`
+/// too (it is not a byte copy) but nothing confirmed it — an unconfirmed
+/// near duplicate, or another shot (NF-05) — so the legend says so when
+/// there is one. [CLAUDE, Phase 11]
+fn tilde_legend(by_hand: u64) -> &'static str {
+    if by_hand > 0 {
+        "~ not a byte copy; a confirmed near duplicate unless marked by hand"
+    } else {
+        "~ confirmed near duplicate, not a byte copy"
+    }
+}
+
+/// The footer line for items a person chose although the program's own
+/// evidence did not confirm them.
 fn by_hand_note(r: &Renderer, n: u64) {
     if n > 0 {
         r.note(
@@ -744,7 +791,7 @@ pub(crate) fn act_milk(
     if !f.near.is_empty() || !f.video.is_empty() {
         r.note_fit(
             Role::Dupe,
-            "~ confirmed near duplicate, not a byte copy",
+            tilde_legend(by_hand),
             "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
         );
     }
@@ -999,7 +1046,7 @@ pub(crate) fn act_purge(
     if !f.near.is_empty() || !f.video.is_empty() {
         r.note_fit(
             Role::Dupe,
-            "~ confirmed near duplicate, not a byte copy",
+            tilde_legend(by_hand),
             "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
         );
     }

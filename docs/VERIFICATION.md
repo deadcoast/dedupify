@@ -2183,3 +2183,408 @@ through clang) and `cargo fmt --check` clean. Binary 26,518,856 bytes.
 - HEIF overlays (`iovl`) are not decoded (counted `undecodable` on the
   DECODE line); alpha planes are ignored (the colour picture is hashed, as
   `bbb_alpha_inverted.avif` decodes); HEVC 4:4:4 tiles: not run.
+
+---
+
+# VERIFICATION — Phase 11 (matching depth), run on 2026-11-10
+
+Linux 6.18, 2 vCPUs, rustc 1.97.0, ffmpeg 6.1.1. Real data, none
+committed, each in its own folder outside the repository:
+
+- **INRIA Copydays** (Jégou, Douze & Schmid, ECCV 2008;
+  `pascal.inrialpes.fr/data2/holidays/`): the 157 originals and the 229
+  `strong` copies made by hand (print and scan, paint, blur, perspective,
+  collage). Its JPEG series (quality 75, 50, 30, 20, 15, 10, 8, 5, 3) and
+  crop series (10–80 % of the surface removed) were regenerated from the
+  originals at its own levels (crops centred).
+- **The real set** of Phases 6–7: 98 pictures (OpenCV samples and others;
+  the chessboard of 13 poses from two cameras, `left*`/`right*`, among
+  them).
+- **Google HDR+** (Hasinoff et al., SIGGRAPH Asia 2016;
+  `gs://hdrplusdata/20171106_subset`): 153 bursts' reference-frame labels
+  and 48 bursts' raw frames, 42 of them with frames 0–3 complete.
+- **`drewnoakes/metadata-extractor-images`**: 409 metadata dumps from real
+  cameras and phones (the Phase 10 checkout).
+- **Clips**: the 29 real videos of Phases 7 and 10 (the `formats` and
+  `realvid` folders).
+- **The owner's sample tree**: the 39-file tree of the Windows runs
+  (`runs\win\sample`), as reproduced here since Phase 8, with the
+  modification times of his Windows run, and again with every copy made
+  older than its original.
+
+Each measurement is a test under `tests/` marked `#[ignore]` that prints
+its record; the commands are in each file's header.
+
+## 1. The deep threshold on real copies (CORE-04)
+
+`tests/real_copies.rs`, the SSCD model of `docs/DEEP.md`, 3,310
+embeddings (28 min):
+
+```
+copy           n    min     p5 median   ≥.60   ≥.65   ≥.70   ≥.75    fit≥    acts
+jpeg q75     157  0.988  0.996  0.999 100.0% 100.0% 100.0% 100.0%  100.0%  100.0%
+jpeg q30     157  0.806  0.951  0.993 100.0% 100.0% 100.0% 100.0%  100.0%  100.0%
+jpeg q10     157  0.323  0.604  0.916  95.5%  94.3%  93.0%  89.8%  100.0%   93.0%
+jpeg q5      157  0.164  0.459  0.782  85.4%  79.6%  73.9%  62.4%   98.1%   73.9%
+jpeg q3      157  0.139  0.349  0.673  65.0%  54.8%  43.3%  31.8%   96.8%   43.3%
+crop 20%     157  0.826  0.868  0.909 100.0% 100.0% 100.0% 100.0%  100.0%  100.0%
+crop 40%     157  0.720  0.751  0.826 100.0% 100.0% 100.0%  96.2%   99.4%   99.4%
+crop 50%     157  0.616  0.692  0.770 100.0%  98.1%  92.4%  68.2%  100.0%   92.4%
+crop 60%     157  0.491  0.600  0.697  95.5%  79.6%  47.1%   8.9%   96.2%   46.5%
+crop 70%     157  0.471  0.507  0.609  56.7%  22.3%   5.1%   0.6%   98.7%    5.1%
+crop 80%     157  0.313  0.381  0.503   3.8%   1.3%   0.0%   0.0%   15.9%    0.0%
+strong       229 -0.019  0.103  0.414  26.6%  18.8%  15.3%   8.7%   20.5%    9.2%
+negatives: 5440359 pairs, median 0.007, p99 0.133, p99.9 0.219, max 0.526
+  cos false pos   fp & fit≥   strong     jpeg     crop
+ 0.50         8           0    39.3%    96.5%    94.3%
+ 0.55         0           0    34.1%    95.1%    89.2%
+ 0.60         0           0    26.6%    93.1%    84.0%
+ 0.70         0           0    15.3%    88.1%    71.6%
+strong copies the hashes alone find: dHash∧pHash 12 of 229, PDQ ≤ 31 2
+```
+
+(Rows abridged; `fit≥` is the plain fit at 0.92, `acts` the cosine at
+0.70 with it. The closest negative, 0.526, is two different photographs
+both re-encoded at quality 5–15; the next, 0.518, two originals.)
+
+On the real set (`measure_deep_real_pairs`, `measure_fit_on_named_pairs`
+in `tests/fit_measure.rs`), the pairs by descriptor cosine, and their fit
+under the Phase 11 search (§2):
+
+```
+cosine ≥ 0.70: 39 pairs   fit ≥ 0.92: 3 (rubberwhale frames 0.996, Suzanne mirrored 0.988, basketball frames 0.965)
+[0.60, 0.70):  81 pairs   fit ≥ 0.92: 2 (lena ~ lena_tmpl 1.000, opencv-logo ~ -white 0.946); next right01 ~ right04 0.787
+[0.45, 0.60): 150 pairs   fit max 0.708
+the chessboard: right11 ~ right14 at cosine 0.878, fit 0.823 — the closest any two poses come
+```
+
+Decision: `DEEP_MIN` stays 0.70 (the descriptor alone lists); new
+`DEEP_FIT_MIN = 0.60` — in [0.60, 0.70) a pair is grouped only when the
+fit confirms it, and then acts; otherwise it is dropped. Over Copydays'
+3,055 copies the descriptor-and-fit rule acts on 2,262 (74.0 %) at 0.70
+and 2,508 (82.1 %) with the band (from the pairs file the test writes;
+plain fit, which the shipped search can only raise): crops leaving 40 %
+of the area 46.5 → 91.7 %, 30 % 5.1 → 56.1 %, quality 3 43.3 → 65.0 %,
+hand-made 9.2 → 13.1 %. No unrelated pair of the 5.44 million is in the
+band. `tests/deep_band.rs` (embeddings set by hand, so both builds run
+it): a crop to half the area that the hashes miss joins in the band and
+acts, another picture in the band is dropped when the fit refuses it, and
+a picture in a keeper's band and at 0.75 with another stays with that
+pair. Found while writing that test, fixed: the band had been tried
+first, so such a picture was attached to the keeper, dropped there by
+the fit, and its pair at 0.75 was lost; under 0.70 a picture now joins a
+keeper or a partner only after every pair at 0.70 is made.
+
+## 2. The fit: cells and mirror (CORE-01, CORE-02)
+
+`tests/fit_measure.rs` scores every pair four ways — plain (Phase 6),
+cells (the 4 × 4 grid, worst quarter set aside), mirror, both — at the
+same placements:
+
+```
+real set: 60 pictures × 21 perturbations, 1,260 pairs, at 0.92
+  plain 88.1 %   cells 88.3 %   mirror 92.8 %   both 93.0 %
+  (mirror: 1.7 % → 100 % on mirrored copies; watermark 95.0 → 98.3 %)
+caption bar over the lower 15 %, 60 pairs
+  plain 20.0 %   cells 98.3 %   mirror 20.0 %   both 98.3 %
+mirrored and cropped to 80 % of the area, 60 pairs
+  plain 3.3 %    cells 5.0 %    mirror 95.0 %   both 96.7 %
+the ELA pair (a local edit): plain 0.766, both 0.885 (under; listed)
+Copydays crops 20–50 %, 160 pairs: plain 99.4 %, both 100 %
+Copydays hand-made copies, 229: plain 20.5 %, both 24.5 %
+unrelated, every fourth pair of Copydays originals (3,062):
+  ≥ 0.92: plain 3 (max 0.947)   cells 8   mirror 4   both 13 (max 0.969)
+real set, every pair of distinct files (4,753, copies among them):
+  ≥ 0.92: plain 2   both 6 — the 4 added: lena_tmpl 1.000, Suzanne 0.988,
+  opencv-logo 0.946 (derivatives) and imageTextN ~ tmpl 0.933 (text, mirror)
+descriptor-admitted non-copies (cosine ≥ 0.55; originals, hand copies,
+  real set): 0 pairs
+cost (thumbnails in hand): plain 19.7 ms, cells 18.0, mirror 33.6, both 33.1 a pair
+```
+
+Decision: ship both (`geometry::SEARCH`); `FIT_MIN` stays 0.92. The fit
+is less specific alone (13 unrelated pairs of 3,062 instead of 3), which
+the rule already allows for: it is only consulted on a pair a first
+family admitted, and among those (§1) only derivatives reach 0.92. On the
+owner's sample tree the change is one group: `lena_tmpl.jpg` (lena with
+a region altered, same size) was `similar, unconfirmed  fit 0.80` and is
+now `near copy  fit 1.00`, acted on; the two chessboard poses there stay
+unconfirmed (fit 0.52, 0.42).
+
+## 3. Capture moment on real cameras (CORE-08)
+
+The 409 metadata dumps: 362 files state a `DateTimeOriginal`; 75 (21 %)
+add `SubSecTimeOriginal` — 47 in two digits, 21 in three, 3 in four, 4 in
+six; 10 write `00`; 3 have a blank date; one camera (Samsung NV10) writes
+`2008.07.10  15:16:55`. The HDR+ frames of a burst all state one second
+and one fraction (`2016:07:27 18:59:22`, `117280`).
+
+A burst roll built from one HDR+ burst (`0006_20160727_185921_651`,
+frames 0–3 developed to JPEG with their own date): `sub/` with the
+burst's fraction, named as the dataset names them (`payload_N000`…);
+`nosub/` without a fraction, named as a camera numbers them
+(`IMG_0012`…`IMG_0015`), plus `IMG_0012 (1).jpg`, a re-encoded copy of
+frame 0. `milk -n`, before (`dedupe_before_p11`, the Phase 10 binary)
+and after:
+
+```
+sub/, before:   NEAR 001   3 similar   1.71 MB reclaimable
+                would~  payload_N001.jpg  re-encoded  d 0 p 0 q 4   (N002, N003 alike)
+sub/, after:    NEAR 001   0 similar  +3 kin   0 B reclaimable
+                3 kin   another shot: another moment, or another frame of its second; left alone
+nosub/, before: NEAR 001   4 similar   2.05 MB reclaimable   (three frames and the copy would move)
+nosub/, after:  NEAR 001   1 similar  +3 kin   347 KB reclaimable
+                kin  IMG_0013.jpg  another shot, same second  d 0 p 0 q 4   (0014, 0015 alike)
+                would~  IMG_0012 (1).jpg  same picture  d 0 p 0 q 0
+```
+
+Unit tests: `capture::a_coarser_fraction_is_the_same_moment` (`117280`
+agrees with `117`, `11728`, `12`, `11`, `1`, `1172800`; not with `118`,
+`217`, `217280`, `2`, `016`, `13`, `10`), `capture::camera_date_forms`
+(the NV10's form, `T`, a trailing NUL; zeros and blanks are no time),
+`near::numbered_apart_tells_frames_from_copies` (5 frame pairs, 10 copy
+and conversion pairs).
+
+## 4. Bursts: the sharpest frame, and choosing other shots (NF-05)
+
+The IDENTIFIED item asked for a "keep the sharpest" option from the
+variance of the Laplacian. Measured against the frame the HDR+ pipeline
+chose as its reference — it picks the sharpest of the first frames
+("lucky imaging") — over frames 0–3 of 42 bursts
+(`tests/burst_focus.rs`):
+
+```
+the hashing-scale focus picks the reference frame in 17 (40 %), full resolution in 23 (55 %);
+always frame 0 would be right in 26 (62 %), a random pick in 25 %
+the reference frame's rank by hashing-scale focus (0 = sharpest): [17, 12, 6, 7]
+```
+
+Within a burst the four frames' focus values differ by about 1 % (69.5,
+69.8, 69.8, 69.7 in the first burst): the frames are equally sharp to
+this measure, and its pick is noise. Over all 153 labelled bursts the
+reference is frame 0 in 77, 1 in 29, 2 in 26, 3 in 21. Not shipped: an
+option that does worse than "the first" would mislead.
+
+What shipped instead is the person's own cull: `c` chooses a group's
+other shots, by hand. Driven in a pseudo-terminal (24 × 130) on a copy
+of `nosub/`:
+
+```
+open:    · kin IMG_0013–0015  another shot, same second;  ■ near IMG_0012 (1).jpg  same picture
+         bar: ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  g go to
+c:       ■ kin IMG_0013–0015;  4 selected  2.05 MB  3 by hand
+         3 other shots chosen by you: different photographs, the keeper stays
+m:       milk 4 → _milked, 2.05 MB, 3 by hand, 3 other shots  enter go  esc back
+enter:   moved~ IMG_0012 (1).jpg  same picture
+         moved~ IMG_0013.jpg  another shot, same second  …  by hand   (0014, 0015 alike)
+         4 moved   2.05 MB into …/_milked   journal 20261110-102002
+         3 by hand: chosen in the workspace, confirmed by your look, not by a second family
+         the folder: IMG_0012.jpg, _milked/{IMG_0012 (1), IMG_0013, IMG_0014, IMG_0015}.jpg
+u:       restored IMG_0015, IMG_0014, IMG_0013, IMG_0012 (1).jpg
+         4 restored   2.05 MB back in place;  the folder as it was, _milked gone
+```
+
+Found while driving it, fixed: the footer's legend read `~ confirmed near
+duplicate, not a byte copy` over rows a person chose that nothing
+confirmed; with a by-hand row it now reads `~ not a byte copy; a
+confirmed near duplicate unless marked by hand`. Unit tests:
+`workspace::state` — `c` chooses the group's other shots and nothing
+else does (not `space` on the header, not `a`), `c` again lets them go,
+the confirm bar counts them.
+
+## 5. The middle of a large file (CORE-06)
+
+Two sparse 1.5 GiB files, equal but for one byte at their middle
+(`cmp`: differ at byte 805,306,369):
+
+```
+before: SAMPLE  2 share a sample   256 KB    LIKELY 001  2 files  1.50 GB each  size + sample match
+        (find: HASH 0 confirmed   3.00 GB read)
+after:  SAMPLE  0 share a sample   384 KB    no duplicates   2 files   3.00 GB checked
+        (find: HASH 0 B read)
+```
+
+Unit test: `exact::a_large_file_is_sampled_in_the_middle_too` (an edit at
+the middle separates; one between the windows does not — left to the
+full hash; `sample_bytes` 128 KiB at 1 GiB, 192 KiB above).
+
+## 6. Keepers by provenance (CORE-07)
+
+The owner's sample tree, `find .`, before and after:
+
+```
+his machine's times   before: NEAR 004 keep photos/exports/graf1_mirror.png (newer original)
+                      after:  NEAR 004 keep photos/graf1.png; every other keeper unchanged
+copies made older     before: 6 groups keep a copy — clips/vtest - Copy.avi (and its video group),
+                              exports/starry_night (1).jpg, exports/home-copy.jpg,
+                              exports/graf1_mirror.png, exports/castle_q60.jpg, exports/board_rot90.jpg
+                      after:  every keeper an original
+```
+
+Unit test: `keeper::a_copy_by_name_or_folder_never_keeps` (11 copy/
+original pairs by name and folder, older copies; 5 look-alike names that
+are not marks; a scan inside `/tmp` still decided by the `exports` below
+it).
+
+## 7. Bars of any colour (CORE-03)
+
+`tests/bars_measure.rs`: each of the 25 real clips long and large enough
+(≥ 1 s, ≥ 240 px) made a portrait (720 high) and framed in 1280 × 720
+the ways platforms post one — over a blurred, enlarged, darkened copy of
+itself (`ambient`), between white, grey or dark-blue bars — and, where
+the clip is wider than 4:3, letterboxed in white at 960 × 720. Found:
+each edge within 2 % of the side. TMK level 2 of the framed copy against
+its portrait, uncropped and cropped to what was found:
+
+```
+             copies  found   confirmed after the crop (before: none)
+white          25      25      23   (MVI_4823, xmp480qt 0.88–0.89, grouped)
+grey           25      25      24
+dark blue      25      25      23
+ambient        25       7       6   (black pass took a dark blurred bar for black in 5)
+letterbox       6       5       5   (Issue_264: its picture's own top is flat)
+the clips and their re-encodes (50): bars found in none
+```
+
+The first run found 8 of 119 (the harness also counted 4:3 letterboxes,
+which leave no bars, and expected a 9:16 portrait where FLIR's is 3:4 —
+both fixed). Looking at why: with `-skip_frame nokey` and no
+`-fps_mode passthrough`, ffmpeg repeated the first keyframe sixteen times
+instead of passing sixteen keyframes; one frame with a flat picture (a
+fade) vetoed the whole clip; and a picture edge falling inside a sampled
+pixel left its first column under the start share. All three fixed in
+`detect_flat_bars` / `flat_bars`, with the unit test extended (a black
+frame among the frames; a soft edge).
+
+The thresholds, from a sweep over every framed copy and the 79 clips,
+re-encodes and portraits without bars (the same rule in Python on the
+same frames):
+
+```
+ratio (start 0.5)   0.15  0.20  0.25  0.28  0.30  0.33  0.35  0.40  0.50
+ambient found          2     3     7    10    11    12    13    16    17   of 25
+solid colours      22–23 22–23 22–23 22–23 22–23 22–23 22–23 23–24 24    of 25 each
+clips without bars     0     0     0     0     0     2     2     2     2   (FLIR's overlay strips)
+start (ratio 0.25)   0.5: solid 22–23   0.4: solid 24   0.3: 1 clip without bars shows some
+(the sweep kept the harness's first expectation for FLIR, so each solid count is one short)
+```
+
+Shipped `FLAT_RATIO` 0.25 and `FLAT_START` 0.4. The pass runs only when
+the black pass finds nothing; on the 29 clips it adds 16 % to the frame
+stage (25 s → 29 s) and changes no group and no word.
+
+## 8. Reduced JPEG decode (TECH-02) — measured, not shipped
+
+The route: `jpeg-decoder` 0.3.2 decoding at 1/2, 1/4 or 1/8 inside its
+inverse DCT (the largest that keeps the short side ≥ 576), EXIF
+orientation and moment from the same read. `tests/decode_reduced.rs`,
+each file in the page cache, each route timed twice in turn, the faster
+kept; "full" is the shipped route (the `image` crate's decoder, then the
+integer box prefilter):
+
+```
+                                files  through it   full / reduced a file   pixels held        same file, PDQ max / p95 / median
+Copydays, real set (≤ 9 MP)      451     203          52 / 54 ms            3.8 / 1.0 MP       14 / 8 / 2
+HDR+ results (8–13 MP, phones)    39      39         123 / 97 ms           11.9 / 0.7 MP       22 / 14 / 4
+PDQ regression inputs (12 MP)     19       4         150 / 87 ms           12.2 / 0.8 MP       10 / 10 / 6
+Copydays upscaled to 24 MP        12      12         229 / 122 ms          24.0 / 1.5 MP        4 / 4 / 4
+dHash and pHash: at most 2 bits apart in every set; full size and capture moment: equal in every file.
+(PDQ figures for the files the route reduces; the 24 MP set is Copydays upscaled, so its smooth
+pictures say little about real 24 MP files beyond the timing)
+```
+
+Then the robustness table through each route
+(`reduced_route_on_copies`): 199 large JPEGs (Copydays originals, the
+HDR+ results, the regression inputs) against copies of each, PDQ max /
+95th percentile, every file decoded in full against every file decoded
+as the route would:
+
+```
+copy            every file in full     through the route
+re-save q85         4 / 2                 2 / 2
+70 % q85           22 / 10               22 / 10
+half q85           22 / 10                6 / 2
+35 % q85           20 / 12               22 / 12
+quarter q85        24 / 10               22 / 10
+full-size PNG       0 / 0                22 / 10
+half-size PNG      22 / 10                4 / 2
+(all 100 % within PDQ 31 both ways; dHash and pHash at most 3)
+```
+
+Decision: not shipped. It is no faster on the files most libraries hold
+(≤ 9 MP), 1.3× faster at 12 MP; it moves a file's own PDQ by up to 22
+bits; and against copies it gains no margin, only moves it — a half-size
+copy comes closer, a full-size PNG export of the same JPEG goes from 0
+bits to 22. The lower peak memory (24 → 1.5 MP a file) is real and is
+what a future attempt would keep, with the size the hashes see made the
+same on both routes. The route stays in `tests/decode_reduced.rs`, with
+`jpeg-decoder` a test-only dependency, so the measurement can be re-run.
+
+Found by it, open: on the shipped route, a 12 MP phone photo and its
+70 %, half or quarter copy are up to 22–24 PDQ bits apart (95th
+percentile 10) — within 31, so PDQ still confirms them, but with 7 bits
+to spare. The box prefilter's integer factor sends copies of different
+sizes to different working sizes (576–1151 px); the Phase 7 tables, on
+smaller pictures, showed 8–14 for the same copies.
+
+## 9. Time left on long stages (QOL-07)
+
+A pseudo-terminal (24 × 100) on Copydays' 386 originals and hand-made
+copies, `find . img`, the screen at 9 s and at 15 s:
+
+```
+ DECODE ━━━━━━━━━━━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌  207 / 386   about 10 s left
+ DECODE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━╌╌  354 / 386
+```
+
+(The stage ended at about 16 s; at 15 s under 3 s were left and nothing
+is said.) Unit test: `render::tests::estimates_only_long_even_stages_and_rounds_them`.
+
+## 10. Suite
+
+`cargo test --release`: 124 unit tests (10 new: `capture` 2, `near` 1,
+`keeper` 1, `exact` 1, `geometry` 1, `video` 1, `util` 1, `render` 1,
+`workspace::state` 1), `tests/deep_band.rs` 1, and 31 end-to-end tests
+pass. One end-to-end test changed with the fit: `milk_leaves_unconfirmed_
+near_duplicates_in_place` used a caption bar over the lower 15 % as the
+member nothing confirms, and the cells now confirm it (`near copy  q 36
+fit 1.00`, moved) — that is `a_caption_bar_is_confirmed_by_the_fits_cells`
+now; the unconfirmed case is a bar over 35 % (`d 7 p 14 q 48 fit 0.90`,
+`kept~`). With `DEDUPE_MODEL` set the 31 and the band test pass; with
+`--no-default-features` 122 + 1 + 31; `formats_corpus -- --ignored` 3
+tests pass. Every measurement harness of this phase compiles in the same
+run and is `#[ignore]`d. clippy with `-D warnings` on all targets (both
+feature sets; for `x86_64-pc-windows-msvc` with `blake3/pure`, and with
+the deep feature through clang) and `cargo fmt --check` are clean.
+Binary 26,575,144 bytes (`jpeg-decoder` is a test-only dependency).
+
+## Not verified here
+
+- Windows: nothing in this phase is Windows-only, and nothing of it ran
+  there. The flat-bar pass's `-fps_mode passthrough` is the option the
+  HEIF route already passes (ffmpeg 5.1 and later; the owner's 9.0.2);
+  the `c` key is the platform-free state machine, driven here in a
+  pseudo-terminal. Phase 10's three Windows items wait in Phase 12.
+- A whole camera roll: the frame rule (§3) was run on one HDR+ burst
+  under two namings and on 409 cameras' metadata, not on a roll of
+  thousands; a roll renumbered on import shows a copy of a frame as
+  another frame (`kin`, left alone — the safe side).
+- Blurred "ambient" bars: found in 7 of 25 (§7); where the black pass
+  takes a dark blurred bar for black (5 of 25) the crop is wrong, as
+  before this phase.
+- The deep band (§1) was measured with the plain fit on Copydays and
+  with the shipped search on the real set's band; Copydays' copies were
+  not re-scored under the shipped search (it scores a pair no lower).
+- Real 24 MP JPEGs (§8): the 24 MP timing is on upscaled pictures.
+- PDQ between a large photo and its resized copies reaches 22–24 bits on
+  the shipped route (§8), within 31; a fixed working size would narrow
+  it. Open, for the next IDENTIFIED pass.
+- The near keeper puts "most matched" before the copy marks (a padded
+  copy with more pixels must not keep), and matches near the thresholds
+  move it: with both caption-bar edits of §10 in the fixture at once,
+  the mirrored copy in `photos/export/` keeps by one more direct match.
+  Copy marks before degree would let a smaller copy outrank a marked
+  original, so the order stays; open for the next IDENTIFIED pass.
+- Terminals under 71 columns: the near policy line (67 cells after its
+  indent) runs past the edge; footer notes now wrap, the stage lines and
+  narrow member lines are as Phase 10 left them (under 62).

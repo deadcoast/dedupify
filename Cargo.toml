@@ -46,6 +46,8 @@ deep = ["dep:tract-onnx"]
 [dev-dependencies]
 tempfile = "3"
 walkdir = "2.5"
+# the reduced JPEG route measured in tests/decode_reduced.rs (TECH-02, not shipped)
+jpeg-decoder = { version = "0.3.2", default-features = false }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
