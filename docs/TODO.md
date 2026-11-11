@@ -16,16 +16,19 @@ milestone: Phase 11, delivered 2026-11-10 (`SHELVED.md` § Phase 11 `[done]`).
 - [x] **SC-06** `unwrap()` audit — 18 made invariants or handled; clippy
   `unwrap_used` denied outside tests
 - [x] **TECH-05** in-tree benchmarks on fixed corpora — `tests/bench.rs`
-- [ ] **TECH-04** ConPTY pseudo-terminal tests on Windows — built (`run_tty`
-  on Windows); ticked when it runs green in CI or the launcher
-- [ ] **TECH-08** CI matrix (ubuntu, windows, ffmpeg) — built
-  (`.github/workflows/ci.yml`); ticked when its first run is green
-- [ ] **TECH-07** Ctrl-C e2e on Windows — built in Phase 10; verified by a
-  Windows pass with a console present
+- [x] **TECH-04** ConPTY pseudo-terminal tests on Windows — `run_tty` on
+  Windows; green in CI run 43115899107 after the first run found the
+  child drawing into the parent's redirected output
+- [x] **TECH-08** CI matrix (ubuntu, windows, ffmpeg) —
+  `.github/workflows/ci.yml`; green from run 43115899107
+- [x] **TECH-07** Ctrl-C e2e on Windows — verified in CI run 43115899107
+  by its own words (`CTRL_BREAK sent to the milk's process group …`)
 - [x] **SC-08** UTF-8 Windows logs — verified from the 2026-11-11 run
   (VERIFICATION § Phase 11 on Windows)
-- [ ] **QOL-10** Windows console colour — built in Phase 10; the screenshot
-  from the next `runs/win/RUN_VERIFY.cmd` goes into VERIFICATION
+- [ ] **QOL-10** Windows console colour — the enablement path runs in a
+  test through the console host (`a_terminal_gets_colour`, in CI); the
+  screenshot from the next `runs/win/RUN_VERIFY.cmd` goes into
+  VERIFICATION
 
 Done when: every box ticked, the suite green on Linux and in the CI
 matrix on Windows, the three Phase 10 items verified on Windows with a

@@ -349,11 +349,16 @@ So far (VERIFICATION § Phase 12):
   new one.
 - **TECH-05** `tests/bench.rs` times each stage on a fixed generated
   corpus.
-- **TECH-04, TECH-08** the pseudo-console tests on Windows and the CI
-  workflow (Ubuntu and Windows, with ffmpeg) are built; their first run
-  decides the boxes.
-- **SC-08** verified by the 2026-11-11 Windows run; TECH-07 and QOL-10
-  wait for the launcher's next run.
+- **TECH-08** CI on Ubuntu and Windows, with ffmpeg: fmt, clippy with
+  and without the deep tier, the suite both ways, the doctor.
+- **TECH-04** the workspace driven by keys through a Windows pseudo
+  console, green in CI (the first run found the child drawing into the
+  test's own redirected output).
+- **TECH-07** Ctrl-C on Windows verified in CI by its own words; **SC-08**
+  by the 2026-11-11 Windows run.
+- **QOL-10** colour's enablement path tested through the console host
+  (`a_terminal_gets_colour`); its picture waits for the launcher's next
+  run on the owner's machine — the last box of the phase.
 
 ## Docs chain
 

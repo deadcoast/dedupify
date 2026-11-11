@@ -2783,36 +2783,53 @@ later phase's change is measured against, on the same corpus.
 A first corpus (all files ≤ 64 KiB) never reached the HASH stage — the
 sample covered each file whole — so the sizes now run past the sample.
 
-## 5. Pseudo-terminal tests on Windows (TECH-04)
+## 5. Pseudo-terminal tests on Windows (TECH-04), and colour (QOL-10)
 
 `tests/e2e.rs` `run_tty` on Windows: `dedupe` started in a pseudo console
 (`CreatePseudoConsole`, Windows 10 1809+) of `columns` × 50 cells, keys
 written to its input after the same delays as `script(1)` on Unix, and
-everything drawn read back and stripped of escapes. The environment is
-passed whole (journal folder, `NO_COLOR`, `COLUMNS`), so no other test
-sees it. `find_on_a_terminal_acts_from_the_result` now runs on both
+everything drawn read back. The environment is passed whole (journal
+folder, `NO_COLOR`, `COLUMNS`), so no other test sees it.
+`find_on_a_terminal_acts_from_the_result` now runs on both
 (`cfg(any(unix, windows))`); its SCAN-line count is asserted on Unix
-only, where `script` gives one line per redraw. Type-checked here
-(clippy, Windows target, `-D warnings`); executed: §7.
+only, where `script` gives one line per redraw.
 
-## 6. Suite
+The first CI run failed it with nothing read back, and the child's own
+screen in the CI log: with the test's stdout a pipe, the child had
+inherited that pipe and drawn there. It now starts with
+`STARTF_USESTDHANDLES` and invalid handles, so it takes the pseudo
+console's own (§ 8). The launcher under `runs/win` redirects the
+tests' output to its logs, so it would have hit the same.
+
+`a_terminal_gets_colour` (new): the doctor on a terminal with `NO_COLOR`
+unset. It asserts the doctor's `24-bit ANSI colour` (it asked for ANSI
+support and got it), a colour escape coming back from the terminal, and
+no escape shown as text. On Windows the terminal is the console host
+itself, so this runs QOL-10's enablement path
+(`crossterm::ansi_support`, which sets virtual-terminal processing on
+the console) end to end. The check that tells colour from no colour was
+tried both ways on Linux: the doctor's raw output through `script` with
+`NO_COLOR=1` has no colour escape and no `24-bit`; without it, both.
+
+`plain_text`, which turns what a terminal received into the text a
+person saw, now reads a cursor moved forward as blanks and one moved to
+a row as a new line: the Windows pseudo console draws runs of blanks and
+new rows that way **[CLAUDE]**. The Unix runs pass with it.
+
+## 6. Suite (here)
 
 - `cargo test --release`: 128 unit tests (1 ignored), the band test, 31
   end-to-end tests (3 ignored) — and the 31 again with the deep model
-  installed (`DEDUPE_MODEL`). `find_on_a_terminal_acts_from_the_result`
-  with its own words: `the workspace driven through a pseudo-terminal: 7
-  moved, 7 restored`.
+  installed (`DEDUPE_MODEL`); the colour test added after, run with the
+  other terminal test: `the workspace driven through a pseudo-terminal:
+  7 moved, 7 restored`, `colour on a terminal: 24-bit ANSI colour,
+  colour escapes back`.
 - clippy at `-D warnings`, all targets: Linux with and without the deep
   tier; the Windows target with and without it (type-checked here, the
   C parts of BLAKE3 as `pure`). `cargo fmt --check` clean.
-- The Windows launcher (`runs/win/RUN_VERIFY.cmd`) runs the
-  pseudo-console test once more with its words shown, and its summary
-  gains a `workspace` line beside `Ctrl-C`.
-- `plain_text`, which turns what a terminal received into the text a
-  person saw, now reads a cursor moved forward as blanks and one moved
-  to a row as a new line: the Windows pseudo console draws runs of
-  blanks and new rows that way **[CLAUDE]**. The Unix runs above pass
-  with it.
+- The Windows launcher (`runs/win/RUN_VERIFY.cmd`) runs the two
+  terminal tests once more with their words shown; its summary gains
+  `workspace` and `colour codes` lines beside `Ctrl-C`.
 
 ## 7. CI (TECH-08)
 
@@ -2820,19 +2837,65 @@ only, where `script` gives one line per redraw. Type-checked here
 request, Ubuntu and Windows, each with ffmpeg (apt; Chocolatey — one of
 the folders `dedupe` looks in, and on the runner's PATH too): `cargo fmt
 --check` (Linux), clippy with and without the deep tier at `-D
-warnings`, the whole suite, the suite without the deep tier, the Ctrl-C
-and pseudo-terminal tests again with their own words shown, and the
+warnings`, the whole suite, the suite without the deep tier, the Ctrl-C,
+workspace and colour tests again with their own words shown, and the
 doctor. The `ci` profile is release without LTO and with 16 codegen
 units, so the test binaries build in minutes and the image work runs at
-release speed.
+release speed. The repository is private: each run spends the account's
+Actions minutes, Windows minutes at twice the rate.
 
-The first run is the push that adds the workflow; what it showed is
-recorded in § 8.
+## 8. CI runs
+
+Read through the API, job logs included. Runners: Ubuntu 26.04.1
+(ffmpeg 8.0.1 from apt), Windows Server 2025 (ffmpeg 9.0.2 essentials
+from Chocolatey), Rust 1.99.1 on both.
+
+- **43112693175** at `ca2812c`. Ubuntu green: 128 unit, band, 31
+  end-to-end; 126 unit and 31 end-to-end without the deep tier; the
+  terminal test's words; the doctor `everything in place`, `ffmpeg
+  /usr/bin/ffmpeg`. Windows: clippy both ways green; the suite 128 unit,
+  band, and end-to-end 29 passed, **1 failed** —
+  `find_on_a_terminal_acts_from_the_result` read nothing back (§ 5).
+  Every other Windows end-to-end test passed with ffmpeg present, the
+  video, HEIC and RAW ones among them.
+- **43115899107** at `1487137` (the handles fixed). Both green. Windows:
+  128 unit, band, 30 end-to-end (3 ignored; the across-volumes milk test
+  is Unix-only), again 126 and 30 without the deep tier, then with their
+  words:
+
+  ```
+  CTRL_BREAK sent to the milk's process group 2156
+  the workspace driven through a pseudo-terminal: 7 moved, 7 restored
+  test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out
+  ```
+
+  and the doctor on Windows: `PASS ffmpeg C:\ProgramData\Chocolatey\
+  bin\ffmpeg.exe`, `PASS heif HEIC and AVIF decode`, `PASS bin Recycle
+  Bin reachable`, `everything in place`. Ctrl-C on Windows (TECH-07) is
+  so verified by its own words: the event was sent to the milk's process
+  group, and the test's journal and undo held.
+- **43120230190** at `03ab607` (the colour test). Both green: Ubuntu 32
+  end-to-end, Windows 31 (3 ignored each), both ways of the deep tier;
+  on Windows, with their words:
+
+  ```
+  colour on a terminal: 24-bit ANSI colour, colour escapes back
+  CTRL_BREAK sent to the milk's process group 6072
+  the workspace driven through a pseudo-terminal: 7 moved, 7 restored
+  test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out
+  ```
+
+  The console host granted virtual-terminal processing, drew colour, and
+  showed no escape as text — QOL-10's mechanism, on Windows Server 2025's
+  console host.
+
+Build times on the runners, for the record: the `ci` profile's test
+build 8 m 46 s on Ubuntu, 16–17 min on Windows, cold; with the cache
+the suite step takes 2–3 min on Ubuntu and 5½ on Windows.
 
 ## Not verified here
 
-- The pseudo-console test and the workflow on Windows: § 8.
-- TECH-07 by its own words (`CTRL_BREAK sent …`) and QOL-10 (colour on a
-  Windows console, a picture of it): the launcher's next run on the
-  owner's machine. CI's Windows runner has no window to photograph.
+- QOL-10's picture: colour as a person sees it on the owner's console.
+  The launcher's next run takes it; a CI runner has no window to
+  photograph.
 - The bench on more threads or on Windows: run here only, on 2 vCPUs.
