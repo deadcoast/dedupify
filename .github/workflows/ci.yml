@@ -76,11 +76,11 @@ jobs:
       - name: tests without the deep tier
         run: cargo test --profile ci --no-default-features --lib --test e2e
 
-      # the Windows end-to-end tests that need a console: Ctrl-C to a milk,
-      # and the workspace driven through a pseudo console; their own words
-      # say whether they ran or skipped
-      - name: Ctrl-C and the workspace, shown
-        run: cargo test --profile ci --test e2e -- --nocapture interrupted_milk_leaves_a_journal_undo_can_use find_on_a_terminal_acts_from_the_result
+      # the end-to-end tests that need a console: Ctrl-C to a milk, the
+      # workspace driven through a pseudo console, colour on it; their own
+      # words say whether they ran or skipped
+      - name: Ctrl-C, the workspace and colour, shown
+        run: cargo test --profile ci --test e2e -- --nocapture interrupted_milk_leaves_a_journal_undo_can_use find_on_a_terminal_acts_from_the_result a_terminal_gets_colour
 
       - name: doctor
         run: cargo run --profile ci -- --doctor

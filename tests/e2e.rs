@@ -290,11 +290,24 @@ fn run(fx: &Fx, args: &[&str]) -> (i32, String, String) {
     )
 }
 
+/// Run on a terminal without colour and return the text a person saw.
+#[cfg(any(unix, windows))]
+fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String> {
+    run_tty_raw(fx, args, keys, columns, false).map(|raw| plain_text(&raw))
+}
+
 /// Run on a pseudo-terminal through `script(1)` with `keys` typed after
 /// `delay`, so the workspace bar appears and answers; Unix only, and only
-/// where `script` exists. Returns None when it cannot run.
+/// where `script` exists. Returns what the terminal received, escapes and
+/// all, or None when it cannot run. `colour` leaves `NO_COLOR` unset.
 #[cfg(unix)]
-fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String> {
+fn run_tty_raw(
+    fx: &Fx,
+    args: &[&str],
+    keys: &[&str],
+    columns: u32,
+    colour: bool,
+) -> Option<String> {
     use std::io::Write;
     use std::process::Stdio;
     if Command::new("script").arg("--version").output().is_err() {
@@ -305,11 +318,16 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         .map(|a| format!("'{}'", a.replace('\'', "'\\''")))
         .collect::<Vec<_>>()
         .join(" ");
-    let mut child = Command::new("script")
+    let mut script = Command::new("script");
+    if colour {
+        script.env_remove("NO_COLOR");
+    } else {
+        script.env("NO_COLOR", "1");
+    }
+    let mut child = script
         .args(["-qfec", &cmd, "/dev/null"])
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
-        .env("NO_COLOR", "1")
         .env("TERM", "xterm")
         .env("COLUMNS", columns.to_string())
         .stdin(Stdio::piped())
@@ -329,18 +347,25 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         }
     });
     let out = child.wait_with_output().ok()?;
-    Some(plain_text(&String::from_utf8_lossy(&out.stdout)))
+    Some(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 /// The same on Windows (Phase 12, TECH-04): `dedupe` started in a pseudo
 /// console (`CreatePseudoConsole`, Windows 10 1809 and later) of
 /// `columns` × 50 cells, `keys` written to its input after the same
 /// delays, everything it draws read from its output. The environment is
-/// this process's with the fixture's journal folder, `NO_COLOR` and
+/// this process's with the fixture's journal folder, `NO_COLOR` (unless
+/// `colour`) and
 /// `COLUMNS` added, passed whole so no other test sees them. Returns None
 /// when the pseudo console cannot be made.
 #[cfg(windows)]
-fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String> {
+fn run_tty_raw(
+    fx: &Fx,
+    args: &[&str],
+    keys: &[&str],
+    columns: u32,
+    colour: bool,
+) -> Option<String> {
     use std::ffi::c_void;
     use std::fs::File;
     use std::io::{Read, Write};
@@ -467,7 +492,9 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         "DEDUPE_JOURNAL_DIR".into(),
         fx.journal.to_string_lossy().into_owned(),
     ));
-    env.push(("NO_COLOR".into(), "1".into()));
+    if !colour {
+        env.push(("NO_COLOR".into(), "1".into()));
+    }
     env.push(("COLUMNS".into(), columns.to_string()));
     env.sort_by_key(|(k, _)| k.to_uppercase());
     let mut block: Vec<u16> = Vec::new();
@@ -579,7 +606,7 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         ClosePseudoConsole(console);
         drop(input);
         let all = reader.join().ok()?;
-        Some(plain_text(&String::from_utf8_lossy(&all)))
+        Some(String::from_utf8_lossy(&all).into_owned())
     }
 }
 
@@ -1721,6 +1748,44 @@ fn find_on_a_terminal_acts_from_the_result() {
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
     // shown by `--nocapture`: the Windows launcher's summary reads it
     eprintln!("the workspace driven through a pseudo-terminal: 7 moved, 7 restored");
+}
+
+/// Colour on a terminal (QOL-10): with `NO_COLOR` unset, the doctor finds
+/// ANSI support and paints its lines. On Windows the terminal is a
+/// pseudo console, the console host itself: "24-bit ANSI colour" means
+/// virtual-terminal processing was asked for and granted, colour escapes
+/// coming back mean the console drew colour, and no escape text in what
+/// it shows means it read the escapes rather than printing them.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_terminal_gets_colour() {
+    let fx = fixture_with_photos();
+    let Some(raw) = run_tty_raw(&fx, &["doctor"], &[], 120, true) else {
+        eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
+        return;
+    };
+    let shown = plain_text(&raw);
+    assert!(shown.contains("24-bit ANSI colour"), "{shown}");
+    // a colour escape of any form the terminal may send back: 24-bit,
+    // 256-colour, or one of the sixteen
+    let colour_sgr = raw.split('\u{1b}').skip(1).any(|seq| {
+        let Some(params) = seq.strip_prefix('[') else {
+            return false;
+        };
+        let end = params.find(|c: char| ('@'..='~').contains(&c));
+        end.is_some_and(|e| {
+            params.as_bytes()[e] == b'm'
+                && params[..e].split(';').any(|p| {
+                    p == "38"
+                        || p.parse::<u32>()
+                            .is_ok_and(|n| (30..=37).contains(&n) || (90..=97).contains(&n))
+                })
+        })
+    });
+    assert!(colour_sgr, "no colour escape came back\n{raw:?}");
+    assert!(!shown.contains("[38;2;"), "escapes shown as text\n{shown}");
+    // shown by `--nocapture`: the Windows launcher's summary reads it
+    eprintln!("colour on a terminal: 24-bit ANSI colour, colour escapes back");
 }
 
 // ---------------------------------------------------------------------------
