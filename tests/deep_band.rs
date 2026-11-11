@@ -48,6 +48,7 @@ fn hashed(dir: &Path, name: &str, img: &image::RgbImage, emb: Embedding) -> Hash
         deep: Some(emb),
         capture: None,
         raw: false,
+        bars: None,
     }
 }
 

@@ -17,7 +17,6 @@
 //! Nothing here is a unit test; it prints a record for VERIFICATION.md.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use dedupe::video::{
@@ -25,7 +24,7 @@ use dedupe::video::{
 };
 
 fn ffmpeg(args: &[&str]) -> bool {
-    Command::new("ffmpeg")
+    dedupe::tools::ffmpeg()
         .args(["-hide_banner", "-loglevel", "error", "-y", "-nostdin"])
         .args(args)
         .status()

@@ -13,7 +13,7 @@
 //! related and unrelated pairs in the set.
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use dedupe::pdq;
 use dedupe::video::{self, Tmk, TmkBuilder, COEFFS, DIM, PERIODS};
@@ -77,7 +77,7 @@ fn read_tmk(path: &Path) -> Tmk {
 
 /// Our descriptor from the reference tool's frame path.
 fn tmk_tool_path(video: &Path) -> Tmk {
-    let mut child = Command::new("ffmpeg")
+    let mut child = dedupe::tools::ffmpeg()
         .args(["-loglevel", "error", "-nostdin", "-i"])
         .arg(video)
         .args([

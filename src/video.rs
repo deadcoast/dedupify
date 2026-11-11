@@ -132,17 +132,18 @@ impl std::fmt::Display for VideoError {
     }
 }
 
+/// Whether `ffmpeg` and `ffprobe` start and answer `-version`, wherever
+/// `tools` found them (PATH, or where an installer put them).
 pub fn tools_present() -> (bool, bool) {
-    let ok = |b: &str| {
-        Command::new(b)
-            .arg("-version")
+    let ok = |mut c: Command| {
+        c.arg("-version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
     };
-    (ok("ffmpeg"), ok("ffprobe"))
+    (ok(crate::tools::ffmpeg()), ok(crate::tools::ffprobe()))
 }
 
 fn json_str<'a>(v: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
@@ -178,7 +179,7 @@ fn parse_rate(s: &str) -> f64 {
 
 /// `ffprobe` the first video stream.
 pub fn probe(path: &Path) -> Result<Meta, VideoError> {
-    let out = Command::new("ffprobe")
+    let out = crate::tools::ffprobe()
         .args([
             "-v",
             "error",
@@ -486,7 +487,7 @@ pub fn parse_cropdetect(stderr: &str, width: u32, height: u32) -> Option<Bars> {
 /// or a dark edge in one scene cannot pass for a bar. `None` when there
 /// are none, or when ffmpeg says nothing usable.
 pub fn detect_bars(path: &Path, meta: &Meta) -> Option<Bars> {
-    let out = Command::new("ffmpeg")
+    let out = crate::tools::ffmpeg()
         .args([
             "-nostdin",
             "-hide_banner",
@@ -658,7 +659,7 @@ pub fn flat_bars(frames: &[image::GrayImage]) -> Option<(f64, f64, f64, f64)> {
 /// picture mapped onto the decoded frame's size (the probed size, turned
 /// when the decoder turned the picture).
 pub fn detect_flat_bars(path: &Path, meta: &Meta) -> Option<Bars> {
-    let out = Command::new("ffmpeg")
+    let out = crate::tools::ffmpeg()
         .args([
             "-nostdin",
             "-hide_banner",
@@ -758,7 +759,7 @@ pub fn hash_video_inside(
     let crop = bars.map_or(String::new(), |b| {
         format!("crop={}:{}:{}:{},", b.width, b.height, b.x, b.y)
     });
-    let mut child = Command::new("ffmpeg")
+    let mut child = crate::tools::ffmpeg()
         .args([
             "-nostdin",
             "-hide_banner",

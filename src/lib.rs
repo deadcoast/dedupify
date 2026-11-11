@@ -77,6 +77,7 @@ pub mod recent;
 pub mod render;
 pub mod skip;
 pub mod theme;
+pub mod tools;
 pub mod util;
 pub mod video;
 pub mod walk;

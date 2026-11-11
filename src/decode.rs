@@ -19,7 +19,7 @@
 
 use std::io::{self, Read, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageReader, RgbImage};
@@ -65,7 +65,8 @@ pub enum DecodeError {
     Image(image::ImageError),
     /// The HEIF container could not be read.
     Heif(String),
-    /// The route needs ffmpeg and it is not on PATH.
+    /// The route needs ffmpeg and it was not found (PATH, nor where an
+    /// installer puts it: `tools`).
     NoFfmpeg(&'static str),
     /// ffmpeg ran and could not decode (no decoder for the coding, a
     /// broken stream); the message is its last line.
@@ -80,7 +81,7 @@ impl std::fmt::Display for DecodeError {
             DecodeError::Io(e) => write!(f, "{e}"),
             DecodeError::Image(e) => write!(f, "{e}"),
             DecodeError::Heif(e) => write!(f, "HEIF: {e}"),
-            DecodeError::NoFfmpeg(what) => write!(f, "{what} needs ffmpeg on PATH"),
+            DecodeError::NoFfmpeg(what) => write!(f, "{what} needs ffmpeg, not found"),
             DecodeError::Ffmpeg(what, e) => write!(f, "{what}: ffmpeg: {e}"),
             DecodeError::NoPreview => write!(f, "RAW without an embedded preview"),
         }
@@ -353,7 +354,7 @@ fn ffmpeg(
     args: &[String],
     input: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, DecodeError> {
-    let mut child = Command::new("ffmpeg")
+    let mut child = crate::tools::ffmpeg()
         .args(args)
         .stdin(if input.is_some() {
             Stdio::piped()

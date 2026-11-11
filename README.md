@@ -3,7 +3,8 @@
 A duplicate finder for the terminal. One run finds exact duplicates,
 near-duplicate images (rescaled, re-encoded, mirrored, rotated, cropped,
 letterboxed) and near-duplicate videos (re-encoded, scaled, trimmed,
-mirrored, boxed in bars; `ffmpeg` and `ffprobe` on PATH), says in
+mirrored, boxed in bars; `ffmpeg` and `ffprobe` on PATH or where their
+installer put them), says in
 words what each one is — `resized 50%`, `cropped 80%`, `another shot,
 05:06:08` — and then opens the result as a workspace: every file marked,
 `space` to choose, `v` to see the keeper beside it in the terminal, `k`

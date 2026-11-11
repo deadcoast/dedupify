@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command as Proc;
 
 use crate::cli::Invocation;
 use crate::journal;
@@ -248,13 +247,29 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         }
     });
 
-    // ffmpeg (videos, HEIC, AVIF)
-    let ff = which("ffmpeg");
-    v.push(match (&ff, which("ffprobe")) {
-        (Some(a), Some(_)) => pass("ffmpeg", a.clone()),
+    // ffmpeg (videos, HEIC, AVIF): where `tools` found it, and whether
+    // that was PATH or an installer's own folder
+    let (ff, fp) = (crate::tools::ffmpeg_at(), crate::tools::ffprobe_at());
+    v.push(match (ff, fp) {
+        (Some(a), Some(_)) => pass(
+            "ffmpeg",
+            if a.on_path {
+                a.path.to_string_lossy().into_owned()
+            } else {
+                format!(
+                    "{}   not on PATH, used from there",
+                    a.path.to_string_lossy()
+                )
+            },
+        ),
+        (Some(_), None) => warn(
+            "ffmpeg",
+            "ffmpeg found, ffprobe not",
+            "videos need both: reinstall ffmpeg (winget install Gyan.FFmpeg)",
+        ),
         _ => warn(
             "ffmpeg",
-            "ffmpeg / ffprobe not on PATH",
+            "ffmpeg / ffprobe not found",
             "needed for videos, HEIC and AVIF: winget install Gyan.FFmpeg",
         ),
     });
@@ -409,24 +424,6 @@ fn other_volumes(root: &Path, root_vol: u64, limit: usize) -> Vec<std::path::Pat
         }
     }
     out
-}
-
-fn which(bin: &str) -> Option<String> {
-    let out = if cfg!(windows) {
-        Proc::new("where").arg(bin).output()
-    } else {
-        Proc::new("which").arg(bin).output()
-    };
-    match out {
-        Ok(o) if o.status.success() => {
-            let s = String::from_utf8_lossy(&o.stdout);
-            s.lines()
-                .next()
-                .map(|l| l.trim().to_string())
-                .filter(|l| !l.is_empty())
-        }
-        _ => None,
-    }
 }
 
 pub fn page(inv: &Invocation, r: &Renderer) -> i32 {

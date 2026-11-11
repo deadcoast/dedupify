@@ -1,7 +1,9 @@
 # dedupe - Windows verification run. Builds the release binary, runs the
 # suite (with the real-format files and the Ctrl-C test), then exercises
 # every command on runs\win\sample and logs it all, UTF-8, under
-# runs\win\log. Run from anywhere; everything is anchored below.
+# runs\win\log - each step in its own file and the whole run, in order,
+# in RUN.txt. Ends on a summary, then the live workspace once a key is
+# pressed. Run from anywhere; everything is anchored below.
 # -Pulled: started by an older copy of this script after its pull (below).
 param([switch]$Pulled)
 $ErrorActionPreference = 'Continue'
@@ -21,24 +23,37 @@ $exe = Join-Path $repo 'target\release\dedupe.exe'
 $utf8 = New-Object System.Text.UTF8Encoding $false
 [Console]::OutputEncoding = $utf8
 $OutputEncoding = $utf8
+# RUN.txt: every step's lines in the order they ran, one file to attach
+[System.IO.File]::WriteAllText((Join-Path $log 'RUN.txt'), '', $utf8)
 function Save($name, $lines) {
     [System.IO.File]::WriteAllLines((Join-Path $log "$name.txt"), [string[]]@($lines), $utf8)
+    [System.IO.File]::AppendAllText((Join-Path $log 'RUN.txt'), ((@("---- $name") + @($lines)) -join "`r`n") + "`r`n", $utf8)
 }
 function Add($name, $line) {
     [System.IO.File]::AppendAllText((Join-Path $log "$name.txt"), "$line`r`n", $utf8)
+    [System.IO.File]::AppendAllText((Join-Path $log 'RUN.txt'), "$line`r`n", $utf8)
 }
 function Show($name, $lines) { $lines | ForEach-Object { Write-Host $_ }; Save $name $lines }
 
-function Step($name) { Write-Host ""; Write-Host "==== $name" -ForegroundColor Cyan }
+function Step($name) {
+    Write-Host ""; Write-Host "==== $name" -ForegroundColor Cyan
+    [System.IO.File]::AppendAllText((Join-Path $log 'RUN.txt'), "`r`n==== $name`r`n", $utf8)
+}
+# each Run's exit code and time, for the summary
+$script:ran = [ordered]@{}
 # native command through cmd so stderr merges as plain text (PowerShell 5.1
 # would wrap every stderr line in an error record); each line is shown and
 # logged as it arrives
 function Run($name, $cmd) {
     $path = Join-Path $log "$name.txt"
     [System.IO.File]::WriteAllText($path, '', $utf8)
+    [System.IO.File]::AppendAllText((Join-Path $log 'RUN.txt'), "---- $name   $cmd`r`n", $utf8)
     $t0 = Get-Date
     cmd /c "$cmd 2>&1" | ForEach-Object { Write-Host $_; Add $name $_ }
-    Add $name "exit $LASTEXITCODE  $([int]((Get-Date) - $t0).TotalSeconds) s"
+    $code = $LASTEXITCODE
+    $secs = [int]((Get-Date) - $t0).TotalSeconds
+    Add $name "exit $code  $secs s"
+    $script:ran[$name] = @{ code = $code; secs = $secs }
 }
 function Tree($name) {
     Save $name (Get-ChildItem $sample -Recurse -File | Sort-Object FullName |
@@ -59,14 +74,20 @@ public static class DedupeWin {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
     public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
 function Shot($name) {
     [void][DedupeWin]::SetProcessDPIAware()
-    # in Windows Terminal the console window is hidden; the terminal is the
+    # the console's own window, unless it is hidden: in Windows Terminal,
+    # and wherever Windows hands a console to its default terminal (no
+    # WT_SESSION then, a hidden 0 x 0 console window), the terminal is the
     # foreground window
-    $h = if ($env:WT_SESSION) { [DedupeWin]::GetForegroundWindow() } else { [DedupeWin]::GetConsoleWindow() }
+    $h = [DedupeWin]::GetConsoleWindow()
+    if ($env:WT_SESSION -or $h -eq [IntPtr]::Zero -or -not [DedupeWin]::IsWindowVisible($h)) {
+        $h = [DedupeWin]::GetForegroundWindow()
+    }
     [void][DedupeWin]::SetForegroundWindow($h)
     Start-Sleep -Milliseconds 400
     $r = New-Object DedupeWin+RECT
@@ -91,8 +112,8 @@ Show 'env' @(
     "codepage  $([Console]::OutputEncoding.WebName)  $(cmd /c chcp)",
     "rustc     $(cmd /c 'rustc -V 2>&1')",
     "cargo     $(cmd /c 'cargo -V 2>&1')",
-    "ffmpeg    $(cmd /c 'ffmpeg -version 2>&1' | Select-Object -First 1)",
-    "ffprobe   $(cmd /c 'ffprobe -version 2>&1' | Select-Object -First 1)",
+    "ffmpeg    on PATH: $(cmd /c 'ffmpeg -version 2>&1' | Select-Object -First 1)   (dedupe also looks where installers put it: see doctor)",
+    "ffprobe   on PATH: $(cmd /c 'ffprobe -version 2>&1' | Select-Object -First 1)",
     "git       $(git rev-parse --short HEAD)  $((git status --porcelain | Measure-Object).Count) changed paths"
 )
 
@@ -120,6 +141,9 @@ Add 'build' "binary    $((Get-Item $exe).Length) bytes"
 
 Step 'cargo test --release (includes the Ctrl-C test: CTRL_BREAK to a child milk)'
 Run 'test' 'cargo test --release'
+
+Step 'the Ctrl-C test again, its own words shown (sent, or skipped without a console)'
+Run 'test_ctrlc' 'cargo test --release --test e2e interrupted_milk_leaves_a_journal_undo_can_use -- --nocapture'
 
 if (Test-Path $model) {
     Step 'cargo test --release --test e2e (with the model)'
@@ -200,10 +224,68 @@ Clear-Host
 Shot 'colour'
 
 Save 'DONE' "DONE $(Get-Date -Format s)"
-Step 'done - a live find on the sample opens the workspace: space select, k keeper, v view, o reveal, m/p act, u undo, q quit'
-Start-Sleep -Seconds 2
-Clear-Host
+
+# the run on one screen: each part, what it gave, and where the rest is
+function Line($label, $ok, $text) {
+    $tag = if ($ok -eq $true) { 'PASS' } elseif ($ok -eq $false) { 'FAIL' } else { '    ' }
+    $colour = if ($ok -eq $true) { 'Green' } elseif ($ok -eq $false) { 'Red' } else { 'Gray' }
+    Write-Host ' ' -NoNewline
+    Write-Host $tag -ForegroundColor $colour -NoNewline
+    Write-Host ("  " + $label.PadRight(13) + $text)
+    Add 'SUMMARY' (" $tag  " + $label.PadRight(13) + $text)
+}
+function Count($name) {
+    $p = Join-Path $log "$name.txt"
+    if (-not (Test-Path $p)) { return $null }
+    $pass = 0; $fail = 0
+    Get-Content $p -Encoding UTF8 | ForEach-Object {
+        if ($_ -match 'test result: \w+\. (\d+) passed; (\d+) failed') { $pass += [int]$Matches[1]; $fail += [int]$Matches[2] }
+    }
+    "$pass passed, $fail failed"
+}
+function Ok($name) { if ($script:ran.Contains($name)) { $script:ran[$name].code -eq 0 } else { $null } }
+function Secs($name) { if ($script:ran.Contains($name)) { "$($script:ran[$name].secs) s" } else { '' } }
+function Grep($name, $pattern) {
+    $p = Join-Path $log "$name.txt"
+    if (Test-Path $p) { Get-Content $p -Encoding UTF8 | Where-Object { $_ -match $pattern } | Select-Object -First 1 } else { $null }
+}
+function Summary() {
+    $rule = ' ' + ([string][char]0x2500) * 76
+    [System.IO.File]::WriteAllText((Join-Path $log 'SUMMARY.txt'), '', $utf8)
+    Write-Host ''
+    Write-Host " dedupe   Windows run   $(Get-Date -Format 'yyyy-MM-dd HH:mm')   $(git rev-parse --short HEAD)"
+    Write-Host $rule -ForegroundColor DarkGray
+    $size = if (Test-Path $exe) { "{0:N1} MB" -f ((Get-Item $exe).Length / 1MB) } else { 'no binary' }
+    Line 'build' (Ok 'build') "$(Secs 'build')   $size"
+    Line 'tests' (Ok 'test') "$(Count 'test')   $(Secs 'test')"
+    $c = Grep 'test_ctrlc' 'CTRL_BREAK sent|could not be sent|skipped'
+    $cOk = if ((Ok 'test_ctrlc') -and $c -match 'CTRL_BREAK sent') { $true } elseif (Ok 'test_ctrlc') { $null } else { $false }
+    Line 'Ctrl-C' $cOk $(if ($c) { $c.Trim() } else { 'no verdict in the log' })
+    if ($script:ran.Contains('test_model')) { Line 'with model' (Ok 'test_model') "$(Count 'test_model')" }
+    Line 'Recycle Bin' (Ok 'test_recycle') "$(Count 'test_recycle')"
+    Line 'formats' (Ok 'test_formats') "$(Count 'test_formats')"
+    $ff = Grep 'doctor' 'ffmpeg  '
+    $ffOk = if ($ff -match 'PASS') { $true } elseif ($ff) { $false } else { $null }
+    Line 'ffmpeg' $ffOk $(if ($ff) { ($ff -replace '^\s*\w+\s+ffmpeg\s+', '').Trim() } else { 'no doctor line' })
+    foreach ($r in @('milk_roundtrip', 'purge_roundtrip')) {
+        $p = Join-Path $log "$r.txt"
+        $t = if (Test-Path $p) { (Get-Content $p -Encoding UTF8 | Select-Object -First 1) } else { 'not run' }
+        Line ($r -replace '_roundtrip', ' + undo') ($t -match '^tree identical') $t
+    }
+    $shot = Join-Path $log 'colour.txt'
+    $s = if (Test-Path $shot) { (Get-Content $shot -Encoding UTF8 | Select-Object -First 1) } else { 'not run' }
+    Line 'colour' $(if ($s -match '^captured') { $true } else { $false }) $(if ($s -match '^captured') { "$s   runs\win\log\colour.png" } else { $s })
+    Write-Host $rule -ForegroundColor DarkGray
+    Write-Host " every step, in order: runs\win\log\RUN.txt   this summary: runs\win\log\SUMMARY.txt" -ForegroundColor DarkGray
+}
+
+Step 'summary'
+Summary
+Write-Host ''
+Write-Host ' press a key to open the live workspace on the sample (q leaves it)' -ForegroundColor Cyan
+$null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 & $exe find $sample .
-Write-Host ""
-Write-Host "logs in runs\win\log - press a key to close" -ForegroundColor DarkGray
+Summary
+Write-Host ''
+Write-Host ' press a key to close' -ForegroundColor DarkGray
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')

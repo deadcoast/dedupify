@@ -7,10 +7,9 @@
 //! cargo run --release --example make_probes   (needs ffmpeg with libx265
 //! and libaom-av1)
 use std::path::Path;
-use std::process::Command;
 
 fn ffmpeg(args: &[&str]) {
-    let st = Command::new("ffmpeg")
+    let st = dedupe::tools::ffmpeg()
         .args(["-hide_banner", "-loglevel", "error", "-y", "-nostdin"])
         .args(args)
         .status()

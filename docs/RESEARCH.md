@@ -342,6 +342,30 @@ the group (the hub — derivatives resemble the original more than each
 other), then most pixels, then oldest, then largest file (Phase 11 put
 the copy marks of §5 before "oldest").
 
+In a group of two the hub ties, and "most pixels" handed the seat to the
+letterboxed copy after all: on the owner's Windows run (2026-11-11) the
+original `baboon.jpg` stood to be milked under its export
+`exports\baboon_letterbox.png`. **[CLAUDE]** Pixels are now the
+picture's own, as the video tier counts them: `near::picture_bars` finds
+bars in one grey copy 256 wide — rows at top and bottom, or columns at
+left and right, 97 % of whose pixels sit within 8 grey levels of the
+outermost line's colour, both ends of one colour and about one depth,
+the picture keeping a quarter of the side — and a file with bars counts
+the picture inside them, less a fiftieth, so it outranks the bare
+picture only with clearly more of it (an upscaled export still does).
+The member says `letterboxed`, `pillarboxed`, `with a border` or, the
+other way round, `bars removed`. Exact uniformity is the test because an
+export pads with one colour; the video rule (low detail along the band,
+a picture that starts at once) missed half the letterboxed photographs
+whose sky meets the bar. Measured (`tests/image_bars.rs`) on 523 real
+pictures and three boxed copies of each: letterboxed 4:5 in black found
+in 514, pillarboxed 16:9 in white in 514, a grey border in 521, with one,
+seven and one placed more than 2 % off; in the pictures themselves bars
+were found in 9 — graphics with real flat margins (OpenCV's `cards`,
+`chessboard`, text images) and one hand-made Copydays copy printed with
+a paper margin — and in none of the 157 holiday photographs or the 39
+phone photographs.
+
 Cost: ~0.3 s per image on two cores through tract; the binary grows from
 2.9 MB to 25.6 MB with the tier compiled in (`--no-default-features`
 builds without it). ONNX Runtime was not used because its prebuilt

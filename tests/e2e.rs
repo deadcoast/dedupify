@@ -563,6 +563,8 @@ fn interrupted_milk_leaves_a_journal_undo_can_use() {
             // SAFETY: plain Win32 calls: no arguments, or our own child's
             // group id
             if unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child.id()) } != 0 {
+                // shown by `--nocapture`: the launcher's summary reads it
+                eprintln!("CTRL_BREAK sent to the milk's process group {}", child.id());
                 return true;
             }
             let err = std::io::Error::last_os_error();
@@ -1041,7 +1043,7 @@ fn ffmpeg_ok() -> bool {
 }
 
 fn ffm(args: &[&str]) {
-    let st = Command::new("ffmpeg")
+    let st = dedupe::tools::ffmpeg()
         .args(["-hide_banner", "-loglevel", "error", "-y", "-nostdin"])
         .args(args)
         .status()
@@ -1596,7 +1598,7 @@ fn nals(b: &[u8]) -> Vec<&[u8]> {
 }
 
 fn has_encoder(name: &str) -> bool {
-    Command::new("ffmpeg")
+    dedupe::tools::ffmpeg()
         .args(["-hide_banner", "-encoders"])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(name))

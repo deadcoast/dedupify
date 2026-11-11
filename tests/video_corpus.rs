@@ -2,7 +2,7 @@
 //!
 //! `cargo test --release --test video_corpus -- --ignored --nocapture`
 //!
-//! Needs `ffmpeg` and `ffprobe` on PATH; skips otherwise. Generates 16
+//! Needs `ffmpeg` and `ffprobe` (as `dedupe::tools` finds them); skips otherwise. Generates 16
 //! distinct 20-second clips from ffmpeg's synthetic sources (fractal zooms,
 //! cellular automata, test patterns, gradients, a static card), applies the
 //! edits a library shows (re-encode, downscale, crop, head/tail/both trims,
@@ -13,7 +13,6 @@
 //! `DEDUPE_VIDEO_CORPUS_DIR` keeps the generated clips for a second run.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use dedupe::pdq::PDQ_MAX;
@@ -74,7 +73,7 @@ const EDITS: &[(&str, &[&str], &str, &[&str])] = &[
 ];
 
 fn ffmpeg(args: &[&str]) -> bool {
-    Command::new("ffmpeg")
+    dedupe::tools::ffmpeg()
         .args(["-hide_banner", "-loglevel", "error", "-y", "-nostdin"])
         .args(args)
         .status()
@@ -139,7 +138,7 @@ fn sig(p: &Path) -> VideoSig {
 fn measure_video_thresholds() {
     let (ff, fp) = tools_present();
     if !(ff && fp) {
-        eprintln!("ffmpeg/ffprobe not on PATH; skipping");
+        eprintln!("ffmpeg/ffprobe not found; skipping");
         return;
     }
     let keep = std::env::var("DEDUPE_VIDEO_CORPUS_DIR").ok();

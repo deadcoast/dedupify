@@ -352,7 +352,7 @@ pub(crate) fn report(f: &Found, inv: &Invocation, r: &Renderer) {
     if f.video_tools_missing {
         r.note(
             Role::Warn,
-            "video pass skipped: ffmpeg and ffprobe are not on PATH   dedupe doctor",
+            "video pass skipped: ffmpeg and ffprobe not found   dedupe doctor",
         );
     }
 }

@@ -2588,3 +2588,98 @@ Binary 26,575,144 bytes (`jpeg-decoder` is a test-only dependency).
 - Terminals under 71 columns: the near policy line (67 cells after its
   indent) runs past the edge; footer notes now wrap, the stage lines and
   narrow member lines are as Phase 10 left them (under 62).
+
+---
+
+# VERIFICATION — Phase 11 on Windows, run on 2026-11-11
+
+The owner's machine (`homeone`): Windows 11 Home 10.0.26300, Ryzen 7
+9800X3D (16 threads), 61.6 GB, `rustc`/`cargo` 1.99.0, Windows
+PowerShell 5.1 in a console handed to Windows Terminal (no `WT_SESSION`,
+133 columns, code page 437). One double-click on `runs/win/RUN_VERIFY.cmd`
+at `2a1a4b0`; every step's log was read here from `runs\win\log` over the
+desktop app's folder link (the owner pasted only the last screen).
+
+## What it showed
+
+- **Build and suite.** Release build 290 s, binary 28,772,864 bytes. 124
+  unit tests and the band test pass; the end-to-end suite 29 passed, 3
+  ignored, in 35 s — and 29 again with the model (`deep_tier_acts_only_
+  with_the_fit` among them), the real Recycle Bin round trip 1 passed.
+  The video and HEIC end-to-end tests return early without ffmpeg, so
+  they passed without running (below).
+- **Ctrl-C (TECH-07).** `interrupted_milk_leaves_a_journal_undo_can_use
+  ... ok` with a console present. The test fails when the event cannot
+  be sent with a console, and returns early only with no console at all;
+  the log could not tell those two apart, so the launcher now runs it
+  once more with its own words shown (`CTRL_BREAK sent …`).
+- **Logs (SC-08).** Every log UTF-8 without a byte-order mark, CRLF, `×`
+  intact; `runs/win/log/` and the old `logs/` ignored by git.
+- **Keepers by provenance (CORE-07).** `graf1.png` keeps over
+  `exports\graf1_mirror.png`; `starry_night.jpg` over `exports\
+  starry_night (1).jpg`; `home.jpg` over `exports\home-copy.jpg`;
+  `vtest.avi` over `vtest - Copy.avi` — the policy lines read as on Linux.
+- **Milk and purge.** 14 entries each, 10.8 MB; `--undo` restored all 14;
+  `tree identical after milk+undo` and `after purge+undo`: 39 files,
+  every SHA-256 equal. `find -q`, the two error paths, the help page and
+  the doctor as before.
+- **The listing.** With the model, the same groups as on Linux, one
+  apart: see the baboon below.
+
+## What it found, and what changed
+
+- **ffmpeg was installed and not used.** The doctor: `ffmpeg / ffprobe
+  not on PATH`; the video pass skipped; `formats_corpus` failed 2 of 3
+  (`HEIC needs ffmpeg on PATH`). WinGet's `Gyan.FFmpeg` 9.0.2 was in
+  `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_…\ffmpeg-9.0.2-
+  full_build` (listed over the link) — the build Phases 7 and 10 ran on —
+  while this console's PATH did not name it. New `tools` module: PATH
+  first, then beside `dedupe.exe`, WinGet's `Links` and `Packages\
+  *FFmpeg*\*\bin`, Scoop's `shims`, Chocolatey's `bin`, `Program Files\
+  ffmpeg\bin`, `C:\ffmpeg\bin` (Homebrew's folders on macOS), `ffprobe`
+  beside the `ffmpeg` found; every ffmpeg the program, the tests and the
+  examples start comes from there. The doctor names the file and says
+  `not on PATH, used from there`. Checked here with PATH emptied: with
+  ffmpeg and ffprobe beside the binary, `PASS ffmpeg …/toolsdir/ffmpeg
+  not on PATH, used from there` and the HEIC/AVIF probes decoded; with
+  them removed, the Linux fallback `/usr/local/bin` held an ffmpeg and no
+  ffprobe, and the doctor said `ffmpeg found, ffprobe not`. The Windows
+  folders themselves wait for the next run.
+- **A letterboxed export kept its group.** With the model:
+  `keep photos\exports\baboon_letterbox.png 512x640` over `near
+  photos\baboon.jpg 512×512` — the original would have been milked. The
+  same on Linux, and before Phase 11 too: in a group of two the hub ties
+  and "most pixels" took the padded file. Now the picture's own pixels
+  count (`near::picture_bars`, RESEARCH § 2.6): `keep photos/baboon.jpg`,
+  `near photos/exports/baboon_letterbox.png  letterboxed  d 15 p 10 q 102
+  deep 0.80 fit 1.00`; the rest of the listing unchanged.
+  `tests/image_bars.rs` on 523 real pictures and three boxed copies of
+  each:
+
+  ```
+  letterbox 4:5 black    found  514 of 523 (98.3 %), wrong place 1
+  pillarbox 16:9 white   found  514 of 523 (98.3 %), wrong place 7
+  border grey            found  521 of 523 (99.6 %), wrong place 1
+  bars in the pictures themselves: 9 — OpenCV graphics with flat margins
+  (cards, chessboard, imageTextN/R, ml, pic1, pic5, templ) and a hand-made
+  Copydays copy printed with a margin; none in 157 holiday photographs
+  or 39 phone photographs
+  ```
+
+  The video tier's own rule, tried first on the same pictures, found
+  45–84 % (a sky meeting the bar made the picture "not start at once")
+  and is not used for stills. Unit tests: `near::bars_tests` (black,
+  white, grey bars both ways; an upscaled letterbox still keeps; a sky on
+  one side is no bar; bars above a sky are found; the four words).
+- **The colour picture was empty.** `no window to capture (0 x 0)`: a
+  console handed to Windows Terminal keeps a hidden 0 × 0 console window
+  and sets no `WT_SESSION`, so `Shot` captured the hidden one. It now
+  takes the foreground window whenever the console's own is hidden.
+  Colour on the Windows console (QOL-10) is still unconfirmed.
+- **The last screen hid the run.** The launcher cleared the console and
+  opened the workspace at once. It now writes the whole run, step by
+  step, to `runs\win\log\RUN.txt`, ends on a summary (each part PASS or
+  FAIL with its count — build, tests, Ctrl-C, model, Recycle Bin,
+  formats, ffmpeg and where, the two round trips, the colour picture —
+  also in `SUMMARY.txt`), and opens the workspace only when a key is
+  pressed, then shows the summary again.

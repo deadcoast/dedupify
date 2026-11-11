@@ -268,9 +268,11 @@ terminal colour and Unicode support, terminal width, journal directory
 writable, root readable and writable, `_milked` present and its size
 (and whether it is on another volume than the root), folders of the root
 on other volumes, the remembered skip list, Recycle Bin reachable,
-`ffmpeg`/`ffprobe` on PATH (videos, HEIC, AVIF), HEIC and AVIF decoding
-(two built-in probe pictures decoded the way a scan decodes them, their
-colours checked), the optional model and its SHA-256 against the
+`ffmpeg`/`ffprobe` and where they were found (videos, HEIC, AVIF; PATH
+first, then where WinGet, Scoop, Chocolatey or Homebrew put them, or
+beside `dedupe` itself — used from there when PATH does not name them),
+HEIC and AVIF decoding (two built-in probe pictures decoded the way a
+scan decodes them, their colours checked), the optional model and its SHA-256 against the
 published file (`docs/DEEP.md`), Windows long-path support when any path
 exceeds 260 characters, and the state of the journals (pending, and any
 file that could not be read). The write check creates and removes one
@@ -395,9 +397,11 @@ at another moment). Each member line says **what the member is**, in
 words, before any number **[CLAUDE, Phase 8]**: `same picture` (the same
 pixels in another file — an EXIF strip, a lossless re-save), `re-encoded`,
 `near copy` (the hashes agree, the pixels moved a little — a consecutive
-frame, a touch-up), `resized 50%`, `cropped 80%`, `letterboxed`, `with a
-border`, `rotated 90°`, `rotated +4°`, `mirrored`, `flipped`, `rotated
-and mirrored`, `edited` (in through the descriptor and the fit), `looks
+frame, a touch-up), `resized 50%`, `cropped 80%`, `letterboxed`,
+`pillarboxed`, `with a border` (bars of one colour around the member's
+picture that the keeper has not), `bars removed` (the other way round),
+`rotated 90°`, `rotated +4°`, `mirrored`, `flipped`, `rotated and
+mirrored`, `edited` (in through the descriptor and the fit), `looks
 alike` (the descriptor's word alone — listed, left in place), `another
 shot, 14:02:11` (a different capture moment; the day instead of the time
 when the day differs), `another shot, same second` (one capture moment,
