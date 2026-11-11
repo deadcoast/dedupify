@@ -439,6 +439,8 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
     const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
     const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
     const WAIT_OBJECT_0: u32 = 0;
+    const STARTF_USESTDHANDLES: u32 = 0x0000_0100;
+    const INVALID_HANDLE: Handle = -1isize as Handle;
 
     let wide = |s: &std::ffi::OsStr| {
         s.encode_wide()
@@ -519,6 +521,14 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         let mut startup: StartupInfoExW = std::mem::zeroed();
         startup.startup_info.cb = std::mem::size_of::<StartupInfoExW>() as u32;
         startup.attribute_list = list_ptr;
+        // no standard handles of ours: without this the child inherits
+        // this process's when they are redirected (a pipe under cargo in
+        // CI, a log under the launcher) and draws there, not in the
+        // pseudo console (found in the first CI run, 2026-11-11)
+        startup.startup_info.flags = STARTF_USESTDHANDLES;
+        startup.startup_info.std_input = INVALID_HANDLE;
+        startup.startup_info.std_output = INVALID_HANDLE;
+        startup.startup_info.std_error = INVALID_HANDLE;
         let mut info: ProcessInformation = std::mem::zeroed();
         let started = CreateProcessW(
             null(),
