@@ -145,6 +145,9 @@ Run 'test' 'cargo test --release'
 Step 'the Ctrl-C test again, its own words shown (sent, or skipped without a console)'
 Run 'test_ctrlc' 'cargo test --release --test e2e interrupted_milk_leaves_a_journal_undo_can_use -- --nocapture'
 
+Step 'the workspace driven through a Windows pseudo console (keys typed, a milk and its undo)'
+Run 'test_tty' 'cargo test --release --test e2e find_on_a_terminal_acts_from_the_result -- --nocapture'
+
 if (Test-Path $model) {
     Step 'cargo test --release --test e2e (with the model)'
     $env:DEDUPE_MODEL = $model
@@ -261,6 +264,9 @@ function Summary() {
     $c = Grep 'test_ctrlc' 'CTRL_BREAK sent|could not be sent|skipped'
     $cOk = if ((Ok 'test_ctrlc') -and $c -match 'CTRL_BREAK sent') { $true } elseif (Ok 'test_ctrlc') { $null } else { $false }
     Line 'Ctrl-C' $cOk $(if ($c) { $c.Trim() } else { 'no verdict in the log' })
+    $t = Grep 'test_tty' 'pseudo-terminal'
+    $tOk = if ((Ok 'test_tty') -and $t -match 'driven through') { $true } elseif (Ok 'test_tty') { $null } else { $false }
+    Line 'workspace' $tOk $(if ($t) { $t.Trim() } else { 'no verdict in the log' })
     if ($script:ran.Contains('test_model')) { Line 'with model' (Ok 'test_model') "$(Count 'test_model')" }
     Line 'Recycle Bin' (Ok 'test_recycle') "$(Count 'test_recycle')"
     Line 'formats' (Ok 'test_formats') "$(Count 'test_formats')"

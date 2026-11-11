@@ -1,0 +1,86 @@
+# The suite on Linux and Windows, with ffmpeg, on every push to main and
+# every pull request (Phase 12, TECH-08): Windows no longer waits for a
+# manual run. The `ci` profile is release without LTO, so the test
+# binaries build in minutes and the image work runs at release speed.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
+jobs:
+  suite:
+    name: suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (stable, with clippy and rustfmt)
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+          rustc --version
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          ffmpeg -version | sed -n 1p
+
+      # Chocolatey's bin folder is one `dedupe` looks in when PATH does not
+      # name ffmpeg; on the runner it is on PATH as well
+      - name: ffmpeg (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install ffmpeg -y --no-progress
+          ffmpeg -version
+
+      - name: format
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --all-targets --profile ci -- -D warnings
+
+      - name: clippy without the deep tier
+        run: cargo clippy --all-targets --no-default-features --profile ci -- -D warnings
+
+      - name: tests
+        run: cargo test --profile ci
+
+      - name: tests without the deep tier
+        run: cargo test --profile ci --no-default-features --lib --test e2e
+
+      # the Windows end-to-end tests that need a console: Ctrl-C to a milk,
+      # and the workspace driven through a pseudo console; their own words
+      # say whether they ran or skipped
+      - name: Ctrl-C and the workspace, shown
+        run: cargo test --profile ci --test e2e -- --nocapture interrupted_milk_leaves_a_journal_undo_can_use find_on_a_terminal_acts_from_the_result
+
+      - name: doctor
+        run: cargo run --profile ci -- --doctor

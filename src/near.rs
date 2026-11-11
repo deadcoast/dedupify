@@ -890,7 +890,7 @@ pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool)
             }
         }
     }
-    let (variant, d, p, q) = best.unwrap();
+    let (variant, d, p, q) = best.expect("invariant: VARIANT_ORDER is not empty");
     Relation {
         variant,
         d,
@@ -1083,13 +1083,17 @@ pub fn group(
     // members the descriptor attached (not the hashes), by path
     let mut by_deep: std::collections::HashSet<std::path::PathBuf> = Default::default();
     for (ci, idxs) in comps.iter().enumerate() {
-        let keeper = slots[idxs[0]].take().unwrap();
+        let keeper = slots[idxs[0]]
+            .take()
+            .expect("invariant: each hashed file lands in one group");
         let mut members: Vec<NearMember> = vec![NearMember {
             hashed: keeper,
             relation: None,
         }];
         for &i in &idxs[1..] {
-            let h = slots[i].take().unwrap();
+            let h = slots[i]
+                .take()
+                .expect("invariant: each hashed file lands in one group");
             let relation = Some(relation_of(&members[0].hashed, &h));
             members.push(NearMember {
                 hashed: h,
@@ -1098,7 +1102,9 @@ pub fn group(
         }
         for &(aci, m, _) in &deep_attached {
             if aci == ci {
-                let h = slots[m].take().unwrap();
+                let h = slots[m]
+                    .take()
+                    .expect("invariant: each hashed file lands in one group");
                 by_deep.insert(h.rep.cand.path.clone());
                 let relation = Some(relation_of(&members[0].hashed, &h));
                 members.push(NearMember {

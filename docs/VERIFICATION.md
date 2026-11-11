@@ -2683,3 +2683,156 @@ desktop app's folder link (the owner pasted only the last screen).
   formats, ffmpeg and where, the two round trips, the colour picture —
   also in `SUMMARY.txt`), and opens the workspace only when a key is
   pressed, then shows the summary again.
+
+---
+
+# VERIFICATION — Phase 12 (structure and CI), run on 2026-11-11
+
+Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
+release profile unless named. The Windows code was type-checked here with
+clippy for `x86_64-pc-windows-msvc`; it runs on Windows in the CI matrix
+(§7).
+
+## 1. Three files split (SC-02, SC-03, TECH-06)
+
+| was (at `66fd76f`) | lines | is now | lines |
+|---|---|---|---|
+| `actions.rs` | 1,540 | `actions/mod.rs` the commands, `scan.rs` the scan and `Found`, `plan.rs` what an action would do, `act.rs` milk and purge, `undo.rs`, `view.rs` (§2) | 99 + 306 + 226 + 548 + 402 + 227 |
+| `render.rs` | 1,583 | `render/mod.rs` the renderer and its common lines, `stages.rs` while a scan runs, `groups.rs` the listing, `totals.rs`, `hints.rs` | 170 + 509 + 563 + 314 + 106 |
+| `video.rs` | 1,575 | `video/mod.rs` hashing one file and the pass, `probe.rs`, `tmk.rs`, `bars.rs`, `group.rs` | 471 + 152 + 235 + 412 + 387 |
+
+IDENTIFIED named scan / plan / act for `actions.rs`; undo is a fourth
+part (it reads a journal and touches no scan), and the group views a
+fifth **[CLAUDE]**. Each module re-exports what its callers named before,
+so callers outside it kept their imports (the workspace dropped three it
+no longer uses after §2).
+
+Evidence that only the cut moved: every line of the old file and of the
+new files, trimmed and sorted, compared (`comm`). Besides the module
+doc comments, the `mod`/`use`/`pub use` lines, `#[cfg(test)] mod tests`
+wrappers (tests moved beside the code they test) and the removed
+`// ----` banners, the only lines that differ are the `unwrap()`s of §3
+and, in `actions`, `Found::set_keeper` (§2):
+
+```
+render  only old 26, only new 89   (12 unwrap lines → self.lock() / expect;
+                                    rustfmt re-wrapping those chains)
+video   only old  9, only new 65   (2 unwrap/expect lines, re-wrapped)
+actions only old 37, only new 64   (set_keeper's three branches → view_mut;
+                                    2 unwrap lines)
+```
+
+## 2. One view of a group (SC-05)
+
+`actions/view.rs`: a `GroupView` trait — `len`, `path`, `size`, `role`,
+`words`, `visual`, `set_keeper` — implemented by the exact, near and
+video groups, and `Found::views()` / `view(i)` / `view_mut(i)` walking
+them in on-screen order. The workspace's layout and preview and
+`Found::set_keeper` used to count offsets across the three lists and
+branch three ways; `workspace/mod.rs` lost 103 lines and gained 19.
+Unit test `views_follow_the_screen_and_keepers_move` (order, roles,
+words, a video's visual, a keeper moved by its screen number, every
+out-of-range number refused). The workspace end-to-end tests drive the
+same paths (§6).
+
+## 3. `unwrap()` (SC-06)
+
+At `66fd76f`, 18 `unwrap()` outside tests (counted with the test modules
+cut out): 11 in `render.rs`, 4 in `near.rs`, 2 in `actions.rs`, 1 in
+`video.rs`. Now none:
+
+- the 6 locks of the stage lines' state take the state from a poisoned
+  lock (`render/stages.rs`, `lock()`): a thread that panicked while
+  drawing leaves lines half drawn, never wrong data, so drawing goes on
+  rather than panicking a second time;
+- the 12 that cannot fail say why in an `expect("invariant: …")` — every
+  member after a keeper has a relation to it (7), each hashed file or
+  video lands in one group (4), the variant list is not empty (1); the
+  one `expect` already there (`piped stdout`) now says the same way why;
+- `#![cfg_attr(not(test), deny(clippy::unwrap_used))]` in `lib.rs` keeps
+  it so: clippy fails on a new `unwrap()` outside tests.
+
+## 4. Benchmarks (TECH-05)
+
+`tests/bench.rs` (`cargo test --release --test bench -- --ignored
+--nocapture`; `DEDUPE_BENCH_DIR` keeps the corpus): a generated corpus,
+the same bytes every run, and each stage timed through the library as
+`find` runs it — 1,200 files of 8–407 KiB (200 byte copies, 100 more of
+an earlier file's size), 120 procedural photographs at 1024 × 768 with a
+half-size copy each and 40 re-encoded at quality 60, and six 10-second
+test videos with a low-bitrate re-encode each. Warm page cache, 2
+threads, three runs on one corpus:
+
+```
+stage     run 1    run 2    run 3    what it did
+SCAN      0.002    0.005    0.003 s  1,492 files, 269 MB
+SIZE      0.003    0.006    0.004 s  1,204 share a size
+SAMPLE    0.027    0.030    0.026 s  400 share a sample, 135.2 MB read
+HASH      0.017    0.022    0.017 s  400 confirmed, 78 MB read, 200 groups
+DECODE    3.356    3.212    3.046 s  280 images, 83–92 a second
+MATCH     2.424    2.427    2.490 s  120 near groups
+FRAMES    5.660    5.236    5.134 s  12 videos, 1,800 frames
+MATCH v   0.034    0.043    0.036 s  6 video groups
+```
+
+Without the deep model (the bench passes none). The byte-copy tier is
+milliseconds; the image and video work is the cost — DECODE and the
+near MATCH about equal, FRAMES the largest. These are the numbers a
+later phase's change is measured against, on the same corpus.
+
+A first corpus (all files ≤ 64 KiB) never reached the HASH stage — the
+sample covered each file whole — so the sizes now run past the sample.
+
+## 5. Pseudo-terminal tests on Windows (TECH-04)
+
+`tests/e2e.rs` `run_tty` on Windows: `dedupe` started in a pseudo console
+(`CreatePseudoConsole`, Windows 10 1809+) of `columns` × 50 cells, keys
+written to its input after the same delays as `script(1)` on Unix, and
+everything drawn read back and stripped of escapes. The environment is
+passed whole (journal folder, `NO_COLOR`, `COLUMNS`), so no other test
+sees it. `find_on_a_terminal_acts_from_the_result` now runs on both
+(`cfg(any(unix, windows))`); its SCAN-line count is asserted on Unix
+only, where `script` gives one line per redraw. Type-checked here
+(clippy, Windows target, `-D warnings`); executed: §7.
+
+## 6. Suite
+
+- `cargo test --release`: 128 unit tests (1 ignored), the band test, 31
+  end-to-end tests (3 ignored) — and the 31 again with the deep model
+  installed (`DEDUPE_MODEL`). `find_on_a_terminal_acts_from_the_result`
+  with its own words: `the workspace driven through a pseudo-terminal: 7
+  moved, 7 restored`.
+- clippy at `-D warnings`, all targets: Linux with and without the deep
+  tier; the Windows target with and without it (type-checked here, the
+  C parts of BLAKE3 as `pure`). `cargo fmt --check` clean.
+- The Windows launcher (`runs/win/RUN_VERIFY.cmd`) runs the
+  pseudo-console test once more with its words shown, and its summary
+  gains a `workspace` line beside `Ctrl-C`.
+- `plain_text`, which turns what a terminal received into the text a
+  person saw, now reads a cursor moved forward as blanks and one moved
+  to a row as a new line: the Windows pseudo console draws runs of
+  blanks and new rows that way **[CLAUDE]**. The Unix runs above pass
+  with it.
+
+## 7. CI (TECH-08)
+
+`.github/workflows/ci.yml`: on every push to `main` and every pull
+request, Ubuntu and Windows, each with ffmpeg (apt; Chocolatey — one of
+the folders `dedupe` looks in, and on the runner's PATH too): `cargo fmt
+--check` (Linux), clippy with and without the deep tier at `-D
+warnings`, the whole suite, the suite without the deep tier, the Ctrl-C
+and pseudo-terminal tests again with their own words shown, and the
+doctor. The `ci` profile is release without LTO and with 16 codegen
+units, so the test binaries build in minutes and the image work runs at
+release speed.
+
+The first run is the push that adds the workflow; what it showed is
+recorded in § 8.
+
+## Not verified here
+
+- The pseudo-console test and the workflow on Windows: § 8.
+- TECH-07 by its own words (`CTRL_BREAK sent …`) and QOL-10 (colour on a
+  Windows console, a picture of it): the launcher's next run on the
+  owner's machine. CI's Windows runner has no window to photograph.
+- The bench on more threads or on Windows: run here only, on 2 vCPUs.

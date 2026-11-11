@@ -27,67 +27,26 @@ use crate::fsops::ActError;
 use crate::preview::{self, Protocol, Visual};
 use crate::render::Renderer;
 use crate::theme::Role as Paint;
-use crate::util::{fmt_bytes, fmt_count, rel_display, shorten_middle};
+use crate::util::{fmt_count, rel_display, shorten_middle};
 
-use state::{Act, Effect, GroupInfo, Key, Layout, Lock, MemberInfo, Role, Row, State};
+use state::{Act, Effect, GroupInfo, Key, Layout, MemberInfo, Row, State};
 
 /// The workspace's view of the groups.
 pub(crate) fn layout_of(f: &Found) -> Layout {
-    let mut groups = Vec::new();
-    for g in &f.groups {
-        groups.push(GroupInfo {
-            members: g
-                .members
-                .iter()
-                .enumerate()
-                .map(|(i, m)| MemberInfo {
-                    path: m.path.clone(),
-                    size: m.size,
-                    role: if i == 0 { Role::Keeper } else { Role::Act },
-                })
-                .collect(),
-        });
+    Layout {
+        groups: f
+            .views()
+            .map(|g| GroupInfo {
+                members: (0..g.len())
+                    .map(|i| MemberInfo {
+                        path: g.path(i).to_path_buf(),
+                        size: g.size(i),
+                        role: g.role(i),
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
-    for g in &f.near {
-        groups.push(GroupInfo {
-            members: g
-                .members
-                .iter()
-                .enumerate()
-                .map(|(i, m)| MemberInfo {
-                    path: m.hashed.rep.cand.path.clone(),
-                    size: m.hashed.rep.cand.size,
-                    role: match (i, m.relation) {
-                        (0, _) | (_, None) => Role::Keeper,
-                        (_, Some(r)) if r.kin => Role::Locked(Lock::Kin),
-                        (_, Some(r)) if r.raw => Role::Locked(Lock::Raw),
-                        (_, Some(r)) if r.listed_only() => Role::Hand,
-                        (_, Some(r)) if r.confirmed() => Role::Act,
-                        _ => Role::Hand,
-                    },
-                })
-                .collect(),
-        });
-    }
-    for g in &f.video {
-        groups.push(GroupInfo {
-            members: g
-                .members
-                .iter()
-                .enumerate()
-                .map(|(i, m)| MemberInfo {
-                    path: m.hashed.rep.cand.path.clone(),
-                    size: m.hashed.rep.cand.size,
-                    role: match (i, m.relation) {
-                        (0, _) | (_, None) => Role::Keeper,
-                        (_, Some(r)) if r.confirmed() => Role::Act,
-                        _ => Role::Hand,
-                    },
-                })
-                .collect(),
-        });
-    }
-    Layout { groups }
 }
 
 /// The listing lines, one per row, rendered exactly as `find` prints them
@@ -694,52 +653,9 @@ fn view(
 /// The keeper and member `m` of on-screen group `g` as things to look at,
 /// with the member's words.
 fn visuals(f: &Found, g: usize, m: usize) -> Option<(Visual, Visual, String)> {
-    let mut i = g;
-    if i < f.groups.len() {
-        let grp = &f.groups[i];
-        let k = &grp.members.first()?.path;
-        let d = &grp.members.get(m)?.path;
-        let vis = |p: &PathBuf| {
-            if crate::kind::has_ext(p, crate::kind::VIDEO_EXT) {
-                Some(Visual::Video(p.clone(), 0.0))
-            } else if crate::kind::has_ext(p, crate::kind::IMAGE_EXT) {
-                Some(Visual::Image(p.clone()))
-            } else {
-                None
-            }
-        };
-        return Some((
-            vis(k)?,
-            vis(d)?,
-            format!("same bytes, {}", fmt_bytes(grp.size)),
-        ));
+    let grp = f.view(g)?;
+    if m >= grp.len() {
+        return None;
     }
-    i -= f.groups.len();
-    if i < f.near.len() {
-        let grp = &f.near[i];
-        let k = &grp.members.first()?.hashed;
-        let mm = grp.members.get(m)?;
-        let words = mm
-            .relation
-            .map(|r| r.words(k, &mm.hashed))
-            .unwrap_or_default();
-        return Some((
-            Visual::Image(k.rep.cand.path.clone()),
-            Visual::Image(mm.hashed.rep.cand.path.clone()),
-            words,
-        ));
-    }
-    i -= f.near.len();
-    let grp = f.video.get(i)?;
-    let k = &grp.members.first()?.hashed;
-    let mm = grp.members.get(m)?;
-    let words = mm
-        .relation
-        .map(|r| r.words(&k.sig, &mm.hashed.sig))
-        .unwrap_or_default();
-    Some((
-        Visual::Video(k.rep.cand.path.clone(), k.sig.meta.duration),
-        Visual::Video(mm.hashed.rep.cand.path.clone(), mm.hashed.sig.meta.duration),
-        words,
-    ))
+    Some((grp.visual(0)?, grp.visual(m)?, grp.words(m)))
 }

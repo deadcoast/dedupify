@@ -337,6 +337,24 @@ tests on Windows, CI on Linux and Windows, and the Windows verification
 Phase 10 carried (Ctrl-C, UTF-8 logs, console colour). Items: SHELVED.md
 § Phase 12.
 
+So far (VERIFICATION § Phase 12):
+
+- **SC-02, SC-03, TECH-06** `actions`, `render` and `video` are folders of
+  modules by concern — scan / plan / act / undo, the stage lines / the
+  listing / the totals / the hints, probe / TMK / bars / grouping — with
+  every line of the old files accounted for.
+- **SC-05** a `GroupView` over the exact, near and video groups; the
+  workspace no longer counts offsets across three lists.
+- **SC-06** no `unwrap()` outside tests (18 before), and clippy denies a
+  new one.
+- **TECH-05** `tests/bench.rs` times each stage on a fixed generated
+  corpus.
+- **TECH-04, TECH-08** the pseudo-console tests on Windows and the CI
+  workflow (Ubuntu and Windows, with ffmpeg) are built; their first run
+  decides the boxes.
+- **SC-08** verified by the 2026-11-11 Windows run; TECH-07 and QOL-10
+  wait for the launcher's next run.
+
 ## Docs chain
 
 ```

@@ -60,3 +60,9 @@ local-data folder; `--undo` consumes it. Ctrl-C during a change stops
 after the file in hand and the journal still covers every move. Set
 `DEDUPE_JOURNAL_DIR` to move the journals, `NO_COLOR=1` for uncoloured
 output, `DEDUPE_ASCII=1` for the ASCII glyph set.
+
+`cargo test --release` runs the suite (the video and HEIC tests need
+ffmpeg; without it they return early). `cargo test --release --test bench
+-- --ignored --nocapture` times each stage on a fixed generated corpus.
+`.github/workflows/ci.yml` runs the suite, clippy and rustfmt on Linux
+and Windows on every push to `main`.

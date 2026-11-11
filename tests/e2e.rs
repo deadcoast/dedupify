@@ -329,20 +329,300 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
         }
     });
     let out = child.wait_with_output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-    // strip the terminal control sequences script passes through
+    Some(plain_text(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// The same on Windows (Phase 12, TECH-04): `dedupe` started in a pseudo
+/// console (`CreatePseudoConsole`, Windows 10 1809 and later) of
+/// `columns` × 50 cells, `keys` written to its input after the same
+/// delays, everything it draws read from its output. The environment is
+/// this process's with the fixture's journal folder, `NO_COLOR` and
+/// `COLUMNS` added, passed whole so no other test sees them. Returns None
+/// when the pseudo console cannot be made.
+#[cfg(windows)]
+fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String> {
+    use std::ffi::c_void;
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{FromRawHandle, RawHandle};
+    use std::ptr::{null, null_mut};
+
+    type Handle = *mut c_void;
+    #[repr(C)]
+    struct Coord {
+        x: i16,
+        y: i16,
+    }
+    #[repr(C)]
+    struct StartupInfoW {
+        cb: u32,
+        reserved: *mut u16,
+        desktop: *mut u16,
+        title: *mut u16,
+        x: u32,
+        y: u32,
+        x_size: u32,
+        y_size: u32,
+        x_count_chars: u32,
+        y_count_chars: u32,
+        fill_attribute: u32,
+        flags: u32,
+        show_window: u16,
+        reserved2_len: u16,
+        reserved2: *mut u8,
+        std_input: Handle,
+        std_output: Handle,
+        std_error: Handle,
+    }
+    #[repr(C)]
+    struct StartupInfoExW {
+        startup_info: StartupInfoW,
+        attribute_list: *mut c_void,
+    }
+    #[repr(C)]
+    struct ProcessInformation {
+        process: Handle,
+        thread: Handle,
+        process_id: u32,
+        thread_id: u32,
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreatePipe(
+            read: *mut Handle,
+            write: *mut Handle,
+            attrs: *const c_void,
+            size: u32,
+        ) -> i32;
+        fn CreatePseudoConsole(
+            size: Coord,
+            input: Handle,
+            output: Handle,
+            flags: u32,
+            console: *mut Handle,
+        ) -> i32;
+        fn ClosePseudoConsole(console: Handle);
+        fn InitializeProcThreadAttributeList(
+            list: *mut c_void,
+            count: u32,
+            flags: u32,
+            size: *mut usize,
+        ) -> i32;
+        fn UpdateProcThreadAttribute(
+            list: *mut c_void,
+            flags: u32,
+            attribute: usize,
+            value: *const c_void,
+            size: usize,
+            previous: *mut c_void,
+            returned: *mut usize,
+        ) -> i32;
+        fn DeleteProcThreadAttributeList(list: *mut c_void);
+        fn CreateProcessW(
+            application: *const u16,
+            command_line: *mut u16,
+            process_attrs: *const c_void,
+            thread_attrs: *const c_void,
+            inherit: i32,
+            flags: u32,
+            environment: *const c_void,
+            directory: *const u16,
+            startup: *const StartupInfoExW,
+            info: *mut ProcessInformation,
+        ) -> i32;
+        fn WaitForSingleObject(handle: Handle, ms: u32) -> u32;
+        fn TerminateProcess(handle: Handle, code: u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+    const PSEUDOCONSOLE: usize = 0x0002_0016;
+    const EXTENDED_STARTUPINFO_PRESENT: u32 = 0x0008_0000;
+    const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
+    const WAIT_OBJECT_0: u32 = 0;
+
+    let wide = |s: &std::ffi::OsStr| {
+        s.encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<u16>>()
+    };
+    // the command line: every argument quoted the way CreateProcess parses it
+    let quote = |a: &str| format!("\"{}\"", a.replace('"', "\\\""));
+    let mut line: Vec<u16> = std::iter::once(bin().to_string_lossy().into_owned())
+        .chain(args.iter().map(|a| a.to_string()))
+        .map(|a| quote(&a))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    // the environment block: KEY=VALUE\0 … \0, this process's plus three
+    let mut env: Vec<(String, String)> = std::env::vars()
+        .filter(|(k, _)| {
+            !["DEDUPE_JOURNAL_DIR", "NO_COLOR", "COLUMNS"].contains(&k.to_uppercase().as_str())
+        })
+        .collect();
+    env.push((
+        "DEDUPE_JOURNAL_DIR".into(),
+        fx.journal.to_string_lossy().into_owned(),
+    ));
+    env.push(("NO_COLOR".into(), "1".into()));
+    env.push(("COLUMNS".into(), columns.to_string()));
+    env.sort_by_key(|(k, _)| k.to_uppercase());
+    let mut block: Vec<u16> = Vec::new();
+    for (k, v) in &env {
+        block.extend(format!("{k}={v}").encode_utf16());
+        block.push(0);
+    }
+    block.push(0);
+    let dir = wide(fx.root.as_os_str());
+
+    // SAFETY: plain Win32 calls on handles this function creates and
+    // closes; buffers outlive the calls that read them; the attribute
+    // list is sized by the first call and freed after CreateProcessW.
+    unsafe {
+        let (mut in_read, mut in_write, mut out_read, mut out_write) =
+            (null_mut(), null_mut(), null_mut(), null_mut());
+        if CreatePipe(&mut in_read, &mut in_write, null(), 0) == 0
+            || CreatePipe(&mut out_read, &mut out_write, null(), 0) == 0
+        {
+            return None;
+        }
+        let mut console: Handle = null_mut();
+        let size = Coord {
+            x: columns as i16,
+            y: 50,
+        };
+        if CreatePseudoConsole(size, in_read, out_write, 0, &mut console) != 0 {
+            return None;
+        }
+        // the pseudo console holds its own copies of its two ends
+        CloseHandle(in_read);
+        CloseHandle(out_write);
+        let mut bytes = 0usize;
+        InitializeProcThreadAttributeList(null_mut(), 1, 0, &mut bytes);
+        let mut list = vec![0u8; bytes];
+        let list_ptr = list.as_mut_ptr() as *mut c_void;
+        if InitializeProcThreadAttributeList(list_ptr, 1, 0, &mut bytes) == 0
+            || UpdateProcThreadAttribute(
+                list_ptr,
+                0,
+                PSEUDOCONSOLE,
+                console,
+                std::mem::size_of::<Handle>(),
+                null_mut(),
+                null_mut(),
+            ) == 0
+        {
+            ClosePseudoConsole(console);
+            return None;
+        }
+        let mut startup: StartupInfoExW = std::mem::zeroed();
+        startup.startup_info.cb = std::mem::size_of::<StartupInfoExW>() as u32;
+        startup.attribute_list = list_ptr;
+        let mut info: ProcessInformation = std::mem::zeroed();
+        let started = CreateProcessW(
+            null(),
+            line.as_mut_ptr(),
+            null(),
+            null(),
+            0,
+            EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT,
+            block.as_ptr() as *const c_void,
+            dir.as_ptr(),
+            &startup,
+            &mut info,
+        );
+        DeleteProcThreadAttributeList(list_ptr);
+        if started == 0 {
+            ClosePseudoConsole(console);
+            CloseHandle(in_write);
+            CloseHandle(out_read);
+            return None;
+        }
+        CloseHandle(info.thread);
+        // read everything it draws, on a thread of its own: a pseudo
+        // console whose output is not drained stops drawing
+        let mut output = File::from_raw_handle(out_read as RawHandle);
+        let reader = std::thread::spawn(move || {
+            let mut all = Vec::new();
+            let _ = output.read_to_end(&mut all);
+            all
+        });
+        let mut input = File::from_raw_handle(in_write as RawHandle);
+        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let writer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2500));
+            for k in keys {
+                let _ = input.write_all(k.as_bytes());
+                let _ = input.flush();
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+            }
+            input
+        });
+        if WaitForSingleObject(info.process, 120_000) != WAIT_OBJECT_0 {
+            TerminateProcess(info.process, 1);
+            WaitForSingleObject(info.process, 10_000);
+        }
+        CloseHandle(info.process);
+        let input = writer.join().ok();
+        // closing the pseudo console ends its output, and the reader
+        ClosePseudoConsole(console);
+        drop(input);
+        let all = reader.join().ok()?;
+        Some(plain_text(&String::from_utf8_lossy(&all)))
+    }
+}
+
+/// Terminal output without its control sequences and carriage returns:
+/// the text a person saw, in the order it was drawn. CSI sequences end at
+/// their final byte (`@` to `~`); OSC ones (a window title, which the
+/// Windows pseudo console sends) at BEL or ESC `\`. Two CSI sequences
+/// stand for what they show: a cursor moved forward (`CSI n C`) is that
+/// many blanks, and one moved to a row and column (`CSI r;c H`) starts a
+/// line — the Windows pseudo console draws a run of blanks and a new row
+/// that way rather than with spaces and line ends.
+fn plain_text(text: &str) -> String {
     let mut plain = String::new();
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '\u{1b}' {
-            if chars.peek() == Some(&'[') {
-                chars.next();
-                while let Some(&n) = chars.peek() {
+            match chars.peek() {
+                Some('[') => {
                     chars.next();
-                    if n.is_ascii_alphabetic() {
-                        break;
+                    let mut params = String::new();
+                    for n in chars.by_ref() {
+                        if ('@'..='~').contains(&n) {
+                            match n {
+                                'C' => {
+                                    let k = params.parse::<usize>().unwrap_or(1).max(1);
+                                    plain.extend(std::iter::repeat_n(' ', k));
+                                }
+                                'H' | 'f' if !plain.is_empty() && !plain.ends_with('\n') => {
+                                    plain.push('\n')
+                                }
+                                _ => {}
+                            }
+                            break;
+                        }
+                        params.push(n);
                     }
                 }
+                Some(']') => {
+                    chars.next();
+                    while let Some(n) = chars.next() {
+                        if n == '\u{7}' {
+                            break;
+                        }
+                        if n == '\u{1b}' && chars.peek() == Some(&'\\') {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    chars.next(); // a two-byte sequence (ESC 7, ESC =)
+                }
+                None => {}
             }
             continue;
         }
@@ -350,7 +630,7 @@ fn run_tty(fx: &Fx, args: &[&str], keys: &[&str], columns: u32) -> Option<String
             plain.push(c);
         }
     }
-    Some(plain)
+    plain
 }
 
 fn files(root: &Path) -> Vec<String> {
@@ -1391,7 +1671,7 @@ fn purge_then_undo_through_the_bin() {
 /// back; `m` + enter moves what is selected without a second scan; `u` on
 /// the bar under the action reverses it; `q` leaves. Piped, the `next`
 /// lines print instead.
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[test]
 fn find_on_a_terminal_acts_from_the_result() {
     let fx = fixture_with_photos();
@@ -1402,7 +1682,7 @@ fn find_on_a_terminal_acts_from_the_result() {
         &["n", "\r", "m", "\r", "u", "q"],
         160,
     ) else {
-        eprintln!("no script(1); skipped");
+        eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
         return;
     };
     // the groups screen: marks, the selection count, the keys
@@ -1414,8 +1694,12 @@ fn find_on_a_terminal_acts_from_the_result() {
     // n: the preview, with the native dry-run command named
     assert!(out.contains("dedupe milk . img --dry-run"), "{out}");
     assert!(out.contains("would~"), "{out}");
-    // m, enter: the move, on the groups already listed (one SCAN line only)
-    assert_eq!(out.matches("SCAN ").count(), 1, "no second scan\n{out}");
+    // m, enter: the move, on the groups already listed (one SCAN line
+    // only; a Windows pseudo console repaints the main screen when the
+    // workspace leaves its own, so there the line can come twice)
+    if cfg!(unix) {
+        assert_eq!(out.matches("SCAN ").count(), 1, "no second scan\n{out}");
+    }
     assert!(out.contains("7 moved"), "{out}");
     assert!(out.contains("u undo it"), "{out}");
     // u: reversed on the spot
@@ -1425,6 +1709,8 @@ fn find_on_a_terminal_acts_from_the_result() {
     let (_, piped, _) = run(&fx, &["find", ".", "img"]);
     assert!(!piped.contains("m milk"), "{piped}");
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
+    // shown by `--nocapture`: the Windows launcher's summary reads it
+    eprintln!("the workspace driven through a pseudo-terminal: 7 moved, 7 restored");
 }
 
 // ---------------------------------------------------------------------------

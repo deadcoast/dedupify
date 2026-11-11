@@ -7,6 +7,11 @@
 //!
 //! `doctor`, `help` and `menu` are the remaining entry points.
 
+// Outside tests, nothing unwraps: a value that cannot be missing says why
+// in an `expect("invariant: …")`, everything else is handled (Phase 12,
+// SC-06). Clippy runs with `-D warnings`, so this holds.
+#![cfg_attr(not(test), deny(clippy::unwrap_used))]
+
 pub mod actions;
 pub mod capture;
 pub mod cli;
