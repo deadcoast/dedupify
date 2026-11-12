@@ -410,11 +410,18 @@ impl NearGroup {
         self.members.insert(0, chosen);
         self.members[0].relation = None;
         let keeper = self.members[0].hashed.clone();
+        let mut thumb: Option<Option<geometry::Thumb>> = None;
         for m in self.members.iter_mut().skip(1) {
             let mut r = relation_of(&keeper, &m.hashed);
             let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only());
             if needs {
-                r.fit = geometry::fit_files(&keeper.rep.cand.path, &m.hashed.rep.cand.path);
+                let k = thumb.get_or_insert_with(|| geometry::thumb_of(&keeper.rep.cand.path));
+                r.fit = k.as_ref().and_then(|k| {
+                    Some(geometry::fit(
+                        k,
+                        &geometry::thumb_of(&m.hashed.rep.cand.path)?,
+                    ))
+                });
             }
             m.relation = Some(r);
         }
@@ -1147,12 +1154,28 @@ pub fn group(
         })
         .collect();
     stats.fits = wanted.len() as u64;
-    let fits: Vec<((usize, usize), Option<Fit>)> = wanted
+    // one thumbnail per keeper, shared by its members' fits (a keeper with
+    // twelve copies was decoded twelve times), small-decoded (Phase 14)
+    let mut by_group: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (gi, mi) in wanted {
+        match by_group.last_mut() {
+            Some((g, ms)) if *g == gi => ms.push(mi),
+            _ => by_group.push((gi, vec![mi])),
+        }
+    }
+    let fits: Vec<((usize, usize), Option<Fit>)> = by_group
         .into_par_iter()
-        .map(|(gi, mi)| {
-            let k = &groups[gi].members[0].hashed.rep.cand.path;
-            let m = &groups[gi].members[mi].hashed.rep.cand.path;
-            ((gi, mi), geometry::fit_files(k, m))
+        .flat_map(|(gi, mis)| {
+            let keeper = geometry::thumb_of(&groups[gi].members[0].hashed.rep.cand.path);
+            mis.into_par_iter()
+                .map(|mi| {
+                    let m = &groups[gi].members[mi].hashed.rep.cand.path;
+                    let f = keeper
+                        .as_ref()
+                        .and_then(|k| Some(geometry::fit(k, &geometry::thumb_of(m)?)));
+                    ((gi, mi), f)
+                })
+                .collect::<Vec<_>>()
         })
         .collect();
     for ((gi, mi), f) in fits {

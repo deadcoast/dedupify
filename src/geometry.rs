@@ -338,6 +338,104 @@ fn ncc_at(outer: &Thumb, inner: &Thumb, dx: usize, dy: usize, margin: usize) -> 
     ((sab - sa * sb / n) / (va * vb).sqrt()) as f32
 }
 
+/// The outer picture's sums for every rectangle in O(1): summed-area
+/// tables of its values and their squares (Phase 14, CORE-15).
+struct Integral {
+    w: usize,
+    s: Vec<f64>,
+    ss: Vec<f64>,
+}
+
+impl Integral {
+    fn of(t: &Thumb) -> Integral {
+        let w = t.w + 1;
+        let mut s = vec![0.0f64; w * (t.h + 1)];
+        let mut ss = vec![0.0f64; w * (t.h + 1)];
+        for y in 0..t.h {
+            let (mut row, mut row2) = (0.0f64, 0.0f64);
+            for x in 0..t.w {
+                let v = t.px[y * t.w + x] as f64;
+                row += v;
+                row2 += v * v;
+                s[(y + 1) * w + x + 1] = s[y * w + x + 1] + row;
+                ss[(y + 1) * w + x + 1] = ss[y * w + x + 1] + row2;
+            }
+        }
+        Integral { w, s, ss }
+    }
+
+    /// Sum and sum of squares over x in [x0, x1), y in [y0, y1).
+    fn rect(&self, x0: usize, y0: usize, x1: usize, y1: usize) -> (f64, f64) {
+        let at = |v: &[f64], x: usize, y: usize| v[y * self.w + x];
+        let f = |v: &[f64]| at(v, x1, y1) - at(v, x0, y1) - at(v, x1, y0) + at(v, x0, y0);
+        (f(&self.s), f(&self.ss))
+    }
+}
+
+/// A containment window prepared once for every placement: its margin,
+/// and its own sums over what is correlated.
+struct Window<'a> {
+    t: &'a Thumb,
+    margin: usize,
+    n: f64,
+    sb: f64,
+    vb: f64,
+}
+
+impl<'a> Window<'a> {
+    /// `None` for a window with NaN pixels (a rotation's corners), which
+    /// `ncc_at` handles.
+    fn of(t: &'a Thumb, margin: usize) -> Option<Window<'a>> {
+        let margin = if t.w > 2 * margin + 4 && t.h > 2 * margin + 4 {
+            margin
+        } else {
+            0
+        };
+        let (mut sb, mut sbb, mut n) = (0.0f64, 0.0f64, 0.0f64);
+        for y in margin..t.h - margin {
+            for &b in &t.px[y * t.w + margin..y * t.w + t.w - margin] {
+                if b.is_nan() {
+                    return None;
+                }
+                let b = b as f64;
+                sb += b;
+                sbb += b * b;
+                n += 1.0;
+            }
+        }
+        Some(Window {
+            t,
+            margin,
+            n,
+            sb,
+            vb: sbb - sb * sb / n,
+        })
+    }
+
+    /// The same correlation as `ncc_at` at (dx, dy) inside `outer`: the
+    /// outer sums from `integral`, the cross term the only per-pixel work.
+    fn ncc(&self, outer: &Thumb, integral: &Integral, dx: usize, dy: usize) -> f32 {
+        let (t, m, n) = (self.t, self.margin, self.n);
+        if n < 16.0 {
+            return -1.0;
+        }
+        let (sa, saa) = integral.rect(dx + m, dy + m, dx + t.w - m, dy + t.h - m);
+        let va = saa - sa * sa / n;
+        if va <= 1e-6 * n || self.vb <= 1e-6 * n {
+            return -1.0;
+        }
+        let mut sab = 0.0f64;
+        for y in m..t.h - m {
+            let o = &outer.px[(dy + y) * outer.w + dx + m..(dy + y) * outer.w + dx + t.w - m];
+            let i = &t.px[y * t.w + m..y * t.w + t.w - m];
+            // a row in single precision (64 products at most), vectorised
+            let row: f32 = o.iter().zip(i).map(|(a, b)| a * b).sum();
+            sab += row as f64;
+        }
+        ((sab - sa * self.sb / n) / (va * self.vb).sqrt()) as f32
+    }
+}
+
 /// The robust score of `inner` at (dx, dy) in `outer`: the window (less
 /// `margin`) cut into `GRID` × `GRID` cells, each correlated on its own;
 /// cells with almost no texture (variance under a twentieth of the
@@ -424,6 +522,7 @@ fn best_containment(outer: &Thumb, inner: &Thumb, robust: bool) -> Fit {
     let (o2, i2) = (outer.half(), inner.half());
     let (n2, w2r) = o2.radii();
     let o2b = o2.band_pass(n2, w2r);
+    let integral = Integral::of(&o2b);
     let mut best = Fit::none();
     let aspect = inner.h as f32 / inner.w as f32;
     for s in scales() {
@@ -434,9 +533,13 @@ fn best_containment(outer: &Thumb, inner: &Thumb, robust: bool) -> Fit {
             continue;
         }
         let win = i2.resized(w2, h2).band_pass(n2, w2r);
+        let prepared = Window::of(&win, w2r);
         for dy in 0..=(o2.h - h2) {
             for dx in 0..=(o2.w - w2) {
-                let c = ncc_at(&o2b, &win, dx, dy, w2r);
+                let c = match &prepared {
+                    Some(p) => p.ncc(&o2b, &integral, dx, dy),
+                    None => ncc_at(&o2b, &win, dx, dy, w2r),
+                };
                 if c > best.ncc {
                     best = Fit {
                         ncc: c,
@@ -609,14 +712,17 @@ fn one_way(a: &Thumb, b: &Thumb, robust: bool) -> Fit {
     best
 }
 
+/// The fit's thumbnail of a file, decoded as small as its format allows
+/// (twice the thumbnail's side: the resize to it still averages). `None`
+/// when it does not decode.
+pub fn thumb_of(path: &std::path::Path) -> Option<Thumb> {
+    let img = crate::decode::load_small(path, 2 * MAX_SIDE as u32).ok()?;
+    Some(Thumb::from_image(&img, MAX_SIDE))
+}
+
 /// Decode both files and fit them. `None` when either does not decode.
 pub fn fit_files(a: &std::path::Path, b: &std::path::Path) -> Option<Fit> {
-    let ia = crate::decode::load_image(a).ok()?;
-    let ib = crate::decode::load_image(b).ok()?;
-    Some(fit(
-        &Thumb::from_image(&ia, MAX_SIDE),
-        &Thumb::from_image(&ib, MAX_SIDE),
-    ))
+    Some(fit(&thumb_of(a)?, &thumb_of(b)?))
 }
 
 #[cfg(test)]

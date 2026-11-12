@@ -159,6 +159,63 @@ pub fn load_image(path: &Path) -> Result<DynamicImage, DecodeError> {
     load(path).map(|d| d.img)
 }
 
+/// Upright, and as small as the format allows with the long side still at
+/// least `long_min`: a JPEG whose long side is at least twice `long_min`
+/// is decoded at 1/2, 1/4 or 1/8 inside its inverse DCT, so the full
+/// picture is never built (a 12-megapixel photograph at an eighth of the
+/// work); anything else as `load_image`. For the geometric fit, whose
+/// thumbnails are 128 pixels: the hashes keep the full decode (TECH-02,
+/// VERIFICATION § Phase 11). (Phase 14, CORE-15)
+pub fn load_small(path: &Path, long_min: u32) -> Result<DynamicImage, DecodeError> {
+    match jpeg_small(path, long_min) {
+        Some(img) => Ok(img),
+        None => load_image(path),
+    }
+}
+
+/// The reduced JPEG route; `None` sends the file to `load_image` (not a
+/// JPEG, too small to gain, CMYK or 16-bit samples, a coding this decoder
+/// does not read, any error).
+fn jpeg_small(path: &Path, long_min: u32) -> Option<DynamicImage> {
+    use jpeg_decoder::PixelFormat;
+    let mut head = [0u8; 3];
+    {
+        let mut f = std::fs::File::open(path).ok()?;
+        if read_up_to(&mut f, &mut head).ok()? < 3 || head != [0xFF, 0xD8, 0xFF] {
+            return None;
+        }
+    }
+    let f = std::fs::File::open(path).ok()?;
+    let mut dec = jpeg_decoder::Decoder::new(io::BufReader::new(f));
+    dec.read_info().ok()?;
+    let info = dec.info()?;
+    if !matches!(info.pixel_format, PixelFormat::L8 | PixelFormat::RGB24) {
+        return None;
+    }
+    let (w, h) = (u32::from(info.width), u32::from(info.height));
+    let k = [8u32, 4, 2]
+        .into_iter()
+        .find(|&k| w.max(h) / k >= long_min)?;
+    let (sw, sh) = dec.scale(w.div_ceil(k) as u16, h.div_ceil(k) as u16).ok()?;
+    let px = dec.decode().ok()?;
+    let (sw, sh) = (u32::from(sw), u32::from(sh));
+    let mut img = match info.pixel_format {
+        PixelFormat::L8 => DynamicImage::ImageLuma8(image::GrayImage::from_raw(sw, sh, px)?),
+        _ => DynamicImage::ImageRgb8(image::RgbImage::from_raw(sw, sh, px)?),
+    };
+    let orientation = dec
+        .exif_data()
+        .and_then(|d| exif::Reader::new().read_raw(d.to_vec()).ok())
+        .and_then(|e| {
+            e.get_field(exif::Tag::Orientation, exif::In::PRIMARY)
+                .and_then(|f| f.value.get_uint(0))
+        })
+        .and_then(|o| Orientation::from_exif(o as u8))
+        .unwrap_or(Orientation::NoTransforms);
+    img.apply_orientation(orientation);
+    Some(img)
+}
+
 fn read_up_to(f: &mut std::fs::File, buf: &mut [u8]) -> io::Result<usize> {
     let mut n = 0;
     while n < buf.len() {

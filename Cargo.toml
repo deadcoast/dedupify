@@ -29,6 +29,9 @@ ctrlc = "3.4"
 time = { version = "0.3", default-features = false, features = ["local-offset"] }
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"] }
 kamadak-exif = "0.6"
+# a JPEG decoded small inside its inverse DCT, for the geometric fit's
+# 128-pixel thumbnails (Phase 14, CORE-15; not for the hashes, TECH-02)
+jpeg-decoder = { version = "0.3.2", default-features = false }
 sha2 = "0.10"
 tract-onnx = { version = "0.23", optional = true }
 
@@ -58,7 +61,6 @@ deep = ["dep:tract-onnx"]
 tempfile = "3"
 walkdir = "2.5"
 # the reduced JPEG route measured in tests/decode_reduced.rs (TECH-02, not shipped)
-jpeg-decoder = { version = "0.3.2", default-features = false }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"
