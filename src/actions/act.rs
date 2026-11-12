@@ -342,6 +342,10 @@ pub(crate) fn act_purge(
         // stops between chunks
         interrupt::install();
         interrupt::changing(true);
+        // on Windows a second name for each file while the shell bins it,
+        // so one the bin lets go can be put back (`recycle`); only `_milked`
+        // is ever written in the tree, and this is removed after
+        let guard = inv.root.join(crate::MILKED_DIR).join(".purging");
         for chunk in to_bin.chunks(500) {
             if interrupt::requested() {
                 stopped = true;
@@ -350,11 +354,16 @@ pub(crate) fn act_purge(
             let paths: Vec<&Path> = chunk.iter().map(|&i| list[i].path).collect();
             let t = unix_secs(SystemTime::now());
             let mut left: std::collections::HashMap<std::path::PathBuf, crate::fsops::ActError> =
-                crate::recycle::to_bin(&paths).into_iter().collect();
+                crate::recycle::to_bin(&paths, Some(&guard))
+                    .into_iter()
+                    .collect();
             for &i in chunk {
                 let it = &list[i];
                 let rel = rel_display(it.path, &inv.root);
-                if !it.path.exists() {
+                // a reason, on disk or not, is a failure: a file the bin
+                // let go without keeping is not "binned" (Phase 13)
+                let why = left.remove(it.path);
+                if why.is_none() && !it.path.exists() {
                     let detail = detail_of(it);
                     r.action(
                         if it.near.is_some() {
@@ -377,7 +386,7 @@ pub(crate) fn act_purge(
                         hash: it.hash.clone(),
                     });
                 } else {
-                    let e = left.remove(it.path).unwrap_or_else(|| {
+                    let e = why.unwrap_or_else(|| {
                         crate::fsops::ActError::Bin("the file is still there".into())
                     });
                     r.action("failed", Role::Danger, &rel, &e.words());

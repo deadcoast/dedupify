@@ -2798,5 +2798,29 @@ fn a_bin_too_small_measured_by_flags() {
             p.exists()
         );
     }
+    // the guard alone (no check before the shell): the file the bin lets
+    // go is put back from its second name
+    let fx = tmp.path().join("guarded");
+    fs::create_dir_all(&fx).unwrap();
+    fs::write(fx.join("big.bin"), blob(79, 5 * 1024 * 1024)).unwrap();
+    let p = fx.join("big.bin").canonicalize().unwrap();
+    let guard = fx.join("_milked").join(".purging");
+    let left = dedupe::recycle::to_bin_guard_only(&[p.as_path()], &guard);
+    eprintln!("the guard alone: {left:?}; on disk {}", p.exists());
     reg(&["delete", &key, "/v", "MaxCapacity", "/f"]);
+    assert!(
+        p.exists(),
+        "the bin let it go and the guard did not put it back"
+    );
+    assert_eq!(fs::read(&p).unwrap(), blob(79, 5 * 1024 * 1024));
+    assert!(
+        left.iter()
+            .any(|(q, e)| q == &p && e.words().contains("put back")),
+        "{left:?}"
+    );
+    assert!(!guard.exists(), "the guard folder stays behind");
+    assert!(
+        !fx.join("_milked").exists(),
+        "`_milked` made for the guard stays behind"
+    );
 }
