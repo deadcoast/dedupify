@@ -847,8 +847,8 @@ mod tests {
         let a = picture(6);
         let mut bright = a.clone();
         for p in bright.pixels_mut() {
-            for k in 0..3 {
-                p.0[k] = (p.0[k] as f32 * 1.3 + 10.0).min(255.0) as u8;
+            for c in p.0.iter_mut() {
+                *c = (*c as f32 * 1.3 + 10.0).min(255.0) as u8;
             }
         }
         let f = fit(&thumb(&a), &thumb(&bright));

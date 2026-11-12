@@ -213,8 +213,8 @@ pub fn rotate_small(img: &RgbImage, deg: f32) -> RgbImage {
 pub fn brightness(img: &RgbImage, f: f32) -> RgbImage {
     let mut out = img.clone();
     for p in out.pixels_mut() {
-        for k in 0..3 {
-            p.0[k] = (p.0[k] as f32 * f).clamp(0.0, 255.0) as u8;
+        for c in p.0.iter_mut() {
+            *c = (*c as f32 * f).clamp(0.0, 255.0) as u8;
         }
     }
     out
@@ -223,8 +223,8 @@ pub fn brightness(img: &RgbImage, f: f32) -> RgbImage {
 pub fn gamma(img: &RgbImage, g: f32) -> RgbImage {
     let mut out = img.clone();
     for p in out.pixels_mut() {
-        for k in 0..3 {
-            p.0[k] = (255.0 * (p.0[k] as f32 / 255.0).powf(g)).clamp(0.0, 255.0) as u8;
+        for c in p.0.iter_mut() {
+            *c = (255.0 * (*c as f32 / 255.0).powf(g)).clamp(0.0, 255.0) as u8;
         }
     }
     out
@@ -265,9 +265,9 @@ pub fn noise(img: &RgbImage, amp: i32) -> RgbImage {
     let mut rng = Rng(4242);
     let mut out = img.clone();
     for p in out.pixels_mut() {
-        for k in 0..3 {
+        for c in p.0.iter_mut() {
             let d = (rng.next() % (2 * amp as u64 + 1)) as i32 - amp;
-            p.0[k] = (p.0[k] as i32 + d).clamp(0, 255) as u8;
+            *c = (*c as i32 + d).clamp(0, 255) as u8;
         }
     }
     out
