@@ -19,6 +19,23 @@
 //! stops at each stage's end: SCAN, SIZE, SAMPLE, HASH (the exact tier),
 //! DECODE and MATCH (images), FRAMES and the video MATCH. Nothing here is
 //! a unit test; it prints a record for VERIFICATION.md.
+//!
+//! Real files join the corpus from `DEDUPE_PHOTO_DIRS` and
+//! `DEDUPE_VIDEO_DIRS` (lists of folders, separated as PATH is; only read).
+//! With the model installed, DECODE runs again with it (`DECODE+m`). Each
+//! row carries the stage's peak memory: on Linux the peak is reset at the
+//! stage's start, elsewhere it is the peak since the run began (the
+//! header says which). (Phase 14, TECH-10)
+//!
+//! ```text
+//! cargo test --release --test bench scale_run -- --ignored --nocapture
+//! DEDUPE_SCALE_FILES=<n> (100000)   DEDUPE_SCALE_DIR=<folder> keeps it
+//! ```
+//!
+//! The scale run: `n` files in folders of 100 — 8 % of them small
+//! photographs (192 × 144, one in eight a half-size copy of another), the
+//! rest 0.5–8 KiB of bytes, one in ten a byte copy — through SCAN, the
+//! exact tier, DECODE and MATCH.
 
 mod common;
 use common::*;
@@ -33,17 +50,214 @@ use dedupe::near::{self, Rep};
 use dedupe::video::{self, VHashed, VRep};
 use dedupe::walk::{self, Filter};
 
-/// Records when each stage of the exact tier ends.
+/// Records when each stage of the exact tier ends, and its peak memory.
 struct Clock {
     t0: Instant,
-    ends: Mutex<Vec<(Stage, Duration)>>,
+    ends: Mutex<Vec<(Stage, Duration, Option<u64>)>>,
 }
 
 impl Progress for Clock {
     fn tick(&self, _: Stage, _: u64, _: u64) {}
     fn done(&self, stage: Stage, _: &PipelineStats) {
-        self.ends.lock().unwrap().push((stage, self.t0.elapsed()));
+        self.ends
+            .lock()
+            .unwrap()
+            .push((stage, self.t0.elapsed(), peak()));
+        peak_reset();
     }
+}
+
+/// The process's peak resident memory in bytes: since the last
+/// `peak_reset` on Linux, since the start elsewhere.
+#[cfg(target_os = "linux")]
+fn peak() -> Option<u64> {
+    let s = std::fs::read_to_string("/proc/self/status").ok()?;
+    let kb: u64 = s
+        .lines()
+        .find(|l| l.starts_with("VmHWM:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    Some(kb * 1024)
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn peak() -> Option<u64> {
+    let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
+    // SAFETY: getrusage fills the struct it is given
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) } != 0 {
+        return None;
+    }
+    // bytes on macOS
+    Some(ru.ru_maxrss as u64)
+}
+
+#[cfg(windows)]
+fn peak() -> Option<u64> {
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    let mut c = PROCESS_MEMORY_COUNTERS {
+        cb: std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the counters are sized as the call expects; the pseudo handle
+    // needs no closing
+    unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) }.ok()?;
+    Some(c.PeakWorkingSetSize as u64)
+}
+
+/// Starts a new peak (Linux: `clear_refs` 5 resets VmHWM to the current
+/// size). `false` where the peak cannot be reset.
+fn peak_reset() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::write("/proc/self/clear_refs", b"5").is_ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+/// One line of the record.
+struct Row {
+    stage: String,
+    what: String,
+    secs: f64,
+    peak: Option<u64>,
+}
+
+/// Times a stage: resets the peak, runs it, reads the peak.
+fn stage<T>(rows: &mut Vec<Row>, name: &str, f: impl FnOnce() -> (T, String)) -> T {
+    peak_reset();
+    let t = Instant::now();
+    let (out, what) = f();
+    rows.push(Row {
+        stage: name.into(),
+        what,
+        secs: t.elapsed().as_secs_f64(),
+        peak: peak(),
+    });
+    out
+}
+
+fn print(rows: &[Row], header: &str) {
+    let per = if peak_reset() {
+        "peak memory per stage"
+    } else {
+        "peak memory since the start"
+    };
+    eprintln!();
+    eprintln!("{header}   {per}");
+    for r in rows {
+        let mem = r
+            .peak
+            .map(|b| format!("{:>6.0} MB", b as f64 / 1e6))
+            .unwrap_or_else(|| "     ? MB".into());
+        eprintln!(" {:<8} {:>8.3} s  {mem}   {}", r.stage, r.secs, r.what);
+    }
+}
+
+/// The folders listed in an environment variable, as PATH lists them.
+fn dirs_in(var: &str) -> Vec<PathBuf> {
+    std::env::var_os(var)
+        .map(|v| std::env::split_paths(&v).filter(|p| p.is_dir()).collect())
+        .unwrap_or_default()
+}
+
+/// SCAN of the corpus and any real folders, as one list.
+fn scan_all(roots: &[PathBuf]) -> (Vec<walk::Candidate>, u64) {
+    let filter = Filter { skip: &[], min: 0 };
+    let mut all = Vec::new();
+    let mut files = 0;
+    for r in roots {
+        let (c, s) = walk::scan(r, true, Kind::All, filter, &mut |_| {});
+        files += s.files;
+        all.extend(c);
+    }
+    (all, files)
+}
+
+/// The exact tier, a row per stage.
+fn exact_rows(rows: &mut Vec<Row>, cands: Vec<walk::Candidate>) {
+    peak_reset();
+    let clock = Clock {
+        t0: Instant::now(),
+        ends: Mutex::new(Vec::new()),
+    };
+    let (groups, pipe) = exact::find_groups(cands, false, &clock);
+    let mut last = Duration::ZERO;
+    for (stage, end, mem) in clock.ends.lock().unwrap().iter() {
+        let what = match stage {
+            Stage::Size => format!("{} share a size", pipe.size_sharing),
+            Stage::Sample => format!(
+                "{} share a sample, {:.1} MB read",
+                pipe.sample_sharing,
+                pipe.bytes_sampled as f64 / 1e6
+            ),
+            Stage::Hash => format!(
+                "{} confirmed, {:.0} MB read, {} groups",
+                pipe.confirmed,
+                pipe.bytes_hashed as f64 / 1e6,
+                groups.len()
+            ),
+            _ => String::new(),
+        };
+        rows.push(Row {
+            stage: stage.label().into(),
+            what,
+            secs: (*end - last).as_secs_f64(),
+            peak: *mem,
+        });
+        last = *end;
+    }
+}
+
+/// DECODE (and DECODE+m with the model) and MATCH over the images.
+fn image_rows(rows: &mut Vec<Row>, cands: &[walk::Candidate], model: bool) {
+    let reps = || -> Vec<Rep> {
+        cands
+            .iter()
+            .filter(|c| dedupe::decode::decodable(&c.path))
+            .map(|c| Rep {
+                cand: c.clone(),
+                exact_group: None,
+            })
+            .collect()
+    };
+    let n_img = reps().len();
+    let (hashed, mut nstats) = stage(rows, "DECODE", || {
+        let t = Instant::now();
+        let out = near::hash_all(reps(), &exact::NoProgress, None);
+        let rate = n_img as f64 / t.elapsed().as_secs_f64();
+        (out, format!("{n_img} images, {rate:.1} a second"))
+    });
+    if model {
+        if let Some(m) = dedupe::deep::installed().and_then(|p| dedupe::deep::Deep::load(&p).ok()) {
+            stage(rows, "DECODE+m", || {
+                let t = Instant::now();
+                let (h, _) = near::hash_all(reps(), &exact::NoProgress, Some(&m));
+                let rate = n_img as f64 / t.elapsed().as_secs_f64();
+                let embedded = h.iter().filter(|x| x.deep.is_some()).count();
+                (
+                    (),
+                    format!("{n_img} images, {embedded} embedded, {rate:.1} a second"),
+                )
+            });
+        } else {
+            rows.push(Row {
+                stage: "DECODE+m".into(),
+                what: "model not installed".into(),
+                secs: 0.0,
+                peak: None,
+            });
+        }
+    }
+    stage(rows, "MATCH", || {
+        let g = near::group(hashed, &mut nstats, &exact::NoProgress);
+        ((), format!("{} near groups, {} fits", g.len(), nstats.fits))
+    });
 }
 
 /// `len` bytes from `seed`, the same every run.
@@ -167,78 +381,35 @@ fn stages_on_a_fixed_corpus() {
     let tmp = tempfile::tempdir().unwrap();
     let root = keep.unwrap_or_else(|| tmp.path().join("bench"));
     let videos = build(&root);
+    let photos = dirs_in("DEDUPE_PHOTO_DIRS");
+    let real_videos = dirs_in("DEDUPE_VIDEO_DIRS");
+    let mut roots = vec![root.clone()];
+    roots.extend(photos.iter().cloned());
+    roots.extend(real_videos.iter().cloned());
     // a warm page cache for every stage: read everything once
-    for e in walkdir::WalkDir::new(&root).into_iter().flatten() {
-        if e.file_type().is_file() {
-            let _ = std::fs::read(e.path());
+    for r in &roots {
+        for e in walkdir::WalkDir::new(r).into_iter().flatten() {
+            if e.file_type().is_file() {
+                let _ = std::fs::read(e.path());
+            }
         }
     }
     let threads = rayon::current_num_threads();
-    let mut rows: Vec<(String, String, f64)> = Vec::new();
-    let filter = Filter { skip: &[], min: 0 };
+    let mut rows: Vec<Row> = Vec::new();
 
     // SCAN and the exact tier
-    let t = Instant::now();
-    let (cands, scan) = walk::scan(&root, true, Kind::All, filter, &mut |_| {});
-    rows.push((
-        "SCAN".into(),
-        format!("{} files, {:.0} MB", scan.files, megabytes(&cands)),
-        t.elapsed().as_secs_f64(),
-    ));
-    let clock = Clock {
-        t0: Instant::now(),
-        ends: Mutex::new(Vec::new()),
-    };
-    let (groups, pipe) = exact::find_groups(cands.clone(), false, &clock);
-    let mut last = Duration::ZERO;
-    for (stage, end) in clock.ends.lock().unwrap().iter() {
-        let text = match stage {
-            Stage::Size => format!("{} share a size", pipe.size_sharing),
-            Stage::Sample => format!(
-                "{} share a sample, {:.1} MB read",
-                pipe.sample_sharing,
-                pipe.bytes_sampled as f64 / 1e6
-            ),
-            Stage::Hash => format!(
-                "{} confirmed, {:.0} MB read, {} groups",
-                pipe.confirmed,
-                pipe.bytes_hashed as f64 / 1e6,
-                groups.len()
-            ),
-            _ => String::new(),
-        };
-        rows.push((stage.label().into(), text, (*end - last).as_secs_f64()));
-        last = *end;
-    }
+    let cands = stage(&mut rows, "SCAN", || {
+        let (c, files) = scan_all(&roots);
+        let what = format!("{files} files, {:.0} MB", megabytes(&c));
+        (c, what)
+    });
+    exact_rows(&mut rows, cands.clone());
 
-    // images: DECODE, MATCH
-    let reps: Vec<Rep> = cands
-        .iter()
-        .filter(|c| dedupe::decode::decodable(&c.path))
-        .map(|c| Rep {
-            cand: c.clone(),
-            exact_group: None,
-        })
-        .collect();
-    let n_img = reps.len();
-    let t = Instant::now();
-    let (hashed, mut nstats) = near::hash_all(reps, &exact::NoProgress, None);
-    let decode = t.elapsed().as_secs_f64();
-    rows.push((
-        "DECODE".into(),
-        format!("{n_img} images, {:.1} a second", n_img as f64 / decode),
-        decode,
-    ));
-    let t = Instant::now();
-    let ngroups = near::group(hashed, &mut nstats, &exact::NoProgress);
-    rows.push((
-        "MATCH".into(),
-        format!("{} near groups", ngroups.len()),
-        t.elapsed().as_secs_f64(),
-    ));
+    // images: DECODE, DECODE+m, MATCH
+    image_rows(&mut rows, &cands, true);
 
     // videos: FRAMES, MATCH
-    if videos {
+    if videos || (!real_videos.is_empty() && dedupe::video::tools_present() == (true, true)) {
         let items: Vec<(VRep, PathBuf)> = cands
             .iter()
             .filter(|c| Kind::Video.matches(&c.path))
@@ -253,32 +424,99 @@ fn stages_on_a_fixed_corpus() {
             })
             .collect();
         let n_vid = items.len();
-        let t = Instant::now();
-        let (vh, mut vstats) = video::hash_all(items, &exact::NoProgress);
-        let frames = t.elapsed().as_secs_f64();
-        rows.push((
-            "FRAMES".into(),
-            format!("{n_vid} videos, {} frames", vstats.frames),
-            frames,
-        ));
+        let (vh, mut vstats) = stage(&mut rows, "FRAMES", || {
+            let (vh, vstats) = video::hash_all(items, &exact::NoProgress);
+            let what = format!("{n_vid} videos, {} frames", vstats.frames);
+            ((vh, vstats), what)
+        });
         let vh: Vec<VHashed> = vh
             .into_iter()
             .map(|(rep, sig)| VHashed { rep, sig })
             .collect();
-        let t = Instant::now();
-        let vg = video::group(vh, &mut vstats, &exact::NoProgress);
-        rows.push((
-            "MATCH v".into(),
-            format!("{} video groups", vg.len()),
-            t.elapsed().as_secs_f64(),
-        ));
+        stage(&mut rows, "MATCH v", || {
+            let vg = video::group(vh, &mut vstats, &exact::NoProgress);
+            ((), format!("{} video groups", vg.len()))
+        });
     } else {
-        rows.push(("FRAMES".into(), "ffmpeg not found: no videos".into(), 0.0));
+        rows.push(Row {
+            stage: "FRAMES".into(),
+            what: "ffmpeg not found: no videos".into(),
+            secs: 0.0,
+            peak: None,
+        });
     }
 
-    eprintln!();
-    eprintln!("{} threads   corpus at {}", threads, root.display());
-    for (stage, what, secs) in &rows {
-        eprintln!(" {stage:<8} {secs:>7.3} s   {what}");
+    let mut header = format!("{threads} threads   corpus at {}", root.display());
+    for d in photos.iter().chain(&real_videos) {
+        header.push_str(&format!(" + {}", d.display()));
     }
+    print(&rows, &header);
+}
+
+/// The scale corpus (see the module's head); `true` once written.
+fn build_scale(root: &Path, n: u64) {
+    let done = root.join(format!(".complete-{n}"));
+    if done.exists() {
+        return;
+    }
+    use rayon::prelude::*;
+    let images = n * 8 / 100;
+    (0..n).into_par_iter().for_each(|i| {
+        let dir = root.join(format!("{:04}", i / 100));
+        if i < images {
+            // one in eight a half-size copy of the image before it
+            let seed = if i % 8 == 7 { i - 1 } else { i };
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+            let (w, h) = (192u32, 144u32);
+            let base = value_noise(&mut rng, w, h);
+            let tint = [rng.f(), rng.f(), rng.f()];
+            let img = image::RgbImage::from_fn(w, h, |x, y| {
+                let v = base[(y * w + x) as usize];
+                image::Rgb([
+                    (255.0 * v * (0.5 + 0.5 * tint[0])) as u8,
+                    (255.0 * v * (0.5 + 0.5 * tint[1])) as u8,
+                    (255.0 * v * (0.5 + 0.5 * tint[2])) as u8,
+                ])
+            });
+            let img = if i % 8 == 7 { scale(&img, 0.5) } else { img };
+            write(&dir.join(format!("i{i:06}.jpg")), &jpeg(&img, 85));
+        } else {
+            let len = |k: u64| 512 + (k * 7919 % 7680) as usize;
+            // one in ten a byte copy of the file before it
+            let k = if i % 10 == 9 { i - 1 } else { i };
+            write(&dir.join(format!("f{i:06}.bin")), &bytes(k, len(k)));
+        }
+    });
+    std::fs::write(&done, b"").unwrap();
+}
+
+#[test]
+#[ignore]
+fn scale_run() {
+    let n: u64 = std::env::var("DEDUPE_SCALE_FILES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100_000);
+    let keep = std::env::var_os("DEDUPE_SCALE_DIR").map(PathBuf::from);
+    let tmp = tempfile::tempdir().unwrap();
+    let root = keep.unwrap_or_else(|| tmp.path().join("scale"));
+    let t = Instant::now();
+    build_scale(&root, n);
+    let built = t.elapsed().as_secs_f64();
+    let threads = rayon::current_num_threads();
+    let mut rows: Vec<Row> = Vec::new();
+    let cands = stage(&mut rows, "SCAN", || {
+        let (c, files) = scan_all(std::slice::from_ref(&root));
+        let what = format!("{files} files, {:.0} MB", megabytes(&c));
+        (c, what)
+    });
+    exact_rows(&mut rows, cands.clone());
+    image_rows(&mut rows, &cands, false);
+    print(
+        &rows,
+        &format!(
+            "{threads} threads   {n} files at {} (written in {built:.1} s)",
+            root.display()
+        ),
+    );
 }
