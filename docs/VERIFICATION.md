@@ -3343,3 +3343,37 @@ Started by the `[ci]` marker on the delivery commit.
   whether its frames match software's there.
 - Camera photographs: the fit was measured on procedural pictures made
   camera-size, not on real 12-megapixel files.
+
+---
+
+# VERIFICATION — Phase 15 (matching debts), begun 2026-11-12
+
+Environment: this container (Linux, 2 vCPUs, Rust 1.97.0), `--profile
+ci`. Items as they land; the suite and CI at the end.
+
+## 1. A copy chained into a stranger's group (CORE-17)
+
+Found by Phase 14's 100,000-file run (§ Phase 14, 1). `near::group` now
+ends with `split_chained`: the members the keeper did not confirm (not
+kin, not RAW, not a RAW pair, not admitted by the descriptor) are joined
+again over the hash edges among themselves; a component of two or more
+takes its own keeper by the same order, is measured against it (PDQ, the
+fit where needed), and leaves as a group of its own when it confirms a
+member. The rest stay listed where they were.
+
+The same run, after (`scale_run`, 100,000 files, the corpus rebuilt):
+
+```
+ MATCH       5.056 s     132 MB   1009 near groups, 335 fits, 2 split from another
+   check                          998 planted pairs grouped, 11 other groups
+```
+
+`7830`/`7831` left `6462`'s group and `4126`/`4127` left `7352`'s
+(`7352`, alone, is no longer grouped); both copies are acted on. With
+`63` and `3319`, acted on in groups a stranger also joined, all 1,000
+planted copies are acted on. The 22 strangers stay listed only, none
+acted on. One fit more (the split pair's), MATCH's time unchanged.
+
+`cargo test --profile ci`: 132 unit tests (1 ignored), the band test, 34
+end-to-end tests (3 ignored); the band test and the 34 again with the
+model installed.
