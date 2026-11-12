@@ -24,6 +24,15 @@ pub fn to_bin(paths: &[&Path]) -> Vec<(PathBuf, ActError)> {
     imp::to_bin(paths)
 }
 
+/// What the shell says while it deletes `path` with `flags`
+/// (`FILEOPERATION_FLAGS`), one line per callback: for the CI test that
+/// measures how the bin treats a file it cannot hold. Not used by `purge`.
+#[cfg(windows)]
+#[doc(hidden)]
+pub fn trace(path: &Path, flags: u32) -> Vec<String> {
+    imp::trace(path, flags)
+}
+
 #[cfg(not(windows))]
 mod imp {
     use super::*;
@@ -79,6 +88,8 @@ mod imp {
         /// Deleted, and no item in the bin for it. Never expected: the
         /// sink stops a file the bin will not take before its delete.
         nuked: Vec<String>,
+        /// Every callback, for `trace`.
+        events: Vec<String>,
     }
 
     #[implement(IFileOperationProgressSink)]
@@ -172,6 +183,10 @@ mod imp {
             flags: u32,
             item: Ref<'_, IShellItem>,
         ) -> windows::core::Result<()> {
+            self.said
+                .borrow_mut()
+                .events
+                .push(format!("PreDeleteItem flags {flags:#x}"));
             // the shell says here whether this delete would be a recycle
             if flags & TSF_DELETE_RECYCLE_IF_POSSIBLE.0 as u32 == 0 {
                 self.said.borrow_mut().refused.push(key(item));
@@ -187,6 +202,11 @@ mod imp {
             recycled: Ref<'_, IShellItem>,
         ) -> windows::core::Result<()> {
             let mut said = self.said.borrow_mut();
+            said.events.push(format!(
+                "PostDeleteItem hr {:#010x} item in the bin {}",
+                result.0 as u32,
+                !recycled.is_null()
+            ));
             // an abort cancels the files after it: not failures, they are
             // asked again (E_ABORT, COPYENGINE_E_USER_CANCELLED,
             // ERROR_CANCELLED)
@@ -251,6 +271,18 @@ mod imp {
 
     /// One shell operation over `paths`; what it said.
     fn once(paths: &[&Path]) -> windows::core::Result<Said> {
+        // no FOF_WANTNUKEWARNING: the sink decides, not a dialog
+        once_with(paths, (FOF_NO_UI | FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE).0)
+    }
+
+    pub fn trace(path: &Path, flags: u32) -> Vec<String> {
+        match once_with(&[path], flags) {
+            Ok(said) => said.events,
+            Err(e) => vec![format!("the operation failed: {e}")],
+        }
+    }
+
+    fn once_with(paths: &[&Path], flags: u32) -> windows::core::Result<Said> {
         // SAFETY: COM calls on this thread, initialised (apartment) here;
         // every interface lives to the end of the block
         unsafe {
@@ -258,8 +290,7 @@ mod imp {
             // fine: the thread has COM either way
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             let op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)?;
-            // no FOF_WANTNUKEWARNING: the sink decides, not a dialog
-            op.SetOperationFlags(FOF_NO_UI | FOF_ALLOWUNDO | FOFX_RECYCLEONDELETE)?;
+            op.SetOperationFlags(windows::Win32::UI::Shell::FILEOPERATION_FLAGS(flags))?;
             let mut queued = 0;
             for p in paths {
                 let item: IShellItem =

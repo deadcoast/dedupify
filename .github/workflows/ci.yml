@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'Windows'
         env:
           DEDUPE_TEST_BIN_CAP: "1"
-        run: cargo test --profile ci --test e2e -- --ignored --nocapture purge_then_undo_through_the_bin the_bin_refusing_a_file_leaves_it_on_disk
+        run: cargo test --profile ci --test e2e -- --ignored --nocapture --test-threads=1 a_bin_too_small_measured_by_flags purge_then_undo_through_the_bin the_bin_refusing_a_file_leaves_it_on_disk
 
       - name: doctor
         run: cargo run --profile ci -- --doctor

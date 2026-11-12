@@ -2721,3 +2721,82 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
         assert_eq!(fs::read(&copy).unwrap(), big);
     }
 }
+
+/// The registry key of the Recycle Bin of the volume `path` is on.
+#[cfg(windows)]
+fn bin_key(path: &Path) -> String {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetVolumePathNameW(file: *const u16, out: *mut u16, len: u32) -> i32;
+        fn GetVolumeNameForVolumeMountPointW(mount: *const u16, out: *mut u16, len: u32) -> i32;
+    }
+    let w: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut mount = vec![0u16; 300];
+    let mut name = vec![0u16; 100];
+    // SAFETY: NUL-terminated input; output buffers of the lengths given
+    unsafe {
+        assert_ne!(GetVolumePathNameW(w.as_ptr(), mount.as_mut_ptr(), 300), 0);
+        assert_ne!(
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), 100),
+            0
+        );
+    }
+    let name = std::ffi::OsString::from_wide(&name[..name.iter().position(|&c| c == 0).unwrap()])
+        .to_string_lossy()
+        .into_owned();
+    let guid = &name[name.find('{').unwrap()..=name.find('}').unwrap()];
+    format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}")
+}
+
+/// What the shell does with a file its bin is capped below, by the flags
+/// the operation is given (Phase 13, TECH-11): each callback, whether the
+/// file is still on disk, and whether the bin lists it. A measurement for
+/// the record, not a test of `purge`; on a disposable machine only
+/// (`DEDUPE_TEST_BIN_CAP=1`). Run before the test that asserts.
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn a_bin_too_small_measured_by_flags() {
+    if std::env::var_os("DEDUPE_TEST_BIN_CAP").is_none() {
+        eprintln!("DEDUPE_TEST_BIN_CAP not set; skipped");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let key = bin_key(tmp.path());
+    let reg = |args: &[&str]| Command::new("reg").args(args).output().expect("reg.exe");
+    reg(&[
+        "add",
+        &key,
+        "/v",
+        "MaxCapacity",
+        "/t",
+        "REG_DWORD",
+        "/d",
+        "1",
+        "/f",
+    ]);
+    // FOF_NO_UI 0x614, FOF_ALLOWUNDO 0x40, FOFX_RECYCLEONDELETE 0x80000,
+    // FOF_WANTNUKEWARNING 0x4000 (the last would ask in a dialog: left out)
+    for (label, flags) in [
+        (
+            "NO_UI | ALLOWUNDO | RECYCLEONDELETE",
+            0x614 | 0x40 | 0x8_0000u32,
+        ),
+        ("NO_UI | ALLOWUNDO", 0x614 | 0x40),
+    ] {
+        let p = tmp.path().join(format!("big-{flags:x}.bin"));
+        fs::write(&p, blob(78, 5 * 1024 * 1024)).unwrap();
+        let p = p.canonicalize().unwrap();
+        let events = dedupe::recycle::trace(&p, flags);
+        let shown = dedupe::util::strip_verbatim(&p);
+        let in_bin = trash::os_limited::list()
+            .map(|items| items.iter().any(|i| i.original_path() == shown))
+            .unwrap_or(false);
+        eprintln!(
+            "MaxCapacity 1 MB, a 5 MB file, {label}: {events:?}; on disk {}, in the bin {in_bin}",
+            p.exists()
+        );
+    }
+    reg(&["delete", &key, "/v", "MaxCapacity", "/f"]);
+}
