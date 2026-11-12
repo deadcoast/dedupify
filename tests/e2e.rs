@@ -1785,11 +1785,19 @@ fn a_terminal_gets_colour() {
     assert!(colour_sgr, "no colour escape came back\n{raw:?}");
     assert!(!shown.contains("[38;2;"), "escapes shown as text\n{shown}");
     // a note under a PASS (the deep row's model path, when no model is
-    // installed) is as quiet as the detail: the escape before it is grey
+    // installed) is as quiet as the detail: the last colour set before it
+    // is grey (the Windows pseudo console moves the cursor in between)
     if let Some(at) = raw.find("expected at") {
-        let sgr = &raw[raw[..at]
-            .rfind("\u{1b}[")
-            .expect("an escape before the note")..at];
+        let sgr = raw[..at]
+            .split('\u{1b}')
+            .skip(1)
+            .filter_map(|seq| {
+                let params = seq.strip_prefix('[')?;
+                let end = params.find(|c: char| ('@'..='~').contains(&c))?;
+                (params.as_bytes()[end] == b'm').then(|| params[..end].to_string())
+            })
+            .last()
+            .expect("a colour set before the note");
         assert!(
             sgr.contains("138;138;138"),
             "note under a PASS painted {sgr:?}"

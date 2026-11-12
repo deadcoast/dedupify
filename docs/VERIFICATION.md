@@ -2968,7 +2968,12 @@ The picture showed one thing changed since: the deep row's note
 outshining its own detail. Under a `PASS` the note is now as quiet as
 the detail; under a WARN or FAIL the line is still what to do and stands
 out **[CLAUDE]**. `a_terminal_gets_colour` asserts it (the escape before
-the note is grey); suite, clippy both targets and fmt green after it.
+the note is grey); suite, clippy both targets and fmt green after it
+here. Correction, recorded in Phase 13: CI's Windows job failed that
+assertion at this commit (run 43210235785) — the pseudo console moves
+the cursor (`ESC[17C`) between the colour and the note, so "the escape
+before it" was the move. The test now reads the last colour set before
+the note; green on Windows from Phase 13 (VERIFICATION § Phase 13 § 7).
 
 ## Not verified here
 
