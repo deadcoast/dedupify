@@ -2577,13 +2577,17 @@ fn windows_of(pid: u32) -> Vec<(String, String)> {
     find.found
 }
 
-/// The Recycle Bin refusing a file (Phase 13, TECH-11). `purge` promises
-/// never to delete outright; that rests on the `trash` crate's flags
-/// (`FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING`), never seen with a
-/// file the bin cannot hold. Here the temp volume's bin is capped at 1 MB
-/// (its `MaxCapacity` under `HKCU\…\BitBucket\Volume\{GUID}`) and a 5 MB
-/// duplicate is purged: it must be refused, still on disk, said why, and
-/// the cap put back. It changes a setting of the machine, so it runs only
+/// A file the Recycle Bin is set not to hold (Phase 13, TECH-11).
+/// `purge` promises never to delete outright. With the `trash` crate's
+/// flags a 5 MB duplicate against a bin capped at 1 MB held `purge` on the
+/// shell's "Delete File" dialog, which asks to delete permanently (CI run
+/// 43226616276); `recycle` asks the shell without that warning and stops
+/// any file the shell will not recycle. Two settings of the temp volume's
+/// bin (`HKCU\…\BitBucket\Volume\{GUID}`): capped at 1 MB
+/// (`MaxCapacity`), and set to delete at once (`NukeOnDelete`). Either way
+/// the duplicate must end on disk, refused, or in the bin, restored
+/// byte-identical by `--undo` — never gone, never a dialog. Each setting
+/// is put back after. It changes the machine's settings, so it runs only
 /// where the machine is disposable: CI sets `DEDUPE_TEST_BIN_CAP=1`.
 #[cfg(windows)]
 #[test]
@@ -2592,7 +2596,7 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::time::{Duration, Instant};
     if std::env::var_os("DEDUPE_TEST_BIN_CAP").is_none() {
-        eprintln!("DEDUPE_TEST_BIN_CAP not set: the bin's cap is left alone; skipped");
+        eprintln!("DEDUPE_TEST_BIN_CAP not set: the bin's settings are left alone; skipped");
         return;
     }
     #[link(name = "kernel32")]
@@ -2601,112 +2605,119 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
         fn GetVolumeNameForVolumeMountPointW(mount: *const u16, out: *mut u16, len: u32) -> i32;
     }
     let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
-    let fx = fixture();
-    // the fixture's volume and its GUID
-    let mut mount = vec![0u16; 300];
-    let mut name = vec![0u16; 100];
-    // SAFETY: NUL-terminated input; output buffers of the lengths given
-    unsafe {
-        assert_ne!(
-            GetVolumePathNameW(wide(&fx.root).as_ptr(), mount.as_mut_ptr(), 300),
-            0
-        );
-        assert_ne!(
-            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), 100),
-            0
-        );
-    }
-    let name = std::ffi::OsString::from_wide(&name[..name.iter().position(|&c| c == 0).unwrap()])
-        .to_string_lossy()
-        .into_owned();
-    let guid = &name[name.find('{').unwrap()..=name.find('}').unwrap()];
-    let key =
-        format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}");
     let reg = |args: &[&str]| Command::new("reg").args(args).output().expect("reg.exe");
-    let old = String::from_utf8_lossy(&reg(&["query", &key, "/v", "MaxCapacity"]).stdout)
-        .lines()
-        .find(|l| l.contains("MaxCapacity"))
-        .and_then(|l| l.split_whitespace().last().map(str::to_string));
-    assert!(reg(&[
-        "add",
-        &key,
-        "/v",
-        "MaxCapacity",
-        "/t",
-        "REG_DWORD",
-        "/d",
-        "1",
-        "/f"
-    ])
-    .status
-    .success());
-    let big = blob(77, 5 * 1024 * 1024);
-    put(&fx.root, "big/keep.bin", &big);
-    put(&fx.root, "big/copy/keep.bin", &big);
-    // a dialog the flags failed to suppress would hold the run: a clock
-    let mut child = Command::new(bin())
-        .args(["purge", "big", "."])
-        .current_dir(&fx.root)
-        .env("DEDUPE_JOURNAL_DIR", &fx.journal)
-        .env("NO_COLOR", "1")
-        .env("COLUMNS", "200")
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn dedupe");
-    let t0 = Instant::now();
-    let status = loop {
-        if let Some(s) = child.try_wait().unwrap() {
-            break Some(s);
+    for (value, setting) in [("MaxCapacity", "1"), ("NukeOnDelete", "1")] {
+        let fx = fixture();
+        // the fixture's volume and its GUID
+        let mut mount = vec![0u16; 300];
+        let mut name = vec![0u16; 100];
+        // SAFETY: NUL-terminated input; output buffers of the lengths given
+        unsafe {
+            assert_ne!(
+                GetVolumePathNameW(wide(&fx.root).as_ptr(), mount.as_mut_ptr(), 300),
+                0
+            );
+            assert_ne!(
+                GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), 100),
+                0
+            );
         }
-        if t0.elapsed() > Duration::from_secs(120) {
-            // what holds it: the child's own windows, by title and class
-            for (title, class) in windows_of(child.id()) {
-                eprintln!("window of the purge: {title:?}  class {class:?}");
+        let name =
+            std::ffi::OsString::from_wide(&name[..name.iter().position(|&c| c == 0).unwrap()])
+                .to_string_lossy()
+                .into_owned();
+        let guid = &name[name.find('{').unwrap()..=name.find('}').unwrap()];
+        let key = format!(
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}"
+        );
+        let old = String::from_utf8_lossy(&reg(&["query", &key, "/v", value]).stdout)
+            .lines()
+            .find(|l| l.contains(value))
+            .and_then(|l| l.split_whitespace().last().map(str::to_string));
+        assert!(reg(&[
+            "add",
+            &key,
+            "/v",
+            value,
+            "/t",
+            "REG_DWORD",
+            "/d",
+            setting,
+            "/f"
+        ])
+        .status
+        .success());
+        let big = blob(77, 5 * 1024 * 1024);
+        put(&fx.root, "big/keep.bin", &big);
+        put(&fx.root, "big/copy/keep.bin", &big);
+        // a dialog would hold the run: a clock
+        let mut child = Command::new(bin())
+            .args(["purge", "big", "."])
+            .current_dir(&fx.root)
+            .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", "200")
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn dedupe");
+        let t0 = Instant::now();
+        let status = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break Some(s);
             }
-            let _ = child.kill();
-            let _ = child.wait();
-            break None;
+            if t0.elapsed() > Duration::from_secs(120) {
+                for (title, class) in windows_of(child.id()) {
+                    eprintln!("window of the purge: {title:?}  class {class:?}");
+                }
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        };
+        let mut out = String::new();
+        use std::io::Read as _;
+        let _ = child.stdout.take().unwrap().read_to_string(&mut out);
+        // the setting put back before anything is asserted
+        match &old {
+            Some(v) => {
+                let v = u32::from_str_radix(v.trim_start_matches("0x"), 16).unwrap_or(0);
+                reg(&[
+                    "add",
+                    &key,
+                    "/v",
+                    value,
+                    "/t",
+                    "REG_DWORD",
+                    "/d",
+                    &v.to_string(),
+                    "/f",
+                ]);
+            }
+            None => {
+                reg(&["delete", &key, "/v", value, "/f"]);
+            }
         }
-        std::thread::sleep(Duration::from_millis(200));
-    };
-    let mut out = String::new();
-    use std::io::Read as _;
-    let _ = child.stdout.take().unwrap().read_to_string(&mut out);
-    // the cap put back before anything is asserted
-    match &old {
-        Some(v) => {
-            let v = u32::from_str_radix(v.trim_start_matches("0x"), 16).unwrap_or(10);
-            reg(&[
-                "add",
-                &key,
-                "/v",
-                "MaxCapacity",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                &v.to_string(),
-                "/f",
-            ]);
+        eprintln!("{value} = {setting}\n{out}");
+        let copy = fx.root.join("big/copy/keep.bin");
+        assert!(fx.root.join("big/keep.bin").exists(), "the keeper\n{out}");
+        let status = status.expect("purge did not end in 120 s: a dialog may be waiting");
+        if copy.exists() {
+            // refused: left in place, and said
+            assert_eq!(status.code(), Some(2), "{out}");
+            assert!(out.contains("Recycle Bin refused it"), "{out}");
+            eprintln!("{value} = {setting}: refused, left on disk");
+        } else {
+            // taken: in the bin, and back from it whole
+            assert_eq!(status.code(), Some(0), "{out}");
+            let (code, undo, _) = run(&fx, &["--undo"]);
+            assert_eq!(code, 0, "{undo}");
+            assert!(
+                copy.exists(),
+                "binned and not restorable: deleted outright\n{out}\n{undo}"
+            );
+            eprintln!("{value} = {setting}: in the Recycle Bin, restored by --undo");
         }
-        None => {
-            reg(&["delete", &key, "/v", "MaxCapacity", "/f"]);
-        }
+        assert_eq!(fs::read(&copy).unwrap(), big);
     }
-    eprintln!("{out}");
-    let copy = fx.root.join("big/copy/keep.bin");
-    let kept = fx.root.join("big/keep.bin");
-    eprintln!(
-        "after: keeper on disk {}, copy on disk {}",
-        kept.exists(),
-        copy.exists()
-    );
-    let status = status.expect("purge did not end in 120 s: a dialog may be waiting");
-    assert!(kept.exists(), "the keeper\n{out}");
-    assert!(
-        copy.exists(),
-        "the bin could not hold it, and it was deleted outright\n{out}"
-    );
-    assert_eq!(fs::read(&copy).unwrap(), big);
-    assert_eq!(status.code(), Some(2), "{out}");
-    assert!(out.contains("Recycle Bin refused it"), "{out}");
 }
