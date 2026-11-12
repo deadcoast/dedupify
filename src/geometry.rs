@@ -713,10 +713,13 @@ fn one_way(a: &Thumb, b: &Thumb, robust: bool) -> Fit {
 }
 
 /// The fit's thumbnail of a file, decoded as small as its format allows
-/// (twice the thumbnail's side: the resize to it still averages). `None`
-/// when it does not decode.
+/// with the long side still at four times the thumbnail's (a 12-megapixel
+/// JPEG at a quarter): measured against the full decode, copies' scores
+/// within 0.003 and no decision changed, where twice the side moved a
+/// letterboxed copy 0.022 (VERIFICATION § Phase 14). `None` when it does
+/// not decode.
 pub fn thumb_of(path: &std::path::Path) -> Option<Thumb> {
-    let img = crate::decode::load_small(path, 2 * MAX_SIDE as u32).ok()?;
+    let img = crate::decode::load_small(path, 4 * MAX_SIDE as u32).ok()?;
     Some(Thumb::from_image(&img, MAX_SIDE))
 }
 
