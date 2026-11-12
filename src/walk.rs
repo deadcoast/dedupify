@@ -325,7 +325,8 @@ mod tests {
             names,
             [".Trash-me/a.jpg", "Trash/b.jpg", "photos/IMG_0041.jpg"]
         );
-        assert_eq!(s.system, 8);
+        // on Windows the two letter cases of the bin are one folder
+        assert_eq!(s.system, if cfg!(windows) { 7 } else { 8 });
         // a file of that name is not a folder: a candidate as any other
         assert!(!system_folder(
             Path::new("/x/notes"),
