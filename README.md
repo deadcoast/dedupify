@@ -69,4 +69,5 @@ output, `DEDUPE_ASCII=1` for the ASCII glyph set.
 ffmpeg; without it they return early). `cargo test --release --test bench
 -- --ignored --nocapture` times each stage on a fixed generated corpus.
 `.github/workflows/ci.yml` runs the suite, clippy and rustfmt on Linux
-and Windows on every push to `main`.
+and Windows when a commit message carries `[ci]` (once per phase, at
+delivery) or when started by hand from the Actions tab.

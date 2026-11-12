@@ -442,5 +442,9 @@ pass runs.
   only all together through `c`, a person culling a burst (Phase 11).
 - A move never leaves two files or none: across volumes it is a verified
   copy whose original is deleted last (Phase 10).
+- CI runs once per phase, at its delivery (`[ci]` in the commit message),
+  or by hand; work in between is verified here and pushed in batches, not
+  after every change. A Windows-only fix that needs CI waits for the
+  delivery run unless it blocks the phase.
 - New flags need a reason stronger than convenience; the menu stays at five
   workflows (plus `again`, the last folder) per screen.

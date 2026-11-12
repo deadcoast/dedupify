@@ -1,13 +1,14 @@
-# The suite on Linux and Windows, with ffmpeg, on every push to main and
-# every pull request (Phase 12, TECH-08): Windows no longer waits for a
-# manual run. The `ci` profile is release without LTO, so the test
+# The suite on Linux and Windows, with ffmpeg (Phase 12, TECH-08). Not on
+# every push: a push runs it only when its commit message carries `[ci]`
+# (once per phase, at delivery), and anyone can start it by hand from the
+# Actions tab. Any other push makes a run whose job is skipped, which uses
+# no runner minutes. The `ci` profile is release without LTO, so the test
 # binaries build in minutes and the image work runs at release speed.
 name: ci
 
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -20,6 +21,7 @@ env:
 
 jobs:
   suite:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[ci]')
     name: suite (${{ matrix.os }})
     strategy:
       fail-fast: false
