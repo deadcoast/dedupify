@@ -390,16 +390,26 @@ Items: SHELVED.md § Phase 13. Delivered (VERIFICATION § Phase 13):
   colour set, not the last escape (CI had failed it on Windows since
   Phase 12's last commit).
 
-## Phase 14 — cost at scale   ← in progress (TODO.md)
+## Phase 14 — cost at scale   ← delivered 2026-11-12
 
 Numbers from real use before changes to speed: the bench on real
 photographs and videos, with the model, its peak memory, and 100,000
 files, here and on the owner's 16 threads; then the fit's search, long
 video's decode and the deep tier's throughput, each measured before and
 after against the decisions it must not change. `near.rs` split first,
-as `video` was. Items: SHELVED.md § Phase 14.
+as `video` was. Items: SHELVED.md § Phase 14. Delivered (VERIFICATION §
+Phase 14): the bench takes real folders, times the model and reads peak
+memory per stage, and runs 100,000 files; `near` is four files; the fit
+searches on summed-area tables (scores identical) and decodes a JPEG at a
+quarter or an eighth for its thumbnail, a keeper's thumbnail once per
+group (camera-size pairs 2.8× faster, no decision changed); a long video
+takes its share of the machine's threads, starts first, and asks for the
+graphics hardware's decoder with software behind it; batched inference
+was measured bit-identical and slower, so the deep tier stays one
+picture per inference. Open: the bench on the owner's machine
+(`runs\win\RUN_BENCH.cmd`), real 1–2 hour videos, a GPU.
 
-## Phase 15 — matching debts   ← planned
+## Phase 15 — matching debts   ← in progress (TODO.md)
 
 The measurements Phase 11 left open for this pass: PDQ at a fixed working
 size, the near keeper's degree against the copy marks, dark blurred bars

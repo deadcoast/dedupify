@@ -18,17 +18,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 
 ---
 
-## Phase 13 — the real disk   `[done]` 2026-11-12 — see PLAN.md § Phase 13, VERIFICATION.md § Phase 13
-
-1. **SC-11** doc drift: where ffmpeg is looked for; the concurrency formula
-2. **CORE-09** never enter the OS trash or system folders
-3. **CORE-10** online-only files are not read
-4. **CORE-11** a clock on every child process
-5. **TECH-09** the journal flushed before it is renamed into place
-6. **TECH-11** the Recycle Bin refusing a file, driven on the Windows CI
-   runner
-
-## Phase 14 — cost at scale   `[todo]`
+## Phase 14 — cost at scale   `[done]` 2026-11-12 — see PLAN.md § Phase 14, VERIFICATION.md § Phase 14
 
 1. **TECH-10** the bench on real files, the model, peak memory, 100,000
    files; here and on the owner's machine
@@ -37,12 +27,14 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 4. **CORE-16** long video's decode cost
 5. **TECH-15** the deep tier's throughput
 
-## Phase 15 — matching debts   `[shelved]`
+## Phase 15 — matching debts   `[todo]`
 
 1. **CORE-12** PDQ at a fixed working size
 2. **CORE-13** the near keeper's degree against the copy marks
 3. **CORE-14** dark blurred bars on video
 4. **TECH-14** the ONNX export against Meta's TorchScript model, in CI
+5. **CORE-17** a copy chained into another picture's group is measured
+   against that keeper (found in Phase 14's 100,000-file run)
 
 ## Phase 16 — the workspace at size   `[shelved]`
 

@@ -3175,3 +3175,160 @@ no bin is refused before the shell, and the workspace offers `_milked`.
   drive with a bin (an external disk) takes no hard link, so there a file
   the bin lets go is reported `deleted without the Recycle Bin`, not put
   back — the cap and delete-at-once checks still run before it.
+
+---
+
+# VERIFICATION — Phase 14 (cost at scale), run on 2026-11-12
+
+Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
+built with `--profile ci` (the release profile without link-time
+optimisation, as CI builds it). Source: IDENTIFIED 2026-11-12
+(`f9227ee`), items TECH-10, SC-09, CORE-15, CORE-16, TECH-15.
+
+## 1. The bench (TECH-10)
+
+`tests/bench.rs` now adds real folders (`DEDUPE_PHOTO_DIRS`,
+`DEDUPE_VIDEO_DIRS`, only read), runs DECODE again with the model when
+it is installed (`DECODE+m`), reads each stage's peak memory (Linux:
+`VmHWM`, reset at the stage's start through `clear_refs`; macOS
+`getrusage`; Windows `GetProcessMemoryInfo`, the peak since the start),
+and runs the videos' frame pass once more in software and with
+`-hwaccel auto`, comparing the signatures. `scale_run` writes 100,000
+files and checks the groups it finds against the ones it planted.
+
+The fixed corpus, with the model, after this phase:
+
+```
+ SCAN        0.003 s      14 MB   1492 files, 269 MB
+ SIZE        0.004 s      14 MB   1204 share a size
+ SAMPLE      0.036 s      14 MB   400 share a sample, 135.2 MB read
+ HASH        0.020 s      16 MB   400 confirmed, 78 MB read, 200 groups
+ DECODE      3.260 s      56 MB   280 images, 85.9 a second
+ DECODE+m   59.051 s     275 MB   280 images, 280 embedded, 4.7 a second
+ MATCH       1.761 s     277 MB   120 near groups, 100 fits
+ FRAMES     12.565 s     281 MB   12 videos, 1800 frames
+ MATCH v     0.033 s     281 MB   6 video groups
+ FRAMES sw    4.273 s       ? MB   12 videos, 0.03 h, one at a time
+ FRAMES hw    4.781 s       ? MB   -hwaccel auto: 12 of 12 signatures identical to software
+```
+
+The model is the cost of a scan that has it: 18 times DECODE's time, and
+220 MB. MATCH was 2.4 s on this corpus at `f9227ee` (IDENTIFIED M2).
+
+The 100,000-file run (`DEDUPE_SCALE_FILES`, written in 13.4 s):
+
+```
+ SCAN        0.181 s      41 MB   100000 files, 427 MB
+ SIZE        0.437 s      65 MB   99970 share a size
+ SAMPLE      0.429 s      84 MB   18400 share a sample, 426.7 MB read
+ HASH        0.004 s      85 MB   18400 confirmed, 0 MB read, 9200 groups
+ DECODE     51.537 s     127 MB   8000 images, 155.2 a second
+ MATCH       5.066 s     127 MB   1008 near groups, 334 fits
+   check                          995 planted pairs grouped, 13 other groups
+```
+
+Found by the check: no stranger was acted on — the 22 strangers in the
+13 other groups matched on the two 64-bit hashes (d 6–10, p 12–14; the
+pictures are smooth 192 × 144 noise) and every one is listed only (PDQ
+98–130, fit 0.59–0.82). Two planted copies of 1,000 (`7831`, `4127`)
+were listed and not acted on: their pair chained, through a hash edge,
+into a group whose keeper is another picture, and each is measured
+against that keeper. Taken into Phase 15 as **CORE-17** [CLAUDE].
+
+## 2. `near` in four files (SC-09)
+
+`near.rs` (1,522 lines) is `near/mod.rs` (334: the types, `hash_all`,
+the keeper order), `relation.rs` (617: `Relation`, its words, the
+relation functions), `bars.rs` (224: bars on stills, `picture_pixels`)
+and `group.rs` (370: union–find, `group`), each with its tests. Every
+non-blank line of the old file is in exactly one new file; the 16 lines
+added are the module heads and `mod`/`pub use` glue. `near::*` is
+unchanged for its callers.
+
+## 3. The fit (CORE-15)
+
+Three changes: the coarse search sums each window from summed-area
+tables of the thumbnail and its square (`geometry::Integral`), leaving
+only the cross term per position; a JPEG is decoded inside its inverse
+DCT at 1/2, 1/4 or 1/8 while the long side stays at least 512
+(`decode::load_small`, EXIF orientation applied), for the thumbnail
+only; a keeper's thumbnail is decoded once per group, in `near::group`
+and when a keeper is chosen by hand.
+
+`tests/fit_compare.rs` writes every pair's score; the tree before
+(`89d76b5`) and after ran the same pairs — 60 photographs at 640–1200 px
+and 20 at 2240–4200 px, each against a half-size copy, a 70 % crop, a
+4° rotation, a letterbox, a squeeze, a watermark and a quality-50
+re-encode, and each against the next as a stranger (638 pairs):
+
+| build | 638 pairs | the 159 camera-size | copies' largest change | strangers' largest | decisions changed |
+|---|---|---|---|---|---|
+| before | 55.3 s | 30.4 s | — | — | — |
+| summed-area search only (479 smaller pairs) | 20.1 s against 25.3 s | — | 0.0000 | 0.0000 | 0 |
+| + decode to 256 px | 30.2 s | 13.0 s | 0.022 (a camera-size letterbox) | 0.047 | 0 |
+| + decode to 512 px (shipped) | 28.5 s | 11.0 s | 0.0026 | 0.033 | 0 |
+
+The summed-area search gives the old scores to four decimals. At the
+512-pixel floor every copy is within 0.0026, and the strangers' highest
+scores (0.863 → 0.865, 0.790, 0.782) within 0.002; four of 78 strangers
+moved more than 0.005, all scoring under 0.73 — their best placement is a
+weak maximum that a slightly different thumbnail moves, 0.19 or more
+under `FIT_MIN`. The TODO's bar, every score within 0.005, holds for the
+copies and not for those four.
+
+## 4. Long video (CORE-16)
+
+- Each ffmpeg process takes the machine's threads over the processes
+  running at once, at least 2 (`video::ffmpeg_threads`): 2 here as
+  before, 4 on 16 threads. Frame-threaded decoding is exact.
+- Every file is probed first and hashed longest first, from a queue
+  (`video::queue`), so a long file never starts last and runs alone.
+- A file of ten minutes or more asks for `-hwaccel auto`, and is decoded
+  again in software if that run fails (`HWACCEL_MIN_SECS`,
+  `DEDUPE_HWACCEL=0`). Here, with no graphics hardware, ffmpeg falls back
+  inside the run: the 12 bench videos' signatures identical, 0.04 s a
+  file spent looking.
+- Not tried: `-skip_frame nonref`. The fps filter takes the frame
+  nearest each fifteenth of a second from the frames decoded; dropping
+  the B-frames of a 30 fps file leaves about 10 a second, so frames would
+  repeat and both the TMK and the positional signatures change. It ships
+  only with the conformance and video tables measured again on real long
+  files.
+
+## 5. The deep tier (TECH-15)
+
+The export writes its batch into the graph (a reshape to
+`[1, 2048, 100]` before the pooling); `tests/deep_batch.rs` rewrites
+that constant and runs 16 pictures on one thread:
+
+| batch | pictures a second | largest difference from batch 1 |
+|---|---|---|
+| 1 | 2.56 | 0 |
+| 2 | 2.20 | 0 |
+| 4 | 1.92 | 0 |
+| 8 | 1.94 | 0 |
+
+Batching is bit-identical and slower here, so `deep` keeps one picture
+per inference, one inference per thread: 4.7 pictures a second on 2
+threads (§ 1), 2.4 per thread.
+
+## 6. Suite (here)
+
+`cargo test --profile ci`: 132 unit tests (1 ignored), the band test, 34
+end-to-end tests (3 ignored), and the 34 again with the model installed.
+clippy at `-D warnings`, all targets, Linux and the Windows target without
+the deep tier; `cargo fmt --check` clean.
+
+## 7. CI
+
+CI_RESULT
+
+## Not verified here
+
+- The bench on the owner's machine (16 threads): `runs\win\RUN_BENCH.cmd`
+  runs it, with the model when it is in `runs\win\models`, and real
+  folders when listed at the top of `win_bench.ps1`.
+- Real 1–2 hour videos, 1080p or 4K; hardware decoding on a GPU, and
+  whether its frames match software's there.
+- Camera photographs: the fit was measured on procedural pictures made
+  camera-size, not on real 12-megapixel files.

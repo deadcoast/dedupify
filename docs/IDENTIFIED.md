@@ -282,6 +282,16 @@ closes a debt a VERIFICATION section left open, that section is named.
   nonref`), the fps filter filling from their neighbours. *Verify:* the conformance (level 2 =
   1.0000 on Meta's samples) and the Phase 3/11 video tables unchanged;
   the time per hour of footage recorded on the owner's machine.
+- **CORE-17** *(found after this review, Phase 14's 100,000-file run)*
+  A chained group: union–find joins members through any hash edge, and
+  each member is then measured against the keeper only. Two planted
+  copies of 1,000 joined a stranger's group through a near-threshold
+  hash edge; measured against that keeper they were listed, never acted
+  on, though each confirms against its own original. When a member does
+  not confirm against the keeper, measure it against the member it was
+  joined through and split confirmed pairs into their own group. *Verify:*
+  the scale run's check (1,000 copies acted on, no stranger acted on);
+  the Phase 6–11 keeper and grouping tables unchanged. [CLAUDE]
 
 ### 4.5 TECHNICAL-MODULE-ENHANCEMENTS
 

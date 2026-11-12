@@ -18,6 +18,9 @@ use common::*;
 use std::io::Write;
 use std::path::Path;
 
+/// A named way to make a copy.
+type Variant = (&'static str, fn(&image::RgbImage) -> image::RgbImage);
+
 fn save(p: &Path, img: &image::RgbImage) {
     let mut v = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut v, 90)
@@ -35,7 +38,7 @@ fn scores_to_a_file() {
     };
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path();
-    let variants: [(&str, fn(&image::RgbImage) -> image::RgbImage); 7] = [
+    let variants: [Variant; 7] = [
         ("half", |i| scale(i, 0.5)),
         ("crop70", |i| crop_center(i, 0.7)),
         ("rot4", |i| rotate_small(i, 4.0)),

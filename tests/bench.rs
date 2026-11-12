@@ -257,10 +257,69 @@ fn image_rows(rows: &mut Vec<Row>, cands: &[walk::Candidate], model: bool) {
             });
         }
     }
-    stage(rows, "MATCH", || {
+    let groups = stage(rows, "MATCH", || {
         let g = near::group(hashed, &mut nstats, &exact::NoProgress);
-        ((), format!("{} near groups, {} fits", g.len(), nstats.fits))
+        let what = format!("{} near groups, {} fits", g.len(), nstats.fits);
+        (g, what)
     });
+    // the scale corpus plants one copy per eight images (`i…7` a half-size
+    // copy of `i…6`): any other group is a finding
+    if cands
+        .iter()
+        .any(|c| c.path.to_string_lossy().contains("i000006"))
+    {
+        let num = |m: &near::NearMember| -> u64 {
+            let s = m
+                .hashed
+                .rep
+                .cand
+                .path
+                .file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
+            s.trim_start_matches('i').parse().unwrap_or(u64::MAX)
+        };
+        // keeper first; a member acted on carries `*`, its relation's
+        // numbers after it
+        let mut other = Vec::new();
+        for g in &groups {
+            let mut n: Vec<u64> = g.members.iter().map(num).collect();
+            n.sort();
+            let planted = n.len() == 2 && n[0] % 8 == 6 && n[1] == n[0] + 1;
+            if !planted {
+                let line: Vec<String> = g
+                    .members
+                    .iter()
+                    .map(|m| match m.relation {
+                        None => format!("{}", num(m)),
+                        Some(r) => format!(
+                            "{}{} ({})",
+                            num(m),
+                            if r.confirmed() { "*" } else { "" },
+                            r.numbers()
+                        ),
+                    })
+                    .collect();
+                other.push(line.join(" "));
+            }
+        }
+        rows.push(Row {
+            stage: "  check".into(),
+            what: format!(
+                "{} planted pairs grouped, {} other groups{}",
+                groups.len() - other.len(),
+                other.len(),
+                if other.is_empty() {
+                    String::new()
+                } else {
+                    format!(":\n            {}", other.join("\n            "))
+                }
+            ),
+            secs: 0.0,
+            peak: None,
+        });
+    }
 }
 
 /// `len` bytes from `seed`, the same every run.
