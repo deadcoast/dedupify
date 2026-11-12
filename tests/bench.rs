@@ -22,7 +22,10 @@
 //!
 //! Real files join the corpus from `DEDUPE_PHOTO_DIRS` and
 //! `DEDUPE_VIDEO_DIRS` (lists of folders, separated as PATH is; only read).
-//! With the model installed, DECODE runs again with it (`DECODE+m`). Each
+//! With the model installed, DECODE runs again with it (`DECODE+m`). The
+//! videos' frame pass runs once more one file at a time in software and
+//! with `-hwaccel auto` (`FRAMES sw`, `FRAMES hw`), and the signatures are
+//! compared. Each
 //! row carries the stage's peak memory: on Linux the peak is reset at the
 //! stage's start, elsewhere it is the peak since the run began (the
 //! header says which). (Phase 14, TECH-10)
@@ -47,7 +50,7 @@ use std::time::{Duration, Instant};
 use dedupe::exact::{self, PipelineStats, Progress, Stage};
 use dedupe::kind::Kind;
 use dedupe::near::{self, Rep};
-use dedupe::video::{self, VHashed, VRep};
+use dedupe::video::{self, VHashed, VRep, VideoSig};
 use dedupe::walk::{self, Filter};
 
 /// Records when each stage of the exact tier ends, and its peak memory.
@@ -436,6 +439,52 @@ fn stages_on_a_fixed_corpus() {
         stage(&mut rows, "MATCH v", || {
             let vg = video::group(vh, &mut vstats, &exact::NoProgress);
             ((), format!("{} video groups", vg.len()))
+        });
+        // the frame pass by the graphics hardware against software, on
+        // every video, whatever its length (CORE-16): the same frames, and
+        // what it costs or saves
+        let paths: Vec<PathBuf> = cands
+            .iter()
+            .filter(|c| Kind::Video.matches(&c.path))
+            .map(|c| c.path.clone())
+            .collect();
+        let metas: Vec<(PathBuf, video::Meta)> = paths
+            .iter()
+            .filter_map(|p| video::probe(p).ok().map(|m| (p.clone(), m)))
+            .collect();
+        let pass = |hw: bool| -> (Vec<Option<VideoSig>>, f64) {
+            let t = Instant::now();
+            let sigs = metas
+                .iter()
+                .map(|(p, m)| video::frame_pass(p, m, None, hw).ok())
+                .collect();
+            (sigs, t.elapsed().as_secs_f64())
+        };
+        let (soft, soft_s) = pass(false);
+        let (hard, hard_s) = pass(true);
+        let same = soft
+            .iter()
+            .zip(&hard)
+            .filter(|(a, b)| match (a, b) {
+                (Some(a), Some(b)) => a.tmk == b.tmk && a.positional == b.positional,
+                _ => false,
+            })
+            .count();
+        let hours: f64 = metas.iter().map(|(_, m)| m.duration).sum::<f64>() / 3600.0;
+        rows.push(Row {
+            stage: "FRAMES sw".into(),
+            what: format!("{} videos, {hours:.2} h, one at a time", metas.len()),
+            secs: soft_s,
+            peak: None,
+        });
+        rows.push(Row {
+            stage: "FRAMES hw".into(),
+            what: format!(
+                "-hwaccel auto: {same} of {} signatures identical to software",
+                metas.len()
+            ),
+            secs: hard_s,
+            peak: None,
         });
     } else {
         rows.push(Row {

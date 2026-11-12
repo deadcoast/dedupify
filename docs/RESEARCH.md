@@ -811,8 +811,12 @@ and a matching toolchain; `ffmpeg`/`ffprobe` are looked for on PATH, then
 where WinGet, Scoop, Chocolatey or Homebrew put them, or beside `dedupe`
 (`tools.rs`, Phase 11 on Windows); `doctor` says where they were found,
 and a run that wanted the pass without them says so and finishes the
-exact tier. Concurrency: ⌊cores/2⌋ clamped to 1–4 ffmpeg processes with
-`-threads 2` each **[CLAUDE]**.
+exact tier. Concurrency: ⌊cores/2⌋ clamped to 1–4 ffmpeg processes, each
+with the machine's threads over that count, at least 2 (`-threads`;
+Phase 14), the longest file first so a long one never runs alone at the
+end; a file of ten minutes or more asks for the graphics hardware's
+decoder (`-hwaccel auto`) and falls back to software when that run fails
+(`DEDUPE_HWACCEL=0` turns it off) **[CLAUDE]**.
 
 Two tiers, because they fail differently:
 

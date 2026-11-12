@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use super::{Meta, VideoError, FFMPEG_THREADS};
+use super::{ffmpeg_threads, Meta, VideoError};
 
 /// The picture inside bars: a pillarbox (bars left and right) or a
 /// letterbox (bars above and below), in source pixels.
@@ -84,7 +84,7 @@ pub fn detect_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>, Vid
         "-loglevel",
         "info",
         "-threads",
-        &FFMPEG_THREADS.to_string(),
+        &ffmpeg_threads().to_string(),
         "-skip_frame",
         "nokey",
     ])
@@ -265,7 +265,7 @@ pub fn detect_flat_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>
         "-loglevel",
         "error",
         "-threads",
-        &FFMPEG_THREADS.to_string(),
+        &ffmpeg_threads().to_string(),
         "-skip_frame",
         "nokey",
     ])

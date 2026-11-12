@@ -385,6 +385,11 @@ out`) and a note under the totals names it (`timed out: clips/a.mp4, …
 ffmpeg sent nothing for 60 s and was stopped; left out of this run`).
 `DEDUPE_STALL` sets the minute in seconds, for a slow network share.
 
+A video of ten minutes or more is decoded by the graphics hardware when
+ffmpeg finds a decoder there, and in software when it does not or that
+run fails; the frames are the same either way (Phase 14).
+`DEDUPE_HWACCEL=0` keeps every file in software.
+
 Near groups follow the exact groups and continue the numbering:
 
 ```

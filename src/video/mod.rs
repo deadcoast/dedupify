@@ -22,8 +22,6 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use rayon::prelude::*;
-
 use crate::exact::{Progress, Stage};
 use crate::pdq::{self};
 use crate::perceptual::{self, Signature, Variant, GRID, VARIANT_ORDER};
@@ -73,8 +71,34 @@ pub const LEVEL2_MIN: f32 = 0.8;
 /// score between 0.8 and 0.9 are grouped, listed as `kept~`, and left to `milk`.
 pub const LEVEL2_CONFIRM: f32 = 0.9;
 
-/// ffmpeg threads per process and concurrent processes.
+/// ffmpeg threads per process, at least; `ffmpeg_threads` shares the
+/// machine's threads among the `concurrency()` processes. Decoding is
+/// exact whatever the thread count (frame threading changes when a frame
+/// is decoded, never its pixels).
 pub const FFMPEG_THREADS: usize = 2;
+
+/// Threads per ffmpeg process: the machine's threads over the processes
+/// running at once, at least `FFMPEG_THREADS` (2 on 2 to 5 threads, 4 on
+/// 16). (Phase 14, CORE-16)
+pub fn ffmpeg_threads() -> usize {
+    let n = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(2);
+    (n / concurrency()).max(FFMPEG_THREADS)
+}
+
+/// A file at least this long is decoded by the graphics hardware when
+/// ffmpeg finds a decoder there (`-hwaccel auto`), and again in software
+/// if that run fails. H.264, HEVC, VP9 and AV1 decoding is exact by their
+/// standards, so the frames are the same; shorter files are not worth
+/// the hardware's start-up. `DEDUPE_HWACCEL=0` turns it off. (Phase 14,
+/// CORE-16)
+pub const HWACCEL_MIN_SECS: f64 = 600.0;
+
+/// Whether the frame pass may ask for hardware decoding.
+pub fn hwaccel_enabled() -> bool {
+    std::env::var("DEDUPE_HWACCEL").map_or(true, |v| v != "0")
+}
 
 pub fn concurrency() -> usize {
     (std::thread::available_parallelism()
@@ -121,11 +145,30 @@ pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
     hash_video_inside(path, meta, bars)
 }
 
-/// The frame pass alone, cropping to `bars` when given.
+/// The frame pass alone, cropping to `bars` when given: by the graphics
+/// hardware for a long file when it can (`HWACCEL_MIN_SECS`), in software
+/// otherwise or when that fails.
 pub fn hash_video_inside(
     path: &Path,
     meta: &Meta,
     bars: Option<Bars>,
+) -> Result<VideoSig, VideoError> {
+    if meta.duration >= HWACCEL_MIN_SECS && hwaccel_enabled() {
+        if let Ok(s) = frame_pass(path, meta, bars, true) {
+            return Ok(s);
+        }
+    }
+    frame_pass(path, meta, bars, false)
+}
+
+/// The frame pass, `hw` asking ffmpeg for hardware decoding. Public for
+/// the bench, which compares the two.
+#[doc(hidden)]
+pub fn frame_pass(
+    path: &Path,
+    meta: &Meta,
+    bars: Option<Bars>,
+    hw: bool,
 ) -> Result<VideoSig, VideoError> {
     // the picture's own size, for the signature's aspect
     let (pic_w, pic_h) = bars.map_or((meta.width, meta.height), |b| (b.width, b.height));
@@ -139,8 +182,13 @@ pub fn hash_video_inside(
             "-loglevel",
             "error",
             "-threads",
-            &FFMPEG_THREADS.to_string(),
+            &ffmpeg_threads().to_string(),
         ])
+        .args(if hw {
+            &["-hwaccel", "auto"][..]
+        } else {
+            &[][..]
+        })
         .arg("-i")
         .arg(path)
         .args([
@@ -280,28 +328,37 @@ pub fn hash_all<T: Send + Sync>(
     let done = AtomicU64::new(0);
     let frames = AtomicU64::new(0);
     progress.tick(Stage::Frames, 0, total);
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(concurrency())
-        .build();
-    #[allow(clippy::type_complexity)]
-    let run = |items: Vec<(T, std::path::PathBuf)>| -> Vec<(T, std::path::PathBuf, Result<VideoSig, VideoError>)> {
-        items
-            .into_par_iter()
-            .map(|(tag, path)| {
-                let r = probe(&path).and_then(|m| hash_video(&path, &m));
-                if let Ok(s) = &r {
-                    frames.fetch_add(s.frames as u64, Ordering::Relaxed);
-                }
-                let d = done.fetch_add(1, Ordering::Relaxed) + 1;
-                progress.tick(Stage::Frames, d, total);
-                (tag, path, r)
-            })
-            .collect()
-    };
-    let results = match pool {
-        Ok(pool) => pool.install(|| run(items)),
-        Err(_) => run(items),
-    };
+    let workers = concurrency();
+    // probe everything, then hash the longest first: a two-hour file that
+    // starts last runs alone at the end while the other workers wait
+    // (Phase 14, CORE-16)
+    let paths: Vec<&Path> = items.iter().map(|(_, p)| p.as_path()).collect();
+    let metas = queue(&paths, workers, |p| probe(p));
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    let length = |i: &usize| metas[*i].as_ref().map_or(0.0, |m| m.duration);
+    order.sort_by(|a, b| length(b).total_cmp(&length(a)));
+    let sigs = queue(&order, workers, |&i| {
+        let r = match &metas[i] {
+            Ok(m) => hash_video(paths[i], m),
+            Err(e) => Err(e.again()),
+        };
+        if let Ok(s) = &r {
+            frames.fetch_add(s.frames as u64, Ordering::Relaxed);
+        }
+        let d = done.fetch_add(1, Ordering::Relaxed) + 1;
+        progress.tick(Stage::Frames, d, total);
+        r
+    });
+    let mut by_item: Vec<Option<Result<VideoSig, VideoError>>> =
+        (0..items.len()).map(|_| None).collect();
+    for (i, r) in order.into_iter().zip(sigs) {
+        by_item[i] = Some(r);
+    }
+    let results: Vec<(T, std::path::PathBuf, Result<VideoSig, VideoError>)> = items
+        .into_iter()
+        .zip(by_item)
+        .map(|((tag, path), r)| (tag, path, r.expect("invariant: every item was hashed once")))
+        .collect();
     let mut stats = VideoStats {
         probed: total,
         frames: frames.load(Ordering::Relaxed),
@@ -324,10 +381,40 @@ pub fn hash_all<T: Send + Sync>(
     (out, stats)
 }
 
+/// `f` over `items` on `workers` threads, each taking the next item as it
+/// finishes one (in order: a list sorted longest first is worked longest
+/// first); the results in the items' order.
+fn queue<I: Sync, O: Send>(items: &[I], workers: usize, f: impl Fn(&I) -> O + Sync) -> Vec<O> {
+    let next = AtomicU64::new(0);
+    let done: std::sync::Mutex<Vec<(usize, O)>> =
+        std::sync::Mutex::new(Vec::with_capacity(items.len()));
+    std::thread::scope(|s| {
+        for _ in 0..workers.clamp(1, items.len().max(1)) {
+            s.spawn(|| loop {
+                let i = next.fetch_add(1, Ordering::Relaxed) as usize;
+                let Some(item) = items.get(i) else { break };
+                let o = f(item);
+                done.lock().unwrap_or_else(|e| e.into_inner()).push((i, o));
+            });
+        }
+    });
+    let mut done = done.into_inner().unwrap_or_else(|e| e.into_inner());
+    done.sort_by_key(|(i, _)| *i);
+    done.into_iter().map(|(_, o)| o).collect()
+}
+
 #[cfg(test)]
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn the_queue_keeps_the_order_and_takes_every_item() {
+        let items: Vec<u64> = (0..103).collect();
+        let out = queue(&items, 4, |x| x * 2);
+        assert_eq!(out, items.iter().map(|x| x * 2).collect::<Vec<_>>());
+        assert!(queue(&[] as &[u64], 4, |x| *x).is_empty());
+    }
 
     fn h(seed: u32, k: usize, salt: u32) -> f32 {
         // deterministic pseudo-random in [−1, 1)

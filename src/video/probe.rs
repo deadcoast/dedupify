@@ -27,6 +27,20 @@ pub enum VideoError {
 }
 
 impl VideoError {
+    /// The same error again, for a probe's error read by the hash pass
+    /// (an `io::Error` keeps its kind and words).
+    pub fn again(&self) -> VideoError {
+        let io = |e: &io::Error| io::Error::new(e.kind(), e.to_string());
+        match self {
+            VideoError::Spawn(e) => VideoError::Spawn(io(e)),
+            VideoError::Probe(s) => VideoError::Probe(s.clone()),
+            VideoError::NoVideoStream => VideoError::NoVideoStream,
+            VideoError::NoFrames => VideoError::NoFrames,
+            VideoError::Io(e) => VideoError::Io(io(e)),
+            VideoError::Stalled => VideoError::Stalled,
+        }
+    }
+
     /// From a clocked run: a stall, or the child would not start.
     pub fn from_run(e: io::Error) -> VideoError {
         if e.kind() == io::ErrorKind::TimedOut {
