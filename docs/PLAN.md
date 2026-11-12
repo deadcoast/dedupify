@@ -363,6 +363,38 @@ Delivered (VERIFICATION § Phase 12):
 - Found while verifying: a note under a PASS in the doctor is as quiet
   as its detail.
 
+## Phase 13 — the real disk   ← in progress (TODO.md)
+
+What a scan meets on a person's own drives and a run must survive: the
+operating system's trash and system folders never entered (a copy in
+the bin was elected keeper over the live photo, IDENTIFIED M1), files a
+sync client keeps online left unread, a clock on every ffmpeg child, a
+journal that survives a power cut, and the Recycle Bin's refusal driven
+for the first time. Items: SHELVED.md § Phase 13.
+
+## Phase 14 — cost at scale   ← planned
+
+Numbers from real use before changes to speed: the bench on real
+photographs and videos, with the model, its peak memory, and 100,000
+files, here and on the owner's 16 threads; then the fit's search, long
+video's decode and the deep tier's throughput, each measured before and
+after against the decisions it must not change. `near.rs` split first,
+as `video` was. Items: SHELVED.md § Phase 14.
+
+## Phase 15 — matching debts   ← planned
+
+The measurements Phase 11 left open for this pass: PDQ at a fixed working
+size, the near keeper's degree against the copy marks, dark blurred bars
+on video, and the ONNX export's agreement with Meta's published model.
+Items: SHELVED.md § Phase 15.
+
+## Phase 16 — the workspace at size   ← planned
+
+A result of hundreds of groups worked the way a person works it: sorted
+and filtered, a preferred folder kept in one key, every line inside a
+narrow pane, a resize mid-sitting, `v` photographed in Windows Terminal,
+and the deep tier installed from the doctor. Items: SHELVED.md § Phase 16.
+
 ## Docs chain
 
 ```

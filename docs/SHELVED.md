@@ -14,7 +14,7 @@ Status tags: `[todo]` in TODO now · `[shelved]` waiting for its
 milestone · `[done]` delivered (kept one milestone for reference, then
 removed).
 
-Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
+Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 
 ---
 
@@ -37,15 +37,54 @@ Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
 11. **QOL-10** Windows console colour — built in Phase 10; the screenshot
     from the next `runs/win/RUN_VERIFY.cmd` goes into VERIFICATION
 
+## Phase 13 — the real disk   `[todo]`
+
+1. **SC-11** doc drift: where ffmpeg is looked for; the concurrency formula
+2. **CORE-09** never enter the OS trash or system folders
+3. **CORE-10** online-only files are not read
+4. **CORE-11** a clock on every child process
+5. **TECH-09** the journal flushed before it is renamed into place
+6. **TECH-11** the Recycle Bin refusing a file, driven on the Windows CI
+   runner
+
+## Phase 14 — cost at scale   `[shelved]`
+
+1. **TECH-10** the bench on real files, the model, peak memory, 100,000
+   files; here and on the owner's machine
+2. **SC-09** split `near.rs` (relation / bars / group)
+3. **CORE-15** the fit's search coarse to fine, thumbnails reused
+4. **CORE-16** long video's decode cost
+5. **TECH-15** the deep tier's throughput
+
+## Phase 15 — matching debts   `[shelved]`
+
+1. **CORE-12** PDQ at a fixed working size
+2. **CORE-13** the near keeper's degree against the copy marks
+3. **CORE-14** dark blurred bars on video
+4. **TECH-14** the ONNX export against Meta's TorchScript model, in CI
+
+## Phase 16 — the workspace at size   `[shelved]`
+
+1. **SC-10** unit tests for the width logic, 40–200 columns
+2. **QOL-11** narrow terminals: no line past the edge down to 40
+3. **SC-12** split `workspace/state.rs` (state and keys / screen)
+4. **QOL-12** sort and filter in the workspace
+5. **NF-10** prefer a folder (`f`)
+6. **TECH-12** a resize during a sitting, driven
+7. **TECH-13** the launcher photographs the workspace and `v`
+8. **QOL-13** `v` sized right in Windows Terminal (from TECH-13's picture)
+9. **NF-09** the model fetched by the doctor
+
 ## Not yet placed
 
 Items IDENTIFIED raised that no planned milestone holds; they wait for a
-PLAN milestone of their own (or the next IDENTIFIED pass):
+PLAN milestone of their own (or the next IDENTIFIED pass), for the
+reasons IDENTIFIED gives with each:
 
 - **NF-06** HTML report export
 - **NF-07** audio duplicates
-- **NF-08** folder-pair mode (`find A B`)
-- **NF-09** model fetch with pinned SHA-256
+- **NF-08** folder-pair mode (`find A B`) — NF-10 first
+- **NF-11** animated GIF, WebP and APNG in the video pass
 
 ---
 

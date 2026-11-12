@@ -1,45 +1,36 @@
-# TODO — Phase 12: structure and CI
+# TODO — Phase 13: the real disk
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 12 · items: `SHELVED.md` § Phase 12 · source:
-`IDENTIFIED.md` § 4.2, 4.3, 4.5 (IDs below). Build order top to bottom. Previous
-milestone: Phase 11, delivered 2026-11-10 (`SHELVED.md` § Phase 11 `[done]`).
+Milestone: `PLAN.md` § Phase 13 · items: `SHELVED.md` § Phase 13 · source:
+`IDENTIFIED.md` § 4 (IDs below), review of 2026-11-12 at `f9227ee`. Build
+order top to bottom. Previous milestone: Phase 12, delivered 2026-11-12
+(`SHELVED.md` § Phase 12 `[done]`).
 
-- [x] **SC-02** split `actions.rs` — `actions/{scan,plan,act,undo,view}.rs`, the
-  commands composed in `actions/mod.rs` (undo apart from act **[CLAUDE]**)
-- [x] **SC-03** split `render.rs` by screen — `render/{stages,groups,totals,hints}.rs`
-- [x] **TECH-06** split `video.rs` — `video/{probe,tmk,bars,group}.rs`
-- [x] **SC-05** `GroupView` trait over the three group types — `Found::views`
-- [x] **SC-06** `unwrap()` audit — 18 made invariants or handled; clippy
-  `unwrap_used` denied outside tests
-- [x] **TECH-05** in-tree benchmarks on fixed corpora — `tests/bench.rs`
-- [x] **TECH-04** ConPTY pseudo-terminal tests on Windows — `run_tty` on
-  Windows; green in CI run 43115899107 after the first run found the
-  child drawing into the parent's redirected output
-- [x] **TECH-08** CI matrix (ubuntu, windows, ffmpeg) —
-  `.github/workflows/ci.yml`; green from run 43115899107
-- [x] **TECH-07** Ctrl-C e2e on Windows — verified in CI run 43115899107
-  by its own words (`CTRL_BREAK sent to the milk's process group …`)
-- [x] **SC-08** UTF-8 Windows logs — verified from the 2026-11-11 run
-  (VERIFICATION § Phase 11 on Windows)
-- [x] **QOL-10** Windows console colour — the enablement path tested
-  through the console host (`a_terminal_gets_colour`, in CI); the picture
-  from the owner's Windows Terminal, its colours measured against the
-  theme (VERIFICATION § Phase 12 § 10)
+- [ ] **SC-11** doc drift: CLI §2 and RESEARCH §3 on where ffmpeg is
+  looked for; RESEARCH §3's concurrency formula
+- [ ] **CORE-09** never enter `$RECYCLE.BIN`, `RECYCLER`, `System Volume
+  Information`, `.Trash`, `.Trashes`, `.Trash-<uid>` or the freedesktop
+  trash; counted on the SCAN line
+- [ ] **CORE-10** online-only files (Windows recall/offline attributes,
+  macOS dataless) not read; counted; the doctor says how many
+- [ ] **CORE-11** a clock on every ffmpeg and ffprobe child; a stalled
+  file named `timed out`
+- [ ] **TECH-09** the journal's `.tmp` flushed before its rename
+- [ ] **TECH-11** the Recycle Bin refusing a file, driven on the Windows
+  CI runner
 
 Done when: every box ticked, the suite green on Linux and in the CI
-matrix on Windows, the three Phase 10 items verified on Windows with a
-console present, `VERIFICATION` § Phase 12 written, and `PLAN.md` marks
-Phase 12 delivered.
+matrix on Windows, `VERIFICATION` § Phase 13 written, and `PLAN.md` marks
+Phase 13 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 12 `[done]`, then
-rewrite this file from the next `[shelved]` section of `SHELVED.md`. If
-SHELVED has no `[shelved]` section left (Phase 12 is the last planned
-milestone), run the IDENTIFIED workflow instead.
+When this list is complete: mark `SHELVED.md` § Phase 13 `[done]`, then
+rewrite this file from the next `[shelved]` section of `SHELVED.md`
+(Phase 14). When SHELVED has no `[shelved]` section left, run the
+IDENTIFIED workflow instead.
