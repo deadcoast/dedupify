@@ -3321,7 +3321,18 @@ the deep tier; `cargo fmt --check` clean.
 
 ## 7. CI
 
-CI_RESULT
+Started by the `[ci]` marker on the delivery commit.
+
+- **43287885765** at `7066fcd`: both jobs failed at clippy. The runners
+  had moved to Rust 1.100.0 (2026-11-09), whose `needless_range_loop`
+  now covers indexing a tuple field (`p.0[k]`) — four loops over a
+  pixel's channels, in `geometry`'s tests and `tests/common`, older than
+  this phase. Written as loops over the channels themselves (`511fba2`),
+  checked here with clippy 1.100.0 on Linux and the Windows target.
+- **43288936143** at `511fba2`: green. Ubuntu: 132 unit tests, the band
+  test, 34 end-to-end tests (3 ignored), the doctor. Windows: 132, the
+  band test, 33 end-to-end (5 ignored), the Recycle Bin capped at 1 MB
+  taking and refusing (3 tests), the doctor.
 
 ## Not verified here
 
