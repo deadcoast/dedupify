@@ -1,36 +1,36 @@
-# TODO — Phase 13: the real disk
+# TODO — Phase 14: cost at scale
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 13 · items: `SHELVED.md` § Phase 13 · source:
+Milestone: `PLAN.md` § Phase 14 · items: `SHELVED.md` § Phase 14 · source:
 `IDENTIFIED.md` § 4 (IDs below), review of 2026-11-12 at `f9227ee`. Build
-order top to bottom. Previous milestone: Phase 12, delivered 2026-11-12
-(`SHELVED.md` § Phase 12 `[done]`).
+order top to bottom. Previous milestone: Phase 13, delivered 2026-11-12
+(`SHELVED.md` § Phase 13 `[done]`).
 
-- [ ] **SC-11** doc drift: CLI §2 and RESEARCH §3 on where ffmpeg is
-  looked for; RESEARCH §3's concurrency formula
-- [ ] **CORE-09** never enter `$RECYCLE.BIN`, `RECYCLER`, `System Volume
-  Information`, `.Trash`, `.Trashes`, `.Trash-<uid>` or the freedesktop
-  trash; counted on the SCAN line
-- [ ] **CORE-10** online-only files (Windows recall/offline attributes,
-  macOS dataless) not read; counted; the doctor says how many
-- [ ] **CORE-11** a clock on every ffmpeg and ffprobe child; a stalled
-  file named `timed out`
-- [ ] **TECH-09** the journal's `.tmp` flushed before its rename
-- [ ] **TECH-11** the Recycle Bin refusing a file, driven on the Windows
-  CI runner
+- [ ] **TECH-10** the bench on real photographs and videos
+  (`DEDUPE_PHOTO_DIRS`, `DEDUPE_VIDEO_DIRS`), with the model, peak memory
+  per stage, a 100,000-file run; here and on the owner's machine
+- [ ] **SC-09** split `near.rs` (relation / bars / group), every line
+  accounted for
+- [ ] **CORE-15** the fit's search coarse to fine, thumbnails reused;
+  every fit score within 0.005, no decision changed
+- [ ] **CORE-16** long video's decode cost measured on real 1–2 hour
+  files; hardware decoding and skipped non-reference frames tried against
+  the conformance and robustness tables
+- [ ] **TECH-15** the deep tier's throughput, from TECH-10's profile;
+  embeddings bit-identical
 
 Done when: every box ticked, the suite green on Linux and in the CI
-matrix on Windows, `VERIFICATION` § Phase 13 written, and `PLAN.md` marks
-Phase 13 delivered.
+matrix on Windows, `VERIFICATION` § Phase 14 written, and `PLAN.md` marks
+Phase 14 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 13 `[done]`, then
+When this list is complete: mark `SHELVED.md` § Phase 14 `[done]`, then
 rewrite this file from the next `[shelved]` section of `SHELVED.md`
-(Phase 14). When SHELVED has no `[shelved]` section left, run the
+(Phase 15). When SHELVED has no `[shelved]` section left, run the
 IDENTIFIED workflow instead.

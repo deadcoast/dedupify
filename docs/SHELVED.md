@@ -18,26 +18,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 
 ---
 
-## Phase 12 — structure and CI   `[done]` 2026-11-12 — see PLAN.md § Phase 12, VERIFICATION.md § Phase 12
-
-1. **SC-02** split `actions.rs` (scan / plan / act)
-2. **SC-03** split `render.rs` by screen
-3. **TECH-06** split `video.rs`
-4. **SC-05** `GroupView` trait over the three group types
-5. **SC-06** `unwrap()` audit
-6. **TECH-05** in-tree benchmarks on fixed corpora
-7. **TECH-04** ConPTY pseudo-terminal tests on Windows
-8. **TECH-08** CI matrix (ubuntu, windows, ffmpeg)
-9. **TECH-07** Ctrl-C e2e on Windows — built in Phase 10; verified by a
-   Windows pass with a console present (the next `RUN_VERIFY.cmd`, or the
-   TECH-08 job if its runner has a console: without one the test skips
-   and proves nothing)
-10. **SC-08** UTF-8 Windows logs — built in Phase 10; read from the next
-    `runs/win/RUN_VERIFY.cmd`
-11. **QOL-10** Windows console colour — built in Phase 10; the screenshot
-    from the next `runs/win/RUN_VERIFY.cmd` goes into VERIFICATION
-
-## Phase 13 — the real disk   `[todo]`
+## Phase 13 — the real disk   `[done]` 2026-11-12 — see PLAN.md § Phase 13, VERIFICATION.md § Phase 13
 
 1. **SC-11** doc drift: where ffmpeg is looked for; the concurrency formula
 2. **CORE-09** never enter the OS trash or system folders
@@ -47,7 +28,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 6. **TECH-11** the Recycle Bin refusing a file, driven on the Windows CI
    runner
 
-## Phase 14 — cost at scale   `[shelved]`
+## Phase 14 — cost at scale   `[todo]`
 
 1. **TECH-10** the bench on real files, the model, peak memory, 100,000
    files; here and on the owner's machine

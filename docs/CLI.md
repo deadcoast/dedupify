@@ -550,13 +550,18 @@ newest, as before.
   reads the copy back and compares it, and only then deletes the original
   (§2 milk). A file that cannot be moved is reported as `failed` with the
   reason and left where it is; the exit code becomes 2.
-- `purge` verifies bytes before the bin call and never hard-deletes. On
-  Windows a file the Recycle Bin cannot hold (larger than its cap, or on
-  a volume set to delete at once) is refused before the shell touches
-  it, with no dialog: `failed  the Recycle Bin refused it: it cannot
-  hold this file …`, the file in place, `_milked` offered in the
-  workspace **[CLAUDE, Phase 13]** — the shell's own way asked, in a
-  dialog, to delete it permanently (VERIFICATION § Phase 13). Near
+- `purge` verifies bytes before the bin call and never hard-deletes
+  **[CLAUDE, Phase 13]**. On Windows the shell cannot be asked "recycle
+  or fail": it deletes a file its bin will not keep outright, or asks in
+  a dialog (VERIFICATION § Phase 13). So a file on a drive with no bin
+  (removable, network, optical), on a drive whose bin is set to delete
+  at once or under the `NoRecycleFiles` policy, or larger than the
+  drive's bin cap, is refused before the shell sees it (`failed  the
+  Recycle Bin refused it: this drive has none: left in place`, `… the
+  file is larger than this drive's bin (5,120 MB) …`); every other file
+  gets a second name in `_milked/.purging` while the shell works, and
+  one the bin let go anyway is put back from it and refused. In the
+  workspace a refused file is offered to `_milked`. Near
   duplicates are moved or binned only when two families of evidence agree
   — images: dHash and pHash with PDQ or the geometric fit, or the deep
   descriptor with the fit; videos: TMK level 2 ≥ 0.9, or the three image

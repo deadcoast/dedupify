@@ -363,16 +363,34 @@ Delivered (VERIFICATION § Phase 12):
 - Found while verifying: a note under a PASS in the doctor is as quiet
   as its detail.
 
-## Phase 13 — the real disk   ← in progress (TODO.md)
+## Phase 13 — the real disk   ← delivered 2026-11-12
 
-What a scan meets on a person's own drives and a run must survive: the
-operating system's trash and system folders never entered (a copy in
-the bin was elected keeper over the live photo, IDENTIFIED M1), files a
-sync client keeps online left unread, a clock on every ffmpeg child, a
-journal that survives a power cut, and the Recycle Bin's refusal driven
-for the first time. Items: SHELVED.md § Phase 13.
+What a scan meets on a person's own drives and a run must survive.
+Items: SHELVED.md § Phase 13. Delivered (VERIFICATION § Phase 13):
 
-## Phase 14 — cost at scale   ← planned
+- **CORE-09** the operating system's trash and system folders are never
+  entered (a copy in the bin had been elected keeper over the live
+  photo, IDENTIFIED M1); the SCAN line counts them.
+- **CORE-10** files a sync client keeps online only are not read
+  (Windows recall and offline marks, macOS dataless); counted, and the
+  doctor warns.
+- **CORE-11** a clock on every ffmpeg and ffprobe child: silent for a
+  minute (`DEDUPE_STALL`), stopped, counted `timed out`, named.
+- **TECH-09** the journal flushed to the disk before its rename.
+- **TECH-11** the Recycle Bin refusing a file, driven in CI — and what
+  it found: on Windows a file larger than the bin's cap made `purge` wait
+  on the shell's "delete permanently?" dialog, and without that dialog
+  the shell deletes it outright. `src/recycle.rs` refuses before the
+  shell what the bin will not keep (no bin on the drive, delete-at-once,
+  over the cap) and guards every other file with a hard link, putting
+  back one the bin lets go.
+- **SC-11** the docs say where ffmpeg is looked for.
+- Found while verifying: the DECODE line names why images did not decode
+  even when nothing is left to compare; the colour test reads the last
+  colour set, not the last escape (CI had failed it on Windows since
+  Phase 12's last commit).
+
+## Phase 14 — cost at scale   ← in progress (TODO.md)
 
 Numbers from real use before changes to speed: the bench on real
 photographs and videos, with the model, its peak memory, and 100,000

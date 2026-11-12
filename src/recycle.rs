@@ -421,12 +421,13 @@ mod imp {
             return Some("this drive has none: left in place".into());
         }
         if bin.nuke {
-            return Some("this drive's is set to delete at once: left in place".into());
+            return Some("this drive's bin is set to delete at once: left in place".into());
         }
         let size = std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
         match bin.cap_mb {
             Some(cap) if size > u64::from(cap) * 1024 * 1024 => Some(format!(
-                "the file is larger than this drive's bin ({cap} MB): left in place"
+                "the file is larger than this drive's bin ({} MB): left in place",
+                crate::util::fmt_count(u64::from(cap))
             )),
             _ => None,
         }

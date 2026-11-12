@@ -2978,3 +2978,200 @@ the note; green on Windows from Phase 13 (VERIFICATION § Phase 13 § 7).
 ## Not verified here
 
 - The bench on more threads or on Windows: run here only, on 2 vCPUs.
+
+---
+
+# VERIFICATION — Phase 13 (the real disk), run on 2026-11-12
+
+Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
+release profile; CI on Ubuntu 26.04 and Windows Server 2025 (§ 7).
+Source: IDENTIFIED 2026-11-12 (`f9227ee`), items SC-11, CORE-09,
+CORE-10, CORE-11, TECH-09, TECH-11.
+
+## 1. The bin and the system folders (CORE-09)
+
+`walk::system_folder`: `$RECYCLE.BIN`, `RECYCLER`, `RECYCLED`, `System
+Volume Information` (any letter case, on every system: a drive formatted
+on Windows carries them wherever it is read), `.Trash`, `.Trashes`,
+`.Trash-<digits>`, and the person's freedesktop trash found by its path
+(`$XDG_DATA_HOME/Trash`, resolved), passed over as `_milked` is and
+counted on the SCAN line.
+
+IDENTIFIED's M1 fixture again — a photo, an older byte copy of it in
+`$RECYCLE.BIN/S-1-5-21-1000/`, another in `.Trash-1000/files/`:
+
+```
+before   GROUP 001   3 copies   293 KB each   586 KB reclaimable
+           keep  $RECYCLE.BIN/S-1-5-21-1000/$RX4K2P1.jpg      2020-01-01
+           dupe  .Trash-1000/files/IMG_0041.jpg
+           dupe  photos/IMG_0041.jpg                  (milk --dry-run: would move it)
+after    SCAN   1 file   293 KB   2 bin and system folders left out
+```
+
+Tests: `walk::the_bin_and_the_system_folders_are_never_entered` (eight
+such folders, two names like them that are not — `.Trash-me`, `Trash` —
+scanned as ordinary folders); `e2e::the_bin_is_never_scanned` (`find`
+and `milk --dry-run`; the freedesktop trash through `XDG_DATA_HOME` on
+Linux; the live photo has no duplicate and stays).
+
+## 2. Files kept online (CORE-10)
+
+`walk::online_only`: on Windows the attributes of the directory listing
+(`OFFLINE` 0x1000, `RECALL_ON_OPEN` 0x40000, `RECALL_ON_DATA_ACCESS`
+0x400000), on macOS `lstat`'s `SF_DATALESS`; nothing is opened to ask
+(walkdir keeps the listing's metadata on Windows, `lstat` elsewhere). Such
+a file is not a candidate; the SCAN line says `N online only, not read`,
+and the doctor warns with how many and how to make them local.
+
+Tests: `walk::the_marks_of_a_file_kept_online` (a OneDrive placeholder's
+attributes as Windows lists them — archive, unpinned, recall on data
+access — and the other two marks are online; normal, archive, read-only,
+hidden, pinned, sparse, compressed are not); on Windows,
+`e2e::a_file_kept_online_is_not_read` marks one copy `OFFLINE` with
+`SetFileAttributesW` (the recall marks are the sync engine's to set) and
+reads `1 online only, not read` on the SCAN line, its twins grouped
+without it, `1 file kept online only` from the doctor (§ 7).
+
+## 3. A clock on every child (CORE-11)
+
+`tools::run` (to the end, stdout and stderr read as they come, input
+written from a thread) and `tools::Watch` (a streaming child): a child
+that sends nothing for `tools::stall()` — 60 s, `DEDUPE_STALL` seconds —
+is killed. ffprobe, the black-bar and flat-bar passes, the frame pipe
+and the still-image ffmpeg route all go through them; a stalled bar pass
+ends the file there rather than stalling the frame pass after it. The
+run does not wait on a pipe a stopped child's own children still hold.
+
+Stage lines count `timed out` (DECODE, FRAMES), and a note under the
+totals names the files in path order, three and then how many more.
+
+Tests: `tools::a_child_that_talks_runs_to_its_end_and_a_silent_one_is_stopped`
+(at a 1.5 s limit: a talking child's stdout and stderr whole, input
+delivered, a silent one stopped under 4 s, and on Unix one whose child
+keeps the pipes open stopped as fast); `e2e::a_stalled_ffmpeg_is_stopped_and_named`
+(stand-in `ffmpeg` and `ffprobe` on PATH that answer `-version` and then
+sleep; `DEDUPE_STALL=1`):
+
+```
+ DECODE   0 images hashed   2 timed out   2 undecodable   1.0 s
+ FRAMES   0 videos hashed   0 frames at 15 fps   3 timed out   3.0 s
+ timed out: art/one.jxl, art/two.jxl, clips/a.mp4, and 2 more   ffmpeg sent nothing for 1 s and was stopped; left out of this run
+```
+
+The whole run 4.3 s; the byte copies grouped as before. (The two
+`undecodable` are the fixture's random-byte `.jpg` files.)
+
+Found while verifying: with fewer than two images left to compare, the
+DECODE line read `0 images   nothing to compare` and dropped why the
+others did not decode (a lone HEIC on a machine without ffmpeg said
+nothing of ffmpeg). The short form now carries the reasons.
+
+## 4. The journal and a power cut (TECH-09)
+
+`journal::rewrite` writes the `.tmp`, `sync_all`s it, renames it into
+place, then (Unix) syncs the folder. `strace -f -e trace=fsync,rename`
+over a `milk` of 400 two-KiB duplicates: two journal writes (the first
+entry, the finish), each `.tmp` fsynced before its rename, the folder
+after — four fsyncs; the 400 moves unchanged. At most one write per
+250 ms (`FLUSH_EVERY`), so a change pays at most four flushes a second;
+the time before and after was not measured.
+
+## 5. Docs (SC-11)
+
+CLI §2 and RESEARCH §3 say where ffmpeg is looked for (PATH, then the
+installers' folders, beside `dedupe`); RESEARCH §3's concurrency is
+⌊cores/2⌋ clamped to 1–4, as `video::concurrency` computes it. CLI §3 and
+§5, and the README, say what Phase 13 leaves out and why.
+
+## 6. Suite (here)
+
+`cargo test --release`: 131 unit tests (1 ignored), the band test, 34
+end-to-end tests (3 ignored), and the 34 again with the model installed.
+clippy at `-D warnings`, all targets, Linux and the Windows target, each
+with and without the deep tier; `cargo fmt --check` clean.
+
+## 7. CI, and the Recycle Bin that would not keep a file (TECH-11)
+
+Runs on push, read through the API with their job logs. Each one that
+failed is the reason for the commit after it.
+
+- **43222451944** at `2a6f5ce`: Windows' unit test of the bin names
+  counted 7 folders where Linux counts 8 — `$RECYCLE.BIN` and
+  `$Recycle.Bin` are one folder there. The test says so (`67f9869`).
+- **43223166724** at `67f9869` (and **43210235785** at `f9227ee`, the
+  Phase 12 delivery, and **43212128312** at `b90b65b`, which I had not
+  read): `a_terminal_gets_colour` failed on Windows — the pseudo console
+  moves the cursor (`ESC[17C`) between the grey and the note, so "the
+  escape before it" was the move. The test reads the last colour set
+  (`1fcce56`); the Phase 12 record carries the correction.
+- **43225088304** at `1fcce56`: every Windows test green — the bin and
+  system folders, `OFFLINE` (`a_file_kept_online_is_not_read`), the clock
+  (`powershell Start-Sleep` stopped at 1.5 s) — except TECH-11: `purge did
+  not end in 120 s`.
+- **43226616276** at `d8db7b0`, what held it: one window of the purge's
+  own, `"Delete File"`, class `#32770` — the shell asking to delete the
+  5 MB file permanently because the 1 MB bin could not hold it. Both
+  files on disk after the kill. With the `trash` crate's flags
+  (`FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING`) `purge` on a
+  person's machine would have shown that dialog, and Yes deletes for good.
+- **43231283716** at `17bdcc3`: the shell asked without the warning and
+  with a progress sink stopping any file not marked
+  recycle-if-possible (Chromium's technique). No dialog — and the file
+  was gone, reported `binned`.
+- **43232630229** at `f305bd1`: `--undo` found nothing to restore: the
+  file had been deleted outright.
+- **43233971778** at `5697357`, the measurement
+  (`a_bin_too_small_measured_by_flags`, a 5 MB file, the bin capped at
+  1 MB), the same under both flag sets tried:
+
+  ```
+  NO_UI | ALLOWUNDO | RECYCLEONDELETE: PreDeleteItem flags 0x282, PostDeleteItem hr 0x00270008, item in the bin false; on disk false, in the bin false
+  NO_UI | ALLOWUNDO:                   PreDeleteItem flags 0x282, PostDeleteItem hr 0x00270008, item in the bin false; on disk false, in the bin false
+  ```
+
+  The shell says beforehand it will recycle "if possible" (0x80 set)
+  and afterwards that nothing went to the bin: it cannot be asked to
+  recycle or fail.
+- **43236743354** at `9e2316c`, both systems green. `src/recycle.rs` on
+  Windows refuses before the shell what the bin will not keep — a drive
+  with none (`GetDriveTypeW` not fixed), `NukeOnDelete`, the
+  `NoRecycleFiles` policy, a file over `MaxCapacity` — and gives every
+  other file a hard link in `_milked/.purging` while the shell works; a
+  file whose link count is back to one afterwards was let go, and is
+  renamed back. Through `purge`:
+
+  ```
+  MaxCapacity = 1   failed  copy\keep.bin  the Recycle Bin refused it: the file is larger than this drive's bin (1 MB): left in place
+  NukeOnDelete = 1  failed  copy\keep.bin  the Recycle Bin refused it: this drive's is set to delete at once: left in place
+  ```
+
+  and the guard alone, against the capped bin with the checks off:
+  `it would not keep the file and Windows deleted it instead: put back
+  where it was`, the 5 MB byte-identical, `_milked/.purging` and the
+  `_milked` made for it gone after. `purge_then_undo_through_the_bin`
+  ran on Windows in the same step: a purge through the new path, and its
+  undo, the tree identical. (The wording "this drive's is" became "this
+  drive's bin is" in the commit after.)
+
+The CLI's promise that `purge` never deletes outright now holds on
+Windows by construction and is driven in CI; before this phase it
+held only while every file fitted the bin. The CLI's earlier claim
+(Phase 10) that a bin refusing a file falls back to `_milked` on a
+network drive was never driven (Phase 10, Not verified): on Windows the
+shell would have asked in a dialog instead; with this phase a drive with
+no bin is refused before the shell, and the workspace offers `_milked`.
+
+## Not verified here
+
+- Real OneDrive, Dropbox or iCloud placeholders: the recall attributes
+  are set by a sync engine; the rule is tested on their values and, on
+  Windows, through the `OFFLINE` mark. macOS's `SF_DATALESS`: no macOS
+  runner.
+- A stall on the owner's machine: the clock was driven by stand-ins
+  here and unit-tested on Windows; no real ffmpeg has been seen to hang.
+- The journal's flush timing on a slow disk.
+- A removable or network drive's refusal on Windows: the drive-type rule
+  runs before the shell, where CI has only fixed drives; a FAT or exFAT
+  drive with a bin (an external disk) takes no hard link, so there a file
+  the bin lets go is reported `deleted without the Recycle Bin`, not put
+  back — the cap and delete-at-once checks still run before it.
