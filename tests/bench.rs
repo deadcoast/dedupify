@@ -259,7 +259,12 @@ fn image_rows(rows: &mut Vec<Row>, cands: &[walk::Candidate], model: bool) {
     }
     let groups = stage(rows, "MATCH", || {
         let g = near::group(hashed, &mut nstats, &exact::NoProgress);
-        let what = format!("{} near groups, {} fits", g.len(), nstats.fits);
+        let what = format!(
+            "{} near groups, {} fits, {} split from another",
+            g.len(),
+            nstats.fits,
+            nstats.split
+        );
         (g, what)
     });
     // the scale corpus plants one copy per eight images (`i…7` a half-size

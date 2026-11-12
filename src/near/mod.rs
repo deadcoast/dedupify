@@ -175,6 +175,9 @@ pub struct NearStats {
     pub fits: u64,
     /// Of those, fits at or above `FIT_MIN`.
     pub fit_confirmed: u64,
+    /// Groups split out of another: members the keeper did not confirm,
+    /// confirmed among themselves (Phase 15, CORE-17).
+    pub split: u64,
     /// Members set aside as `kin` by their capture time.
     pub kin: u64,
     /// Decoded through a route other than the `image` crate.

@@ -223,6 +223,11 @@ pub fn group(
         stats.deep_pairs = deep_attached.len() as u64;
     }
 
+    let index_of: std::collections::HashMap<std::path::PathBuf, usize> = hashed
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (h.rep.cand.path.clone(), i))
+        .collect();
     let mut slots: Vec<Option<Hashed>> = hashed.into_iter().map(Some).collect();
     let mut groups: Vec<NearGroup> = Vec::new();
     // members the descriptor attached (not the hashes), by path
@@ -279,11 +284,7 @@ pub fn group(
                 .skip(1)
                 .filter_map(move |(mi, m)| {
                     let r = m.relation?;
-                    let needs = !r.kin
-                        && ((r.hash_pair() && !r.pdq_ok())
-                            || r.deep_only()
-                            || (!r.hash_pair() && r.deep_band()));
-                    needs.then_some((gi, mi))
+                    needs_fit(&r).then_some((gi, mi))
                 })
         })
         .collect();
@@ -336,6 +337,7 @@ pub fn group(
             .grouped
             .saturating_sub(dropped as u64 + u64::from(g.members.len() < 2));
     }
+    split_chained(&mut groups, &pairs, &index_of, &degree, &by_deep, stats);
     groups.retain(|g| g.members.len() >= 2);
     stats.kin = groups.iter().map(|g| g.kin_count() as u64).sum();
     stats.raw_pairs = groups.iter().map(|g| g.kinds().pair as u64).sum();
@@ -350,6 +352,174 @@ pub fn group(
         })
     });
     groups
+}
+
+/// Whether a member's relation leaves a question only the fit answers:
+/// hash-grouped and PDQ did not confirm, or admitted by the descriptor.
+/// Kin members are decided already.
+fn needs_fit(r: &Relation) -> bool {
+    !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only() || (!r.hash_pair() && r.deep_band()))
+}
+
+/// Copies chained into another picture's group, given a group of their own
+/// (Phase 15, CORE-17). Union–find joins a group through any hash edge,
+/// and each member is measured against the keeper alone: a photograph and
+/// its copy that reach a stranger's group through one near-threshold edge
+/// are both listed there, and the copy is never acted on. Here the members
+/// the keeper did not confirm — not kin, not RAW, not a RAW pair, not
+/// admitted by the descriptor — are joined again over the hash edges among
+/// themselves; each such component of two or more takes its own keeper by
+/// the same order, is measured against it (PDQ, the fit where needed), and
+/// leaves as a group of its own when it confirms one member at least. The
+/// rest stay listed where they were. A new group is examined in turn.
+fn split_chained(
+    groups: &mut Vec<NearGroup>,
+    pairs: &[Match],
+    index_of: &std::collections::HashMap<std::path::PathBuf, usize>,
+    degree: &[usize],
+    by_deep: &std::collections::HashSet<std::path::PathBuf>,
+    stats: &mut NearStats,
+) {
+    let mut adj: std::collections::HashMap<usize, Vec<usize>> = Default::default();
+    for m in pairs {
+        adj.entry(m.a).or_default().push(m.b);
+        adj.entry(m.b).or_default().push(m.a);
+    }
+    let mut gi = 0;
+    while gi < groups.len() {
+        let g = &groups[gi];
+        let loose: Vec<usize> = g
+            .members
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, m)| {
+                !by_deep.contains(&m.hashed.rep.cand.path)
+                    && m.relation
+                        .is_some_and(|r| !r.confirmed() && !r.kin && !r.raw && !r.pair)
+            })
+            .map(|(mi, _)| mi)
+            .collect();
+        if loose.len() < 2 {
+            gi += 1;
+            continue;
+        }
+        let idx: Vec<usize> = loose
+            .iter()
+            .map(|&mi| index_of[&g.members[mi].hashed.rep.cand.path])
+            .collect();
+        let pos: std::collections::HashMap<usize, usize> =
+            idx.iter().enumerate().map(|(p, &i)| (i, p)).collect();
+        let mut uf = UnionFind::new(loose.len());
+        for (p, i) in idx.iter().enumerate() {
+            for j in adj.get(i).into_iter().flatten() {
+                if let Some(&q) = pos.get(j) {
+                    uf.union(p, q);
+                }
+            }
+        }
+        let mut comps: std::collections::BTreeMap<usize, Vec<usize>> = Default::default();
+        for p in 0..loose.len() {
+            let r = uf.find(p);
+            comps.entry(r).or_default().push(p);
+        }
+        let hashed_at = |p: usize| &g.members[loose[p]].hashed;
+        // (keeper's member index, [(member index, relation)])
+        let mut out: Vec<(usize, Vec<(usize, Relation)>)> = Vec::new();
+        for mut comp in comps.into_values().filter(|c| c.len() >= 2) {
+            // the keeper as `group` orders a component: the most known-same
+            // capture moments, then degree and the usual order
+            let same: Vec<usize> = comp
+                .iter()
+                .map(|&a| {
+                    comp.iter()
+                        .filter(|&&b| {
+                            b != a
+                                && capture::different_moments(
+                                    hashed_at(a).capture.as_ref(),
+                                    hashed_at(b).capture.as_ref(),
+                                ) == Some(false)
+                        })
+                        .count()
+                })
+                .collect();
+            let same_of = |p: usize| same[comp.iter().position(|&x| x == p).unwrap_or(0)];
+            let mut order = comp.clone();
+            order.sort_by(|&a, &b| {
+                same_of(b).cmp(&same_of(a)).then_with(|| {
+                    keeper_order_with_degree(
+                        hashed_at(a),
+                        degree[idx[a]],
+                        hashed_at(b),
+                        degree[idx[b]],
+                    )
+                })
+            });
+            comp = order;
+            let keeper = hashed_at(comp[0]);
+            let mut rels: Vec<Relation> = comp[1..]
+                .iter()
+                .map(|&p| relation_of(keeper, hashed_at(p)))
+                .collect();
+            let wanted: Vec<usize> = (0..rels.len()).filter(|&x| needs_fit(&rels[x])).collect();
+            if !wanted.is_empty() {
+                let kt = geometry::thumb_of(&keeper.rep.cand.path);
+                let fits: Vec<(usize, Option<Fit>)> = wanted
+                    .into_par_iter()
+                    .map(|x| {
+                        let m = &hashed_at(comp[x + 1]).rep.cand.path;
+                        let f = kt
+                            .as_ref()
+                            .and_then(|k| Some(geometry::fit(k, &geometry::thumb_of(m)?)));
+                        (x, f)
+                    })
+                    .collect();
+                stats.fits += fits.len() as u64;
+                for (x, f) in fits {
+                    rels[x].fit = f;
+                    if rels[x].fit_ok() {
+                        stats.fit_confirmed += 1;
+                    }
+                }
+            }
+            if rels.iter().any(|r| r.confirmed()) {
+                out.push((
+                    loose[comp[0]],
+                    comp[1..].iter().map(|&p| loose[p]).zip(rels).collect(),
+                ));
+            }
+        }
+        if out.is_empty() {
+            gi += 1;
+            continue;
+        }
+        let mut slots: Vec<Option<NearMember>> = std::mem::take(&mut groups[gi].members)
+            .into_iter()
+            .map(Some)
+            .collect();
+        for (kmi, ms) in out {
+            let mut keeper = slots[kmi]
+                .take()
+                .expect("invariant: a member leaves its group once");
+            keeper.relation = None;
+            let mut members = vec![keeper];
+            for (mi, r) in ms {
+                let mut m = slots[mi]
+                    .take()
+                    .expect("invariant: a member leaves its group once");
+                m.relation = Some(r);
+                members.push(m);
+            }
+            stats.split += 1;
+            groups.push(NearGroup { members });
+        }
+        groups[gi].members = slots.into_iter().flatten().collect();
+        if groups[gi].members.len() < 2 {
+            // the keeper left alone is no longer grouped
+            stats.grouped = stats.grouped.saturating_sub(1);
+        }
+        gi += 1;
+    }
 }
 
 #[cfg(test)]

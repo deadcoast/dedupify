@@ -19,7 +19,7 @@ order top to bottom. Previous milestone: Phase 14, delivered 2026-11-12
   25 real clips (5 corrected, 20 unchanged) and the 79 without bars
 - [ ] **TECH-14** the ONNX export against Meta's TorchScript model, in a
   CI job started by hand; a note unless agreement is under 0.99
-- [ ] **CORE-17** a pair chained into another picture's group: its copy
+- [x] **CORE-17** a pair chained into another picture's group: its copy
   measured against its own partner; the scale run's two lost copies
   acted on, no stranger acted on
 

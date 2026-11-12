@@ -756,9 +756,13 @@ linear 0.15 s / MIH 0.12 s at n = 5,500; 2.4 s / 0.8 s at 22,000; 10.4 s /
 Near-duplicate relations are not transitive (A≈B, B≈C does not force A≈C),
 so groups are connected components of the match graph. Union–find with
 path halving and union by rank (Tarjan 1975) gives near-constant amortised
-time per union (`near.rs`). A member linked only transitively shows its
-real distance to the keeper, in the warning colour when it exceeds a
-threshold. Exact-duplicate groups are equivalence classes of one hash
+time per union (`near/group.rs`). A member linked only transitively shows
+its real distance to the keeper, in the warning colour when it exceeds a
+threshold. Members the keeper does not confirm are joined again over the
+edges among themselves; a component that confirms a member against its
+own keeper leaves as a group of its own, so a copy chained into a
+stranger's group through one near-threshold edge is still acted on
+(Phase 15, CORE-17) **[CLAUDE]**. Exact-duplicate groups are equivalence classes of one hash
 value and need no graph; the near pass runs over exact-group keepers and
 singletons only, so a byte copy is never reported twice.
 
