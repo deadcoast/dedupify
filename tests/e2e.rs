@@ -1784,6 +1784,17 @@ fn a_terminal_gets_colour() {
     });
     assert!(colour_sgr, "no colour escape came back\n{raw:?}");
     assert!(!shown.contains("[38;2;"), "escapes shown as text\n{shown}");
+    // a note under a PASS (the deep row's model path, when no model is
+    // installed) is as quiet as the detail: the escape before it is grey
+    if let Some(at) = raw.find("expected at") {
+        let sgr = &raw[raw[..at]
+            .rfind("\u{1b}[")
+            .expect("an escape before the note")..at];
+        assert!(
+            sgr.contains("138;138;138"),
+            "note under a PASS painted {sgr:?}"
+        );
+    }
     // shown by `--nocapture`: the Windows launcher's summary reads it
     eprintln!("colour on a terminal: 24-bit ANSI colour, colour escapes back");
 }

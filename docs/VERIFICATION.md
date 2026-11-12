@@ -2936,9 +2936,40 @@ window was found and its class. The C# compiles with Mono's compiler at
 language version 5, the level Windows PowerShell 5.1 compiles; nothing
 of it has run yet.
 
+## 10. On Windows again, 2026-11-12: the picture (QOL-10)
+
+`RUN_VERIFY.cmd` at `6afd49d`, same machine, every line of the summary
+`PASS` (build 2 s and tests 17 s: nothing to rebuild), the colour line:
+
+```
+captured 1235 x 718   drawn by the window   the terminal window that owns this console (CASCADIA_HOSTING_WINDOW_CLASS)   host=ConsoleHost  WT_SESSION=
+```
+
+![the doctor on the owner's Windows Terminal](img/phase12-windows-colour.png)
+
+The colours measured in the picture against the theme (`src/theme.rs`):
+each role's 24-bit value is found exactly, at the centre of its glyphs,
+where the font's edge blending leaves the colour itself.
+
+| where | role | theme | in the picture |
+|---|---|---|---|
+| `PASS`, `everything in place` | Ok | `#7CD992` | `#7CD992`, 2,289 px |
+| `doctor` | Keep | `#FFB000` | `#FFB000`, 154 px |
+| the folder | Info | `#5FB3FF` | `#5FB3FF`, 252 px |
+| check names, `dedupe` | Plate | `#E8E4D8` | `#E8E4D8`, 2,291 px |
+| details | Dupe | `#8A8A8A` | `#8A8A8A`, 6,717 px |
+| rules | Rule | `#4A4A4A` | `#4A4A4A`, 4,716 px |
+
+The background, `#030304`, is the terminal's own. QOL-10 is so verified:
+the console host given to Windows Terminal draws the 24-bit theme as set.
+
+The picture showed one thing changed since: the deep row's note
+(`expected at …`, under a `PASS`) was painted as bright as a WARN's fix,
+outshining its own detail. Under a `PASS` the note is now as quiet as
+the detail; under a WARN or FAIL the line is still what to do and stands
+out **[CLAUDE]**. `a_terminal_gets_colour` asserts it (the escape before
+the note is grey); suite, clippy both targets and fmt green after it.
+
 ## Not verified here
 
-- QOL-10's picture: colour as a person sees it on the owner's console.
-  The run of § 9 could not take it; the launcher's next run does. A CI
-  runner has no window to photograph.
 - The bench on more threads or on Windows: run here only, on 2 vCPUs.

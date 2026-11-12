@@ -25,10 +25,10 @@ milestone: Phase 11, delivered 2026-11-10 (`SHELVED.md` § Phase 11 `[done]`).
   by its own words (`CTRL_BREAK sent to the milk's process group …`)
 - [x] **SC-08** UTF-8 Windows logs — verified from the 2026-11-11 run
   (VERIFICATION § Phase 11 on Windows)
-- [ ] **QOL-10** Windows console colour — the enablement path runs in a
-  test through the console host (`a_terminal_gets_colour`, in CI); the
-  screenshot from the next `runs/win/RUN_VERIFY.cmd` goes into
-  VERIFICATION
+- [x] **QOL-10** Windows console colour — the enablement path tested
+  through the console host (`a_terminal_gets_colour`, in CI); the picture
+  from the owner's Windows Terminal, its colours measured against the
+  theme (VERIFICATION § Phase 12 § 10)
 
 Done when: every box ticked, the suite green on Linux and in the CI
 matrix on Windows, the three Phase 10 items verified on Windows with a

@@ -18,24 +18,7 @@ Source review: IDENTIFIED 2026-11-09 (`780e3cc`).
 
 ---
 
-## Phase 11 — matching depth   `[done]` 2026-11-10 — see PLAN.md § Phase 11, VERIFICATION.md § Phase 11
-
-Item 8 delivered as the person's own cull (`c`): the "keep the sharpest"
-option it named was measured and not shipped. Item 9 measured and not
-shipped (the reduced decode stays in its harness).
-
-1. **CORE-04** deep threshold on real labelled copies
-2. **CORE-08** capture-moment rule on a real camera roll (needs NF-01)
-3. **CORE-01** robust (trimmed / rank) NCC in the fit
-4. **CORE-02** mirror search in the fit
-5. **CORE-03** non-black video bars
-6. **CORE-06** mid-file sample for files over 1 GB
-7. **CORE-07** provenance-aware keeper policy
-8. **NF-05** burst / series handling, keep the sharpest
-9. **TECH-02** DCT-domain JPEG downscale, re-measured against conformance
-10. **QOL-07** ETA on long stages
-
-## Phase 12 — structure and CI   `[todo]`
+## Phase 12 — structure and CI   `[done]` 2026-11-12 — see PLAN.md § Phase 12, VERIFICATION.md § Phase 12
 
 1. **SC-02** split `actions.rs` (scan / plan / act)
 2. **SC-03** split `render.rs` by screen

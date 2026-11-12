@@ -453,13 +453,19 @@ pub fn page(inv: &Invocation, r: &Renderer) -> i32 {
             )
         );
         if !c.fix.is_empty() {
+            // under a WARN or FAIL the line is what to do, and stands out;
+            // under a PASS it is a note, as quiet as the detail above it
+            // (the deep row's model path outshone its own PASS, seen on
+            // the 2026-11-12 Windows picture) [CLAUDE]
+            let tone = if c.status == Status::Pass {
+                Role::Dupe
+            } else {
+                Role::Plate
+            };
             let room = t.width.saturating_sub(17 + 1).max(12);
             println!(
                 "                 {}",
-                t.paint(
-                    Role::Plate,
-                    &shorten_middle(&c.fix, room, t.glyphs.ellipsis)
-                )
+                t.paint(tone, &shorten_middle(&c.fix, room, t.glyphs.ellipsis))
             );
         }
     }

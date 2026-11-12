@@ -329,7 +329,7 @@ metadata, the owner's sample tree (VERIFICATION § Phase 11):
   running past it; the `~` legend no longer calls a by-hand row
   confirmed; the near policy label fits 80 columns.
 
-## Phase 12 — structure and CI   ← in progress (TODO.md)
+## Phase 12 — structure and CI   ← delivered 2026-11-12
 
 The code shaped for what it became: actions/render/video split, a shared
 group interface, the `unwrap()` audit, in-tree benchmarks, pseudo-terminal
@@ -337,7 +337,7 @@ tests on Windows, CI on Linux and Windows, and the Windows verification
 Phase 10 carried (Ctrl-C, UTF-8 logs, console colour). Items: SHELVED.md
 § Phase 12.
 
-So far (VERIFICATION § Phase 12):
+Delivered (VERIFICATION § Phase 12):
 
 - **SC-02, SC-03, TECH-06** `actions`, `render` and `video` are folders of
   modules by concern — scan / plan / act / undo, the stage lines / the
@@ -357,8 +357,11 @@ So far (VERIFICATION § Phase 12):
 - **TECH-07** Ctrl-C on Windows verified in CI by its own words; **SC-08**
   by the 2026-11-11 Windows run.
 - **QOL-10** colour's enablement path tested through the console host
-  (`a_terminal_gets_colour`); its picture waits for the launcher's next
-  run on the owner's machine — the last box of the phase.
+  (`a_terminal_gets_colour`), and the picture from the owner's Windows
+  Terminal with every theme colour measured exact. The launcher now finds
+  the window a handed-off console is shown in.
+- Found while verifying: a note under a PASS in the doctor is as quiet
+  as its detail.
 
 ## Docs chain
 
