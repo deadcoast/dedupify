@@ -113,7 +113,7 @@ pub fn write(j: &mut Journal) -> io::Result<PathBuf> {
 }
 
 /// How often the journal on disk is brought up to date while a change
-/// runs, so a hard kill (power, task manager) loses at most this much.
+/// runs, so a hard kill (task manager, power) loses at most this much.
 pub const FLUSH_EVERY: Duration = Duration::from_millis(250);
 
 /// A journal being written as a change runs. Nothing touches the disk
@@ -180,13 +180,28 @@ impl Writer {
     }
 }
 
-/// Replace `path` atomically: the new text goes to a sibling `.tmp`, then
-/// one rename, so a kill mid-write leaves the previous journal intact.
+/// Replace `path` atomically: the new text goes to a sibling `.tmp`, is
+/// flushed to the disk, and then takes the journal's name in one rename —
+/// so a kill mid-write leaves the previous journal intact, and so does a
+/// power cut: the name never points at text still in memory (Phase 13,
+/// TECH-09). On Unix the folder is flushed after, which holds the rename.
 fn rewrite(path: &Path, j: &Journal) -> io::Result<()> {
+    use std::io::Write as _;
     let text = serde_json::to_string_pretty(j).map_err(|e| io::Error::other(e.to_string()))?;
     let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, text)?;
-    fs::rename(&tmp, path)
+    {
+        let mut f = fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    fs::rename(&tmp, path)?;
+    #[cfg(unix)]
+    if let Some(dir) = path.parent() {
+        if let Ok(d) = fs::File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+    Ok(())
 }
 
 pub fn read(path: &Path) -> io::Result<Journal> {

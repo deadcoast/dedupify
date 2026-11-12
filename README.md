@@ -55,7 +55,11 @@ page.
 - `docs/IDENTIFIED.md` → `docs/SHELVED.md` → `docs/TODO.md` — the latest review, its items by milestone, the milestone in progress
 
 Nothing is cached or indexed on a scan, and nothing is written into the
-scanned folder but `_milked`. A change writes one journal in the OS
+scanned folder but `_milked`. The operating system's trash and system
+folders are never scanned, and files a sync client keeps online only
+(OneDrive, iCloud) are not read, which would download them; the SCAN
+line counts both. An ffmpeg that sends nothing for a minute is stopped
+and its file named (`DEDUPE_STALL` sets the minute in seconds). A change writes one journal in the OS
 local-data folder; `--undo` consumes it. Ctrl-C during a change stops
 after the file in hand and the journal still covers every move. Set
 `DEDUPE_JOURNAL_DIR` to move the journals, `NO_COLOR=1` for uncoloured

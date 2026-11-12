@@ -485,7 +485,7 @@ pub struct Kinds {
     pub raw: usize,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct NearStats {
     pub decoded: u64,
     pub undecodable: u64,
@@ -515,6 +515,9 @@ pub struct NearStats {
     pub no_preview: u64,
     /// Members of near groups that are a RAW's own camera JPEG.
     pub raw_pairs: u64,
+    /// Files whose ffmpeg sent nothing for `tools::stall()` and was
+    /// stopped (Phase 13, CORE-11); counted in `undecodable` too.
+    pub stalled: Vec<std::path::PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +657,7 @@ pub fn hash_all(
                     E::NoFfmpeg(_) => stats.need_ffmpeg += 1,
                     E::Ffmpeg(..) => stats.ffmpeg_failed += 1,
                     E::NoPreview => stats.no_preview += 1,
+                    E::Stalled(_) => stats.stalled.push(rep.cand.path.clone()),
                     _ => {}
                 }
             }

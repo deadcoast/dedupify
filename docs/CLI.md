@@ -75,8 +75,8 @@ complete).
 ### find **[SPEC]**
 Runs the full suite — the exact pipeline (size → sample → full hash), the
 near-duplicate image pass (DECODE → MATCH, NEAR groups) and the video
-pass (FRAMES → MATCH, VIDEO groups; needs `ffmpeg` and `ffprobe` on
-PATH) — prints every group, and then **stays on the result**: on a
+pass (FRAMES → MATCH, VIDEO groups; needs `ffmpeg` and `ffprobe`, on
+PATH or where an installer put them, §2 doctor) — prints every group, and then **stays on the result**: on a
 terminal a one-line bar offers the decisions a person makes at that point
 (§2a); piped, it prints the `next` lines instead, the exact `milk` and
 `purge` invocations for this root. `img` / `vid` scope what is scanned
@@ -272,7 +272,9 @@ on other volumes, the remembered skip list, Recycle Bin reachable,
 first, then where WinGet, Scoop, Chocolatey or Homebrew put them, or
 beside `dedupe` itself — used from there when PATH does not name them),
 HEIC and AVIF decoding (two built-in probe pictures decoded the way a
-scan decodes them, their colours checked), the optional model and its SHA-256 against the
+scan decodes them, their colours checked), files kept online only by a
+sync client under the folder (WARN: they are not compared; Windows and
+macOS, Phase 13), the optional model and its SHA-256 against the
 published file (`docs/DEEP.md`), Windows long-path support when any path
 exceeds 260 characters, and the state of the journals (pending, and any
 file that could not be read). The write check creates and removes one
@@ -372,7 +374,16 @@ stage lines at SIZE.
 
 What a run left out is said where it happens (Phase 10): the header
 names the skip list and the size floor (`skip node_modules, *.tmp  min
-100 KB`), and the SCAN line counts them (`3 skipped   41 under 100 KB`).
+100 KB`), and the SCAN line counts them (`3 skipped   41 under 100 KB`),
+the files a sync client keeps online (`3,204 online only, not read`) and
+the operating system's folders it never enters (`2 bin and system
+folders left out`) (Phase 13, §5).
+
+A file whose ffmpeg (or ffprobe) sends nothing for a minute is stopped
+and left out of the run (Phase 13): its stage line counts it (`2 timed
+out`) and a note under the totals names it (`timed out: clips/a.mp4, …
+ffmpeg sent nothing for 60 s and was stopped; left out of this run`).
+`DEDUPE_STALL` sets the minute in seconds, for a slow network share.
 
 Near groups follow the exact groups and continue the numbering:
 
@@ -559,6 +570,22 @@ newest, as before.
   case there.
 - `_milked` and the app folder (journals, `recent.json`, `skip.json`, an
   optional model) are the only things `dedupe` creates.
+- The operating system's trash and system folders are never entered, as
+  `_milked` is not **[CLAUDE, Phase 13]**: `$RECYCLE.BIN`, `RECYCLER`,
+  `RECYCLED`, `System Volume Information` (any letter case), `.Trash`,
+  `.Trashes`, `.Trash-<uid>`, and the person's freedesktop trash
+  (`$XDG_DATA_HOME/Trash`). A copy in the bin is a file already thrown
+  away; elected keeper (it was the oldest), it made the live file the
+  duplicate.
+- A file a sync client keeps online only is not read **[CLAUDE, Phase
+  13]**: reading even a sample downloads it. Windows marks it
+  (`RECALL_ON_DATA_ACCESS`, `RECALL_ON_OPEN`, `OFFLINE`: OneDrive's Files
+  On-Demand, Dropbox, iCloud for Windows), macOS too (`SF_DATALESS`:
+  iCloud Drive); the walk reads the mark from the listing, opening
+  nothing. Made local, such files are compared like any other.
+- A journal is flushed to the disk before it takes its name (Phase 13):
+  after a power cut it is the previous version or the new one, never an
+  empty file.
 - The optional model (`docs/DEEP.md`) admits members; on its own it only
   adds lines. A member it admitted moves or bins only when the geometric
   fit confirms it.

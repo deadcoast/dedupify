@@ -17,9 +17,8 @@
 //! Video frames for the workspace's view are here too (`video_frame`); the
 //! video pass streams its own frames (`video`). [CLAUDE]
 
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::path::Path;
-use std::process::Stdio;
 
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageReader, RgbImage};
@@ -73,6 +72,8 @@ pub enum DecodeError {
     Ffmpeg(&'static str, String),
     /// A RAW with no usable embedded preview.
     NoPreview,
+    /// ffmpeg sent nothing for `tools::stall()` and was stopped.
+    Stalled(&'static str),
 }
 
 impl std::fmt::Display for DecodeError {
@@ -84,6 +85,11 @@ impl std::fmt::Display for DecodeError {
             DecodeError::NoFfmpeg(what) => write!(f, "{what} needs ffmpeg, not found"),
             DecodeError::Ffmpeg(what, e) => write!(f, "{what}: ffmpeg: {e}"),
             DecodeError::NoPreview => write!(f, "RAW without an embedded preview"),
+            DecodeError::Stalled(what) => write!(
+                f,
+                "{what}: ffmpeg sent nothing for {} s and was stopped",
+                crate::tools::stall().as_secs()
+            ),
         }
     }
 }
@@ -95,6 +101,7 @@ impl DecodeError {
             DecodeError::NoFfmpeg(what) => format!("{what} need ffmpeg"),
             DecodeError::Ffmpeg(what, _) => format!("{what} ffmpeg could not decode"),
             DecodeError::NoPreview => "RAW without a preview".to_string(),
+            DecodeError::Stalled(_) => "timed out".to_string(),
             DecodeError::Heif(_) => "HEIF unreadable".to_string(),
             DecodeError::Io(_) | DecodeError::Image(_) => "unreadable".to_string(),
         }
@@ -348,61 +355,22 @@ fn load_raw(path: &Path, b: &[u8]) -> Result<Decoded, DecodeError> {
 // ---------------------------------------------------------------------------
 
 /// Run ffmpeg with `args`, `input` on stdin (written from a thread so a
-/// full stdout pipe cannot stall it), and return stdout.
+/// full stdout pipe cannot stall it), and return stdout. A child silent
+/// for `tools::stall()` is stopped (Phase 13, CORE-11).
 fn ffmpeg(
     what: &'static str,
     args: &[String],
     input: Option<Vec<u8>>,
 ) -> Result<Vec<u8>, DecodeError> {
-    let mut child = crate::tools::ffmpeg()
-        .args(args)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                DecodeError::NoFfmpeg(what)
-            } else {
-                DecodeError::Ffmpeg(what, e.to_string())
-            }
-        })?;
-    let writer = input.and_then(|data| {
-        child.stdin.take().map(|mut stdin| {
-            std::thread::spawn(move || {
-                // a decoder that stops early closes the pipe; that is not
-                // an error here, the exit status says what happened
-                let _ = stdin.write_all(&data);
-            })
-        })
-    });
-    let mut out = Vec::new();
-    let mut err = Vec::new();
-    if let Some(mut so) = child.stdout.take() {
-        let mut se = child.stderr.take();
-        let errs = std::thread::spawn(move || {
-            let mut v = Vec::new();
-            if let Some(s) = se.as_mut() {
-                let _ = s.read_to_end(&mut v);
-            }
-            v
-        });
-        so.read_to_end(&mut out)
-            .map_err(|e| DecodeError::Ffmpeg(what, e.to_string()))?;
-        err = errs.join().unwrap_or_default();
-    }
-    if let Some(w) = writer {
-        let _ = w.join();
-    }
-    let status = child
-        .wait()
-        .map_err(|e| DecodeError::Ffmpeg(what, e.to_string()))?;
-    if !status.success() || out.is_empty() {
-        let msg = String::from_utf8_lossy(&err);
+    let ran = crate::tools::run(crate::tools::ffmpeg().args(args), input).map_err(|e| {
+        match e.kind() {
+            io::ErrorKind::NotFound => DecodeError::NoFfmpeg(what),
+            io::ErrorKind::TimedOut => DecodeError::Stalled(what),
+            _ => DecodeError::Ffmpeg(what, e.to_string()),
+        }
+    })?;
+    if !ran.status.success() || ran.stdout.is_empty() {
+        let msg = String::from_utf8_lossy(&ran.stderr);
         let last = msg
             .lines()
             .rev()
@@ -412,7 +380,7 @@ fn ffmpeg(
             .to_string();
         return Err(DecodeError::Ffmpeg(what, last));
     }
-    Ok(out)
+    Ok(ran.stdout)
 }
 
 fn base_args() -> Vec<String> {

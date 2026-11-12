@@ -206,6 +206,7 @@ mod tests {
             video: Vec::new(),
             videos_seen: 0,
             video_tools_missing: false,
+            stalled: Vec::new(),
         };
         assert_eq!(f.group_count(), 2);
         let order: Vec<&Path> = f.views().map(|g| g.path(0)).collect();

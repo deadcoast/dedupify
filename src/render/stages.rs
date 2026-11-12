@@ -194,13 +194,19 @@ impl LiveProgress {
     /// Near-pass stage texts; `actions` closes these stages with `finish`.
     pub fn decode_summary(&self, n: &NearStats, elapsed: Duration) -> String {
         let t = &self.theme;
-        if n.decoded < 2 {
-            return format!(
-                "{} {}   {}",
-                t.paint(Role::Info, &fmt_count(n.decoded)),
-                plural(n.decoded, "image", "images"),
-                t.paint(Role::Dupe, "nothing to compare")
-            );
+        if n.decoded + n.undecodable < 2 {
+            // what did not decode is said even here: a single HEIC on a
+            // machine without ffmpeg used to read "0 images" and no reason
+            let mut v = vec![
+                format!(
+                    "{} {}",
+                    t.paint(Role::Info, &fmt_count(n.decoded)),
+                    plural(n.decoded, "image", "images")
+                ),
+                t.paint(Role::Dupe, "nothing to compare"),
+            ];
+            v.extend(self.decode_failures(n));
+            return v.join("   ");
         }
         let mut v = vec![format!(
             "{} {} hashed",
@@ -227,20 +233,7 @@ impl LiveProgress {
                 &format!("{} embeddings failed", fmt_count(n.deep_failed)),
             ));
         }
-        // what was not decoded, by the reason a person can act on
-        let unreadable = n
-            .undecodable
-            .saturating_sub(n.need_ffmpeg + n.ffmpeg_failed + n.no_preview);
-        for (k, what, role) in [
-            (n.need_ffmpeg, "need ffmpeg", Role::Warn),
-            (n.ffmpeg_failed, "ffmpeg could not decode", Role::Warn),
-            (n.no_preview, "RAW without a preview", Role::Dupe),
-            (unreadable, "undecodable", Role::Dupe),
-        ] {
-            if k > 0 {
-                v.push(t.paint(role, &format!("{} {what}", fmt_count(k))));
-            }
-        }
+        v.extend(self.decode_failures(n));
         if n.low_quality > 0 {
             v.push(t.paint(
                 Role::Dupe,
@@ -249,6 +242,26 @@ impl LiveProgress {
         }
         v.push(t.paint(Role::Dupe, &fmt_duration(elapsed)));
         v.join("   ")
+    }
+
+    /// What was not decoded, by the reason a person can act on.
+    fn decode_failures(&self, n: &NearStats) -> Vec<String> {
+        let t = &self.theme;
+        let stalled = n.stalled.len() as u64;
+        let unreadable = n
+            .undecodable
+            .saturating_sub(n.need_ffmpeg + n.ffmpeg_failed + n.no_preview + stalled);
+        [
+            (stalled, "timed out", Role::Warn),
+            (n.need_ffmpeg, "need ffmpeg", Role::Warn),
+            (n.ffmpeg_failed, "ffmpeg could not decode", Role::Warn),
+            (n.no_preview, "RAW without a preview", Role::Dupe),
+            (unreadable, "undecodable", Role::Dupe),
+        ]
+        .into_iter()
+        .filter(|(k, _, _)| *k > 0)
+        .map(|(k, what, role)| t.paint(role, &format!("{} {what}", fmt_count(k))))
+        .collect()
     }
 
     pub fn match_summary(&self, n: &NearStats, elapsed: Duration) -> String {
@@ -302,10 +315,14 @@ impl LiveProgress {
                 &format!("{} frames at 15 fps", fmt_count(v.frames)),
             ),
         ];
-        if v.unreadable > 0 {
+        let stalled = v.stalled.len() as u64;
+        if stalled > 0 {
+            parts.push(t.paint(Role::Warn, &format!("{} timed out", fmt_count(stalled))));
+        }
+        if v.unreadable > stalled {
             parts.push(t.paint(
                 Role::Dupe,
-                &format!("{} unreadable", fmt_count(v.unreadable)),
+                &format!("{} unreadable", fmt_count(v.unreadable - stalled)),
             ));
         }
         parts.push(t.paint(Role::Dupe, &fmt_duration(elapsed)));
@@ -453,6 +470,24 @@ impl Renderer {
             v.push(t.paint(
                 Role::Dupe,
                 &format!("{} under {}", fmt_count(s.small), fmt_bytes(s.min)),
+            ));
+        }
+        // files a sync client keeps online: reading them would fetch them
+        if s.online > 0 {
+            v.push(t.paint(
+                Role::Dupe,
+                &format!("{} online only, not read", fmt_count(s.online)),
+            ));
+        }
+        // the bin and the system's own folders, never entered (Phase 13)
+        if s.system > 0 {
+            v.push(t.paint(
+                Role::Dupe,
+                &format!(
+                    "{} {} left out",
+                    fmt_count(s.system),
+                    plural(s.system, "bin or system folder", "bin and system folders")
+                ),
             ));
         }
         if let Some(e) = elapsed {

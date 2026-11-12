@@ -32,6 +32,9 @@ pub(crate) struct Found {
     pub(crate) videos_seen: u64,
     /// ffmpeg/ffprobe missing when the video pass was wanted.
     pub(crate) video_tools_missing: bool,
+    /// Files whose ffmpeg sent nothing for `tools::stall()` and was stopped:
+    /// left out of this run, named under the totals (Phase 13, CORE-11).
+    pub(crate) stalled: Vec<PathBuf>,
 }
 
 impl Found {
@@ -155,6 +158,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
     };
     keeper::order(&mut groups);
 
+    let mut stalled: Vec<PathBuf> = Vec::new();
     let mut near_groups = Vec::new();
     if near_on {
         // representatives: every decodable image that is not a non-keeper
@@ -198,6 +202,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                     }
                 });
             let (hashed, mut stats) = near::hash_all(reps, &lp, deep_model.as_ref());
+            stalled.extend(stats.stalled.iter().cloned());
             let e = lp.stage_elapsed(Stage::Decode);
             lp.finish_stage(Stage::Decode, lp.decode_summary(&stats, e));
             near_groups = near::group(hashed, &mut stats, &lp);
@@ -252,6 +257,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                 .collect();
             if reps.len() >= 2 {
                 let (hashed, mut stats) = video::hash_all(reps, &lp);
+                stalled.extend(stats.stalled.iter().cloned());
                 let e = lp.stage_elapsed(Stage::Frames);
                 lp.finish_stage(Stage::Frames, lp.frames_summary(&stats, e));
                 let hashed: Vec<video::VHashed> = hashed
@@ -281,6 +287,7 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         video: video_groups,
         videos_seen,
         video_tools_missing,
+        stalled,
         scan,
         pipe,
         images_seen,
@@ -303,4 +310,27 @@ pub(crate) fn report(f: &Found, inv: &Invocation, r: &Renderer) {
             "video pass skipped: ffmpeg and ffprobe not found   dedupe doctor",
         );
     }
+    if !f.stalled.is_empty() {
+        r.note(Role::Warn, &stalled_note(&f.stalled, &inv.root));
+    }
+}
+
+/// The files a stalled ffmpeg was stopped on, by name: the first three,
+/// then how many more.
+pub(crate) fn stalled_note(paths: &[PathBuf], root: &Path) -> String {
+    let mut sorted: Vec<&PathBuf> = paths.iter().collect();
+    sorted.sort();
+    let mut names: Vec<String> = sorted
+        .iter()
+        .take(3)
+        .map(|p| crate::util::rel_display(p, root))
+        .collect();
+    if paths.len() > 3 {
+        names.push(format!("and {} more", paths.len() - 3));
+    }
+    format!(
+        "timed out: {}   ffmpeg sent nothing for {} s and was stopped; left out of this run",
+        names.join(", "),
+        crate::tools::stall().as_secs()
+    )
 }

@@ -807,9 +807,11 @@ frame's PDQ band feeds the TMK accumulator; the twelve frames nearest to
 (i+0.5)/12 of the duration also get the full eight-orientation image
 signature — the **positional tier**. ffmpeg is a subprocess, not a linked
 library, because linking FFmpeg into a Rust build on Windows needs vcpkg
-and a matching toolchain; `doctor` reports whether `ffmpeg`/`ffprobe` are
-on PATH, and a run that wanted the pass without them says so and finishes
-the exact tier. Concurrency: ⌈cores/2⌉ clamped to 1–4 ffmpeg processes with
+and a matching toolchain; `ffmpeg`/`ffprobe` are looked for on PATH, then
+where WinGet, Scoop, Chocolatey or Homebrew put them, or beside `dedupe`
+(`tools.rs`, Phase 11 on Windows); `doctor` says where they were found,
+and a run that wanted the pass without them says so and finishes the
+exact tier. Concurrency: ⌊cores/2⌋ clamped to 1–4 ffmpeg processes with
 `-threads 2` each **[CLAUDE]**.
 
 Two tiers, because they fail differently:

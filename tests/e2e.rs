@@ -2339,3 +2339,309 @@ fn skip_is_remembered_and_min_is_per_run() {
         "{out}{err}"
     );
 }
+
+/// The operating system's trash and system folders are never entered
+/// (Phase 13, CORE-09). IDENTIFIED M1: with a copy of a photo in
+/// `$RECYCLE.BIN`, older than the live one, the bin's copy was elected
+/// keeper and the live photo was the file `milk` would move. Now the bin
+/// is not scanned, the live photo has no duplicate, and the SCAN line
+/// says what was left out; the person's own freedesktop trash is found
+/// by its path, here through `XDG_DATA_HOME`.
+#[test]
+fn the_bin_is_never_scanned() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("fx");
+    let journal = tmp.path().join("journal");
+    let photo = blob(41, 300 * 1024);
+    put(&root, "photos/IMG_0041.jpg", &photo);
+    put_at(
+        &root,
+        "$RECYCLE.BIN/S-1-5-21-1000/$RX4K2P1.jpg",
+        &photo,
+        1_577_836_800, // 2020-01-01: the oldest copy, the keeper it was
+    );
+    put(&root, ".Trash-1000/files/IMG_0041.jpg", &photo);
+    put(&root, "System Volume Information/tracking.log", &photo);
+    // the person's freedesktop trash: Linux and the BSDs only
+    let home_trash = !cfg!(any(windows, target_os = "macos"));
+    if home_trash {
+        put(&root, "share/Trash/files/IMG_0041.jpg", &photo);
+    }
+    // a real duplicate beside them still groups
+    let note = blob(42, 4096);
+    put(&root, "notes/a.txt", &note);
+    put(&root, "notes/a (copy).txt", &note);
+    let fx = Fx {
+        _tmp: tmp,
+        root: root.canonicalize().unwrap(),
+        journal,
+    };
+    let go = |args: &[&str]| {
+        let out = Command::new(bin())
+            .args(args)
+            .current_dir(&fx.root)
+            .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("XDG_DATA_HOME", fx.root.join("share"))
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", "200")
+            .output()
+            .expect("spawn dedupe");
+        (
+            out.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+    let (code, out) = go(&["find", "."]);
+    assert_eq!(code, 0, "{out}");
+    for gone in ["RECYCLE", "Trash", "System Volume"] {
+        assert!(!out.contains(gone), "{gone} listed\n{out}");
+    }
+    assert!(out.contains("1 group"), "{out}");
+    assert!(!out.contains("IMG_0041"), "{out}");
+    let left_out = if home_trash { 4 } else { 3 };
+    assert!(
+        out.contains(&format!("{left_out} bin and system folders left out")),
+        "{out}"
+    );
+    let (code, out) = go(&["milk", ".", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        !out.contains("photos/IMG_0041.jpg"),
+        "the live photo stays\n{out}"
+    );
+}
+
+/// A file a sync client keeps online is not read (Phase 13, CORE-10).
+/// Windows lets a program mark a file `OFFLINE` (the recall attributes a
+/// sync client sets cannot be set from here; `walk::online_only` treats
+/// the three alike, unit-tested): the marked copy is counted on the SCAN
+/// line and in the doctor, its twin has no duplicate, and nothing reads
+/// it.
+#[cfg(windows)]
+#[test]
+fn a_file_kept_online_is_not_read() {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn SetFileAttributesW(name: *const u16, attributes: u32) -> i32;
+    }
+    let set = |p: &Path, a: u32| {
+        let w: Vec<u16> = p.as_os_str().encode_wide().chain(Some(0)).collect();
+        // SAFETY: a NUL-terminated wide path that outlives the call
+        assert_ne!(
+            unsafe { SetFileAttributesW(w.as_ptr(), a) },
+            0,
+            "{}",
+            p.display()
+        );
+    };
+    let fx = fixture();
+    let cloud = fx.root.join("backup/IMG_0041.jpg");
+    set(&cloud, 0x0000_1000 | 0x0000_0020); // OFFLINE | ARCHIVE
+    let (code, out, _) = run(&fx, &["find", "."]);
+    let (dcode, doc, _) = run(&fx, &["doctor"]);
+    set(&cloud, 0x0000_0020); // local again, so the folder can go
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("1 online only, not read"), "{out}");
+    assert!(
+        !out.lines()
+            .any(|l| l.trim_end().ends_with("backup\\IMG_0041.jpg")),
+        "{out}"
+    );
+    assert!(
+        out.contains("backup\\old\\IMG_0041 (1).jpg"),
+        "its twins still group\n{out}"
+    );
+    assert_eq!(dcode, 0, "{doc}");
+    assert!(doc.contains("1 file kept online only"), "{doc}");
+}
+
+/// A clock on every ffmpeg and ffprobe child (Phase 13, CORE-11): a
+/// stand-in pair on PATH answers `-version` and then sends nothing. Each
+/// file it is asked about is stopped after `DEDUPE_STALL` seconds, counted
+/// `timed out` on its stage line and named under the totals; the run ends
+/// and the byte copies still group. (Unix: the stand-ins are shell
+/// scripts; the clock itself is unit-tested on Windows too, `tools`.)
+#[cfg(unix)]
+#[test]
+fn a_stalled_ffmpeg_is_stopped_and_named() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+    let fx = fixture();
+    let bin_dir = fx.root.parent().unwrap().join("fake-bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    for name in ["ffmpeg", "ffprobe"] {
+        let p = bin_dir.join(name);
+        fs::write(
+            &p,
+            "#!/bin/sh\ncase \"$1\" in -version) echo \"$0 version stand-in\"; exit 0;; esac\nexec sleep 30\n",
+        )
+        .unwrap();
+        fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    put(&fx.root, "clips/b.mp4", &blob(7, 90_000));
+    put(&fx.root, "clips/c.mp4", &blob(8, 91_000));
+    put(&fx.root, "art/one.jxl", &blob(9, 5_000));
+    put(&fx.root, "art/two.jxl", &blob(10, 5_100));
+    let path = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let t = Instant::now();
+    let out = Command::new(bin())
+        .args(["find", "."])
+        .current_dir(&fx.root)
+        .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("DEDUPE_STALL", "1")
+        .env("PATH", path)
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .output()
+        .expect("spawn dedupe");
+    let took = t.elapsed();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(0), "{text}");
+    assert!(took < Duration::from_secs(25), "{took:?}\n{text}");
+    // three videos stand for themselves (a.mp4 keeps its byte copy's place)
+    let frames = text.lines().find(|l| l.contains("FRAMES")).unwrap_or("");
+    assert!(frames.contains("3 timed out"), "{text}");
+    let decode = text.lines().find(|l| l.contains("DECODE")).unwrap_or("");
+    assert!(decode.contains("2 timed out"), "{text}");
+    assert!(text.contains("timed out: "), "{text}");
+    assert!(text.contains("ffmpeg sent nothing for 1 s"), "{text}");
+    // the first three by path, then how many more
+    let note = text
+        .lines()
+        .find(|l| l.contains("timed out: "))
+        .unwrap_or("");
+    for named in ["art/one.jxl", "art/two.jxl", "clips/a.mp4", "and 2 more"] {
+        assert!(note.contains(named), "{named}\n{text}");
+    }
+    // the byte copies did not wait on any of it
+    assert!(text.contains("IMG_0041 (1).jpg"), "{text}");
+}
+
+/// The Recycle Bin refusing a file (Phase 13, TECH-11). `purge` promises
+/// never to delete outright; that rests on the `trash` crate's flags
+/// (`FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING`), never seen with a
+/// file the bin cannot hold. Here the temp volume's bin is capped at 1 MB
+/// (its `MaxCapacity` under `HKCU\…\BitBucket\Volume\{GUID}`) and a 5 MB
+/// duplicate is purged: it must be refused, still on disk, said why, and
+/// the cap put back. It changes a setting of the machine, so it runs only
+/// where the machine is disposable: CI sets `DEDUPE_TEST_BIN_CAP=1`.
+#[cfg(windows)]
+#[test]
+#[ignore]
+fn the_bin_refusing_a_file_leaves_it_on_disk() {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::time::{Duration, Instant};
+    if std::env::var_os("DEDUPE_TEST_BIN_CAP").is_none() {
+        eprintln!("DEDUPE_TEST_BIN_CAP not set: the bin's cap is left alone; skipped");
+        return;
+    }
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetVolumePathNameW(file: *const u16, out: *mut u16, len: u32) -> i32;
+        fn GetVolumeNameForVolumeMountPointW(mount: *const u16, out: *mut u16, len: u32) -> i32;
+    }
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let fx = fixture();
+    // the fixture's volume and its GUID
+    let mut mount = vec![0u16; 300];
+    let mut name = vec![0u16; 100];
+    // SAFETY: NUL-terminated input; output buffers of the lengths given
+    unsafe {
+        assert_ne!(
+            GetVolumePathNameW(wide(&fx.root).as_ptr(), mount.as_mut_ptr(), 300),
+            0
+        );
+        assert_ne!(
+            GetVolumeNameForVolumeMountPointW(mount.as_ptr(), name.as_mut_ptr(), 100),
+            0
+        );
+    }
+    let name = std::ffi::OsString::from_wide(&name[..name.iter().position(|&c| c == 0).unwrap()])
+        .to_string_lossy()
+        .into_owned();
+    let guid = &name[name.find('{').unwrap()..=name.find('}').unwrap()];
+    let key =
+        format!(r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\BitBucket\Volume\{guid}");
+    let reg = |args: &[&str]| Command::new("reg").args(args).output().expect("reg.exe");
+    let old = String::from_utf8_lossy(&reg(&["query", &key, "/v", "MaxCapacity"]).stdout)
+        .lines()
+        .find(|l| l.contains("MaxCapacity"))
+        .and_then(|l| l.split_whitespace().last().map(str::to_string));
+    assert!(reg(&[
+        "add",
+        &key,
+        "/v",
+        "MaxCapacity",
+        "/t",
+        "REG_DWORD",
+        "/d",
+        "1",
+        "/f"
+    ])
+    .status
+    .success());
+    let big = blob(77, 5 * 1024 * 1024);
+    put(&fx.root, "big/keep.bin", &big);
+    put(&fx.root, "big/copy/keep.bin", &big);
+    // a dialog the flags failed to suppress would hold the run: a clock
+    let mut child = Command::new(bin())
+        .args(["purge", "big", "."])
+        .current_dir(&fx.root)
+        .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "200")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("spawn dedupe");
+    let t0 = Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break Some(s);
+        }
+        if t0.elapsed() > Duration::from_secs(120) {
+            let _ = child.kill();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let mut out = String::new();
+    use std::io::Read as _;
+    let _ = child.stdout.take().unwrap().read_to_string(&mut out);
+    // the cap put back before anything is asserted
+    match &old {
+        Some(v) => {
+            let v = u32::from_str_radix(v.trim_start_matches("0x"), 16).unwrap_or(10);
+            reg(&[
+                "add",
+                &key,
+                "/v",
+                "MaxCapacity",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                &v.to_string(),
+                "/f",
+            ]);
+        }
+        None => {
+            reg(&["delete", &key, "/v", "MaxCapacity", "/f"]);
+        }
+    }
+    let status = status.expect("purge did not end in 120 s: a dialog may be waiting");
+    eprintln!("{out}");
+    let copy = fx.root.join("big/copy/keep.bin");
+    let kept = fx.root.join("big/keep.bin");
+    assert!(kept.exists(), "the keeper\n{out}");
+    assert!(
+        copy.exists(),
+        "the bin could not hold it, and it was deleted outright\n{out}"
+    );
+    assert_eq!(fs::read(&copy).unwrap(), big);
+    assert_eq!(status.code(), Some(2), "{out}");
+    assert!(out.contains("Recycle Bin refused it"), "{out}");
+}

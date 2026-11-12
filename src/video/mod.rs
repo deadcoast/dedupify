@@ -34,8 +34,9 @@ mod probe;
 mod tmk;
 
 pub use bars::{
-    detect_bars, detect_flat_bars, flat_bars, parse_cropdetect, Bars, BAR_KEEP_MIN, BAR_LIMIT,
-    BAR_MIN_SHARE, FLAT_FRAMES, FLAT_PICTURE_MIN, FLAT_RATIO, FLAT_START, FLAT_WIDTH,
+    detect_bars, detect_bars_clocked, detect_flat_bars, detect_flat_bars_clocked, flat_bars,
+    parse_cropdetect, Bars, BAR_KEEP_MIN, BAR_LIMIT, BAR_MIN_SHARE, FLAT_FRAMES, FLAT_PICTURE_MIN,
+    FLAT_RATIO, FLAT_START, FLAT_WIDTH,
 };
 pub use group::{
     group, keeper_order, relate, VHashed, VRep, VideoGroup, VideoMember, VideoRelation,
@@ -112,7 +113,11 @@ pub fn position_indices(duration: f64) -> Vec<u32> {
 pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
     // black bars first (cropdetect, measured in Phase 7); bars of any
     // other colour when there are none
-    let bars = detect_bars(path, meta).or_else(|| detect_flat_bars(path, meta));
+    // (a pass that stalled ends the file here: the frame pass would too)
+    let bars = match detect_bars_clocked(path, meta)? {
+        Some(b) => Some(b),
+        None => detect_flat_bars_clocked(path, meta)?,
+    };
     hash_video_inside(path, meta, bars)
 }
 
@@ -159,6 +164,9 @@ pub fn hash_video_inside(
         .stdout
         .take()
         .expect("invariant: the child was spawned with stdout piped");
+    // a clock on the pipe: no frame for `tools::stall()` and ffmpeg is
+    // stopped (Phase 13, CORE-11)
+    let watch = crate::tools::Watch::new(child);
 
     let want = position_indices(meta.duration);
     let mut positional: Vec<Signature> = Vec::with_capacity(POSITIONS);
@@ -169,12 +177,17 @@ pub fn hash_video_inside(
     let mut next_pos = 0usize;
     loop {
         match read_exact_or_eof(&mut out, &mut raw) {
-            Ok(true) => {}
+            Ok(true) => watch.touch(),
             Ok(false) => break,
             Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(VideoError::Io(e));
+                let stalled = watch.stalled();
+                watch.kill();
+                let _ = watch.finish();
+                return Err(if stalled {
+                    VideoError::Stalled
+                } else {
+                    VideoError::Io(e)
+                });
             }
         }
         for (g, b) in grid.iter_mut().zip(&raw) {
@@ -205,7 +218,11 @@ pub fn hash_video_inside(
         }
         t += 1;
     }
-    let _ = child.wait();
+    let _ = watch.finish();
+    // stopped at a frame's edge reads as the end of the file: it is not
+    if watch.stalled() {
+        return Err(VideoError::Stalled);
+    }
     if t == 0 {
         return Err(VideoError::NoFrames);
     }
@@ -241,10 +258,13 @@ fn read_exact_or_eof(r: &mut impl Read, buf: &mut [u8]) -> io::Result<bool> {
 // ---------------------------------------------------------------------------
 // comparing two videos
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct VideoStats {
     pub probed: u64,
     pub unreadable: u64,
+    /// Files whose ffmpeg or ffprobe sent nothing for `tools::stall()` and
+    /// was stopped (Phase 13, CORE-11); counted in `unreadable` too.
+    pub stalled: Vec<std::path::PathBuf>,
     pub hashed: u64,
     pub frames: u64,
     pub pairs: u64,
@@ -263,7 +283,8 @@ pub fn hash_all<T: Send + Sync>(
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(concurrency())
         .build();
-    let run = |items: Vec<(T, std::path::PathBuf)>| -> Vec<(T, Result<VideoSig, VideoError>)> {
+    #[allow(clippy::type_complexity)]
+    let run = |items: Vec<(T, std::path::PathBuf)>| -> Vec<(T, std::path::PathBuf, Result<VideoSig, VideoError>)> {
         items
             .into_par_iter()
             .map(|(tag, path)| {
@@ -273,7 +294,7 @@ pub fn hash_all<T: Send + Sync>(
                 }
                 let d = done.fetch_add(1, Ordering::Relaxed) + 1;
                 progress.tick(Stage::Frames, d, total);
-                (tag, r)
+                (tag, path, r)
             })
             .collect()
     };
@@ -287,11 +308,15 @@ pub fn hash_all<T: Send + Sync>(
         ..Default::default()
     };
     let mut out = Vec::with_capacity(results.len());
-    for (tag, r) in results {
+    for (tag, path, r) in results {
         match r {
             Ok(s) => {
                 stats.hashed += 1;
                 out.push((tag, s));
+            }
+            Err(VideoError::Stalled) => {
+                stats.unreadable += 1;
+                stats.stalled.push(path);
             }
             Err(_) => stats.unreadable += 1,
         }

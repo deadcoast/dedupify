@@ -3,7 +3,7 @@
 
 use std::io;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Meta {
@@ -21,6 +21,20 @@ pub enum VideoError {
     NoVideoStream,
     NoFrames,
     Io(io::Error),
+    /// ffmpeg or ffprobe sent nothing for `tools::stall()` and was stopped
+    /// (Phase 13, CORE-11).
+    Stalled,
+}
+
+impl VideoError {
+    /// From a clocked run: a stall, or the child would not start.
+    pub fn from_run(e: io::Error) -> VideoError {
+        if e.kind() == io::ErrorKind::TimedOut {
+            VideoError::Stalled
+        } else {
+            VideoError::Spawn(e)
+        }
+    }
 }
 
 impl std::fmt::Display for VideoError {
@@ -31,6 +45,11 @@ impl std::fmt::Display for VideoError {
             VideoError::NoVideoStream => write!(f, "no video stream"),
             VideoError::NoFrames => write!(f, "no frames decoded"),
             VideoError::Io(e) => write!(f, "{e}"),
+            VideoError::Stalled => write!(
+                f,
+                "ffmpeg sent nothing for {} s and was stopped",
+                crate::tools::stall().as_secs()
+            ),
         }
     }
 }
@@ -39,12 +58,7 @@ impl std::fmt::Display for VideoError {
 /// `tools` found them (PATH, or where an installer put them).
 pub fn tools_present() -> (bool, bool) {
     let ok = |mut c: Command| {
-        c.arg("-version")
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+        crate::tools::run(c.arg("-version"), None).is_ok_and(|r| r.status.success())
     };
     (ok(crate::tools::ffmpeg()), ok(crate::tools::ffprobe()))
 }
@@ -82,21 +96,19 @@ fn parse_rate(s: &str) -> f64 {
 
 /// `ffprobe` the first video stream.
 pub fn probe(path: &Path) -> Result<Meta, VideoError> {
-    let out = crate::tools::ffprobe()
-        .args([
-            "-v",
-            "error",
-            "-select_streams",
-            "v:0",
-            "-show_entries",
-            "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,duration:format=duration",
-            "-of",
-            "json",
-        ])
-        .arg(path)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(VideoError::Spawn)?;
+    let mut out = crate::tools::ffprobe();
+    out.args([
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name,width,height,r_frame_rate,avg_frame_rate,duration:format=duration",
+        "-of",
+        "json",
+    ])
+    .arg(path);
+    let out = crate::tools::run(&mut out, None).map_err(VideoError::from_run)?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
         return Err(VideoError::Probe(if err.is_empty() {

@@ -3,9 +3,8 @@
 //! along each edge band (Phase 11, CORE-03).
 
 use std::path::Path;
-use std::process::Stdio;
 
-use super::{Meta, FFMPEG_THREADS};
+use super::{Meta, VideoError, FFMPEG_THREADS};
 
 /// The picture inside bars: a pillarbox (bars left and right) or a
 /// letterbox (bars above and below), in source pixels.
@@ -72,39 +71,45 @@ pub fn parse_cropdetect(stderr: &str, width: u32, height: u32) -> Option<Bars> {
 /// or a dark edge in one scene cannot pass for a bar. `None` when there
 /// are none, or when ffmpeg says nothing usable.
 pub fn detect_bars(path: &Path, meta: &Meta) -> Option<Bars> {
-    let out = crate::tools::ffmpeg()
-        .args([
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "info",
-            "-threads",
-            &FFMPEG_THREADS.to_string(),
-            "-skip_frame",
-            "nokey",
-        ])
-        .arg("-i")
-        .arg(path)
-        .args([
-            "-an",
-            "-sn",
-            "-dn",
-            "-vf",
-            &format!("cropdetect=limit={BAR_LIMIT}:round=2:reset=0:skip=0"),
-            "-f",
-            "null",
-            "-",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .ok()?;
-    parse_cropdetect(
+    detect_bars_clocked(path, meta).ok().flatten()
+}
+
+/// `detect_bars`, with a stalled ffmpeg said apart from an answer of no
+/// bars, so the frame pass is not tried on a file that will stall it again.
+pub fn detect_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>, VideoError> {
+    let mut cmd = crate::tools::ffmpeg();
+    cmd.args([
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "info",
+        "-threads",
+        &FFMPEG_THREADS.to_string(),
+        "-skip_frame",
+        "nokey",
+    ])
+    .arg("-i")
+    .arg(path)
+    .args([
+        "-an",
+        "-sn",
+        "-dn",
+        "-vf",
+        &format!("cropdetect=limit={BAR_LIMIT}:round=2:reset=0:skip=0"),
+        "-f",
+        "null",
+        "-",
+    ]);
+    let out = match crate::tools::run(&mut cmd, None) {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(VideoError::Stalled),
+        Err(_) => return Ok(None),
+    };
+    Ok(parse_cropdetect(
         &String::from_utf8_lossy(&out.stderr),
         meta.width,
         meta.height,
-    )
+    ))
 }
 
 /// A band at the frame's edge counts as flat when its detail, in every
@@ -248,43 +253,53 @@ pub fn flat_bars(frames: &[image::GrayImage]) -> Option<(f64, f64, f64, f64)> {
 /// picture mapped onto the decoded frame's size (the probed size, turned
 /// when the decoder turned the picture).
 pub fn detect_flat_bars(path: &Path, meta: &Meta) -> Option<Bars> {
-    let out = crate::tools::ffmpeg()
-        .args([
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-threads",
-            &FFMPEG_THREADS.to_string(),
-            "-skip_frame",
-            "nokey",
-        ])
-        .arg("-i")
-        .arg(path)
-        .args([
-            "-an",
-            "-sn",
-            "-dn",
-            "-vf",
-            &format!("scale={FLAT_WIDTH}:-2:flags=area"),
-            "-frames:v",
-            &FLAT_FRAMES.to_string(),
-            // each keyframe once: without it the output's frame rate
-            // repeats the first keyframe in place of the others
-            "-fps_mode",
-            "passthrough",
-            "-f",
-            "image2pipe",
-            "-c:v",
-            "ppm",
-            "pipe:1",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    let frames: Vec<image::GrayImage> = crate::decode::ppm_frames(&out.stdout)?
+    detect_flat_bars_clocked(path, meta).ok().flatten()
+}
+
+/// `detect_flat_bars`, a stall said apart (as `detect_bars_clocked`).
+pub fn detect_flat_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>, VideoError> {
+    let mut cmd = crate::tools::ffmpeg();
+    cmd.args([
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-threads",
+        &FFMPEG_THREADS.to_string(),
+        "-skip_frame",
+        "nokey",
+    ])
+    .arg("-i")
+    .arg(path)
+    .args([
+        "-an",
+        "-sn",
+        "-dn",
+        "-vf",
+        &format!("scale={FLAT_WIDTH}:-2:flags=area"),
+        "-frames:v",
+        &FLAT_FRAMES.to_string(),
+        // each keyframe once: without it the output's frame rate
+        // repeats the first keyframe in place of the others
+        "-fps_mode",
+        "passthrough",
+        "-f",
+        "image2pipe",
+        "-c:v",
+        "ppm",
+        "pipe:1",
+    ]);
+    let out = match crate::tools::run(&mut cmd, None) {
+        Ok(o) => o,
+        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(VideoError::Stalled),
+        Err(_) => return Ok(None),
+    };
+    Ok(flat_bars_of(&out.stdout, meta))
+}
+
+/// The keyframes the flat-bar pass decoded, to the inner picture.
+fn flat_bars_of(stdout: &[u8], meta: &Meta) -> Option<Bars> {
+    let frames: Vec<image::GrayImage> = crate::decode::ppm_frames(stdout)?
         .into_iter()
         .map(|f| image::DynamicImage::ImageRgb8(f).to_luma8())
         .collect();

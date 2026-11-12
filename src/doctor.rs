@@ -149,6 +149,35 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
         )
     });
 
+    // files a sync client keeps online only (Phase 13, CORE-10): the scan
+    // leaves them unread, so their duplicates go unfound
+    v.push(if cfg!(any(windows, target_os = "macos")) {
+        let (_, scan) = crate::walk::scan(
+            root,
+            true,
+            crate::kind::Kind::All,
+            crate::walk::Filter {
+                skip: &inv.skip,
+                min: 0,
+            },
+            &mut |_| {},
+        );
+        if scan.online == 0 {
+            pass("online", "no file kept online only")
+        } else {
+            warn(
+                "online",
+                format!(
+                    "{} kept online only: not read, so not compared",
+                    counted(scan.online, "file", "files")
+                ),
+                "make them local to compare them (OneDrive: Always keep on this device)",
+            )
+        }
+    } else {
+        pass("online", "this system marks no file online only")
+    });
+
     // long paths (Windows MAX_PATH is 260)
     let longest = longest_path_len(root, 2_000);
     v.push(if cfg!(windows) && longest >= 260 {

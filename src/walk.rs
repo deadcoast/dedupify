@@ -1,6 +1,8 @@
 //! Discovery: turn a root into candidates.
 //!
-//! Rules: never follow symlinks or junctions; never enter `_milked`;
+//! Rules: never follow symlinks or junctions; never enter `_milked`, nor
+//! the operating system's trash and system folders (`system_folder`);
+//! never read a file a sync client keeps online only (`online_only`);
 //! zero-byte files are not candidates (a thousand empty files are not a
 //! thousand copies of anything worth moving); directory metadata supplies
 //! size and modification time, so this stage opens no file. A folder or
@@ -37,6 +39,10 @@ pub struct ScanStats {
     pub errors: u64,
     /// Folders and files passed over by name (a skipped folder counts once).
     pub skipped: u64,
+    /// The operating system's trash and system folders passed over.
+    pub system: u64,
+    /// Files of the kind asked for that are online only, left unread.
+    pub online: u64,
     /// Files under the size floor, and the floor.
     pub small: u64,
     pub min: u64,
@@ -60,6 +66,94 @@ fn is_milked_dir(name: &std::ffi::OsStr) -> bool {
     }
 }
 
+/// The operating system's own folders, never entered (Phase 13, CORE-09).
+/// A file in the trash is one the person already threw away: elected a
+/// group's keeper (it was the oldest copy), it made the live file the
+/// duplicate, which `milk` would move and `purge` would bin beside it. The
+/// system's folders hold restore points and indexes, and refuse reading.
+/// Windows' names on every system, letter case ignored (a drive formatted
+/// there carries them wherever it is read); the Unix trashes by name
+/// (`.Trash`, `.Trashes`, `.Trash-1000`) and the person's own freedesktop
+/// trash by its path. [CLAUDE]
+pub fn system_folder(path: &Path, name: &std::ffi::OsStr) -> bool {
+    const WINDOWS: [&str; 4] = [
+        "$RECYCLE.BIN",
+        "RECYCLER",
+        "RECYCLED",
+        "System Volume Information",
+    ];
+    let n = name.to_string_lossy();
+    if WINDOWS.iter().any(|w| n.eq_ignore_ascii_case(w)) || n == ".Trash" || n == ".Trashes" {
+        return true;
+    }
+    if let Some(uid) = n.strip_prefix(".Trash-") {
+        if !uid.is_empty() && uid.bytes().all(|b| b.is_ascii_digit()) {
+            return true;
+        }
+    }
+    home_trash().is_some_and(|t| t == path)
+}
+
+/// Windows' marks of a file whose bytes are elsewhere: `OFFLINE`
+/// (archival storage), `RECALL_ON_OPEN` and `RECALL_ON_DATA_ACCESS` (a sync
+/// client's placeholder: OneDrive's Files On-Demand, Dropbox, iCloud for
+/// Windows). Reading such a file fetches it.
+pub const FILE_ATTRIBUTE_OFFLINE: u32 = 0x0000_1000;
+pub const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x0004_0000;
+pub const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+/// macOS's mark of a file whose bytes are in iCloud Drive (`SF_DATALESS`).
+pub const SF_DATALESS: u32 = 0x4000_0000;
+
+/// By Windows file attributes: are the bytes elsewhere?
+pub fn online_only_attributes(attributes: u32) -> bool {
+    attributes
+        & (FILE_ATTRIBUTE_OFFLINE
+            | FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        != 0
+}
+
+/// Online only: a sync client keeps the file's bytes in its cloud, and
+/// reading them, even the 64 KiB a sample takes, downloads the file
+/// (Phase 13, CORE-10). Such a file is not a candidate; the SCAN line
+/// counts it. The walk's own metadata says so (Windows: the directory
+/// listing's attributes; macOS: `lstat`'s flags), so nothing is opened to
+/// ask. Elsewhere no file system marks it. [CLAUDE]
+pub fn online_only(md: &std::fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        online_only_attributes(md.file_attributes())
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt;
+        md.st_flags() & SF_DATALESS != 0
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let _ = md;
+        false
+    }
+}
+
+/// The freedesktop trash of the person running this (`$XDG_DATA_HOME/Trash`,
+/// by default `~/.local/share/Trash`), as the walk will meet it: resolved.
+/// macOS keeps its trash in `~/.Trash`, by name above; Windows in
+/// `$RECYCLE.BIN`.
+fn home_trash() -> Option<&'static PathBuf> {
+    static TRASH: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    TRASH
+        .get_or_init(|| {
+            if cfg!(any(windows, target_os = "macos")) {
+                return None;
+            }
+            let t = dirs::data_dir()?.join("Trash");
+            Some(crate::util::strip_verbatim(&t.canonicalize().unwrap_or(t)))
+        })
+        .as_ref()
+}
+
 /// Walk `root`. `recurse = false` reads only the root's own entries.
 /// `progress` is called every 256 files with the running stats.
 pub fn scan(
@@ -77,6 +171,7 @@ pub fn scan(
     let depth = if recurse { usize::MAX } else { 1 };
     let mut seen: u64 = 0;
     let skipped = std::cell::Cell::new(0u64);
+    let system = std::cell::Cell::new(0u64);
 
     let walker = WalkDir::new(root)
         .follow_links(false)
@@ -87,6 +182,10 @@ pub fn scan(
                 return true; // the root itself is never skipped
             }
             if e.file_type().is_dir() && is_milked_dir(e.file_name()) {
+                return false;
+            }
+            if e.file_type().is_dir() && system_folder(e.path(), e.file_name()) {
+                system.set(system.get() + 1);
                 return false;
             }
             if crate::skip::skipped(filter.skip, e.file_name()) {
@@ -118,6 +217,7 @@ pub fn scan(
             stats.filtered += 1;
         } else {
             match entry.metadata() {
+                Ok(md) if online_only(&md) => stats.online += 1,
                 Ok(md) => {
                     let size = md.len();
                     if size == 0 {
@@ -140,10 +240,12 @@ pub fn scan(
         }
         if seen.is_multiple_of(256) {
             stats.skipped = skipped.get();
+            stats.system = system.get();
             progress(&stats);
         }
     }
     stats.skipped = skipped.get();
+    stats.system = system.get();
     progress(&stats);
     (out, stats)
 }
@@ -186,6 +288,69 @@ mod tests {
         assert!(imgs[0].path.ends_with("x.jpg"));
         assert_eq!(s.filtered, 1);
         assert_eq!(s.empty, 1);
+    }
+
+    #[test]
+    fn the_bin_and_the_system_folders_are_never_entered() {
+        let d = tempfile::tempdir().unwrap();
+        mk(d.path(), "photos/IMG_0041.jpg", &[7; 3000]);
+        for bin in [
+            "$RECYCLE.BIN/S-1-5-21-1000/$RX4K2P1.jpg",
+            "$Recycle.Bin/S-1-5-21-1000/$RX4K2P2.jpg",
+            "RECYCLER/x.jpg",
+            "System Volume Information/x.jpg",
+            ".Trash/x.jpg",
+            ".Trashes/501/x.jpg",
+            ".Trash-1000/files/IMG_0041.jpg",
+            "sub/.Trash-0/files/y.jpg",
+        ] {
+            mk(d.path(), bin, &[7; 3000]);
+        }
+        // names like them that are not them
+        mk(d.path(), ".Trash-me/a.jpg", &[7; 3000]);
+        mk(d.path(), "Trash/b.jpg", &[7; 3000]);
+        let (c, s) = scan(d.path(), true, Kind::All, Filter::default(), &mut |_| {});
+        let mut names: Vec<String> = c
+            .iter()
+            .map(|c| {
+                c.path
+                    .strip_prefix(d.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            [".Trash-me/a.jpg", "Trash/b.jpg", "photos/IMG_0041.jpg"]
+        );
+        assert_eq!(s.system, 8);
+        // a file of that name is not a folder: a candidate as any other
+        assert!(!system_folder(
+            Path::new("/x/notes"),
+            std::ffi::OsStr::new("notes")
+        ));
+    }
+
+    #[test]
+    fn the_marks_of_a_file_kept_online() {
+        // a OneDrive placeholder as Windows lists it: archive, unpinned,
+        // recall on data access
+        assert!(online_only_attributes(
+            0x0000_0020 | 0x0010_0000 | 0x0040_0000
+        ));
+        assert!(online_only_attributes(FILE_ATTRIBUTE_RECALL_ON_OPEN));
+        assert!(online_only_attributes(FILE_ATTRIBUTE_OFFLINE));
+        // local: normal, archive, read-only, hidden, pinned (kept on the
+        // device), sparse, compressed
+        for local in [0x80, 0x20, 0x01, 0x02, 0x0008_0000 | 0x20, 0x200, 0x800] {
+            assert!(!online_only_attributes(local), "{local:#x}");
+        }
+        // a file this test wrote is local everywhere
+        let d = tempfile::tempdir().unwrap();
+        mk(d.path(), "a.jpg", b"local");
+        assert!(!online_only(&fs::metadata(d.path().join("a.jpg")).unwrap()));
     }
 
     #[test]
