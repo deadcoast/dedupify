@@ -14,7 +14,8 @@ $model = Join-Path $repo 'runs\win\models\sscd_disc_mixup.onnx'
 $formats = Join-Path $repo 'runs\win\formats'
 New-Item -ItemType Directory -Force -Path $log | Out-Null
 Set-Location $repo
-$host.UI.RawUI.WindowTitle = 'dedupe - Windows verification'
+$title = 'dedupe - Windows verification'
+$host.UI.RawUI.WindowTitle = $title
 $exe = Join-Path $repo 'target\release\dedupe.exe'
 
 # dedupe writes UTF-8; read native output as UTF-8 and write every log as
@@ -64,10 +65,15 @@ function Snapshot() {
         ForEach-Object { "$($_.FullName.Substring($sample.Length))  $($_.Length)  $((Get-FileHash $_.FullName -Algorithm SHA256).Hash)" }
 }
 
-# a picture of this console window, as it is on screen (QOL-10)
+# a picture of the window this console is shown in, as drawn (QOL-10)
 Add-Type -AssemblyName System.Drawing
-Add-Type @"
-using System; using System.Runtime.InteropServices;
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @"
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 public static class DedupeWin {
     [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -75,31 +81,169 @@ public static class DedupeWin {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
-    public struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+    public delegate bool EnumProc(IntPtr h, IntPtr p);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc f, IntPtr p);
+    [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+
+    public static string Text(IntPtr h) {
+        StringBuilder s = new StringBuilder(512);
+        GetWindowText(h, s, s.Capacity);
+        return s.ToString();
+    }
+    public static string Class(IntPtr h) {
+        StringBuilder s = new StringBuilder(256);
+        GetClassName(h, s, s.Capacity);
+        return s.ToString();
+    }
+    // the frame as drawn: DWM's bounds leave out the invisible resize border
+    public static RECT Frame(IntPtr h) {
+        RECT r;
+        if (DwmGetWindowAttribute(h, 9, out r, Marshal.SizeOf(typeof(RECT))) != 0) GetWindowRect(h, out r);
+        return r;
+    }
+    public static string Size(IntPtr h) {
+        RECT r = Frame(h);
+        return (r.Right - r.Left) + " x " + (r.Bottom - r.Top);
+    }
+    static bool Sized(IntPtr h) {
+        RECT r = Frame(h);
+        return r.Right - r.Left >= 50 && r.Bottom - r.Top >= 50;
+    }
+    // Windows Terminal's window, or the classic console's
+    public static bool Terminal(IntPtr h) {
+        string c = Class(h);
+        return c == "CASCADIA_HOSTING_WINDOW_CLASS" || c == "ConsoleWindowClass";
+    }
+    static IntPtr ByTitle(string part) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate (IntPtr h, IntPtr p) {
+            if (IsWindowVisible(h) && Terminal(h) && Text(h).IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0) {
+                found = h;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    // The window that shows this console. A classic console has its own
+    // window. In Windows Terminal - and wherever Windows hands a console to
+    // its default terminal, which leaves no WT_SESSION - the console's
+    // window is a hidden 0 x 0 stand-in owned by the terminal's window.
+    // Then: that owner; a terminal window carrying this run's title; the
+    // terminal in front. Never a window that is not a terminal.
+    public static IntPtr Pick(string title, out string how) {
+        IntPtr con = GetConsoleWindow();
+        if (con != IntPtr.Zero && IsWindowVisible(con) && (Sized(con) || IsIconic(con)) && Terminal(con)) {
+            how = "this console's window";
+            return con;
+        }
+        if (con != IntPtr.Zero) {
+            IntPtr own = GetAncestor(con, 3); // GA_ROOTOWNER
+            if (own != IntPtr.Zero && own != con && IsWindowVisible(own) && Terminal(own)) {
+                how = "the terminal window that owns this console";
+                return own;
+            }
+        }
+        IntPtr t = ByTitle(title);
+        if (t != IntPtr.Zero) {
+            how = "the terminal window titled '" + title + "'";
+            return t;
+        }
+        IntPtr f = GetForegroundWindow();
+        if (f != IntPtr.Zero && Terminal(f)) {
+            how = "the terminal in front";
+            return f;
+        }
+        how = null;
+        return IntPtr.Zero;
+    }
+
+    // why no window was found, for the log
+    public static string Why(string title) {
+        IntPtr con = GetConsoleWindow();
+        string s = "console window ";
+        if (con == IntPtr.Zero) {
+            s += "none";
+        } else {
+            s += Class(con) + " " + Size(con) + (IsWindowVisible(con) ? " shown" : " hidden");
+            IntPtr own = GetAncestor(con, 3);
+            s += ", owner " + (own == IntPtr.Zero || own == con ? "none" : Class(own) + " " + Size(own));
+        }
+        IntPtr f = GetForegroundWindow();
+        s += ", no terminal titled '" + title + "', in front " + (f == IntPtr.Zero ? "nothing" : Class(f));
+        return s;
+    }
+
+    static bool Blank(Bitmap b) {
+        Color first = b.GetPixel(0, 0);
+        for (int y = 0; y < 24; y++) {
+            for (int x = 0; x < 24; x++) {
+                Color c = b.GetPixel(x * (b.Width - 1) / 23, y * (b.Height - 1) / 23);
+                if (c.R != first.R || c.G != first.G || c.B != first.B) return false;
+            }
+        }
+        return true;
+    }
+
+    // The window as a picture of its frame, saved to path; what was done,
+    // or null. The window draws itself (PrintWindow with
+    // PW_RENDERFULLCONTENT, composed content included), so one behind
+    // another comes out whole; a blank drawing falls back to the screen.
+    public static string Capture(IntPtr h, string path) {
+        if (IsIconic(h)) {
+            ShowWindow(h, 9); // SW_RESTORE
+            Thread.Sleep(600);
+        }
+        RECT w;
+        GetWindowRect(h, out w);
+        RECT f = Frame(h);
+        int ww = w.Right - w.Left, wh = w.Bottom - w.Top;
+        int fw = f.Right - f.Left, fh = f.Bottom - f.Top;
+        if (fw < 50 || fh < 50) return null;
+        string method = "drawn by the window";
+        // no alpha channel: GDI leaves it unset, which would read as transparent
+        using (Bitmap full = new Bitmap(ww, wh, PixelFormat.Format32bppRgb)) {
+            using (Graphics g = Graphics.FromImage(full)) {
+                IntPtr hdc = g.GetHdc();
+                bool drawn = PrintWindow(h, hdc, 2); // PW_RENDERFULLCONTENT
+                g.ReleaseHdc(hdc);
+                if (!drawn || Blank(full)) {
+                    SetForegroundWindow(h);
+                    Thread.Sleep(400);
+                    g.CopyFromScreen(w.Left, w.Top, 0, 0, full.Size);
+                    method = "copied from the screen" + (GetForegroundWindow() == h ? "" : ", another window may be over it");
+                }
+            }
+            Rectangle crop = new Rectangle(f.Left - w.Left, f.Top - w.Top, fw, fh);
+            if (!new Rectangle(0, 0, ww, wh).Contains(crop)) crop = new Rectangle(0, 0, ww, wh);
+            using (Bitmap pic = full.Clone(crop, PixelFormat.Format24bppRgb)) {
+                pic.Save(path, ImageFormat.Png);
+            }
+            return crop.Width + " x " + crop.Height + "   " + method;
+        }
+    }
 }
 "@
 function Shot($name) {
     [void][DedupeWin]::SetProcessDPIAware()
-    # the console's own window, unless it is hidden: in Windows Terminal,
-    # and wherever Windows hands a console to its default terminal (no
-    # WT_SESSION then, a hidden 0 x 0 console window), the terminal is the
-    # foreground window
-    $h = [DedupeWin]::GetConsoleWindow()
-    if ($env:WT_SESSION -or $h -eq [IntPtr]::Zero -or -not [DedupeWin]::IsWindowVisible($h)) {
-        $h = [DedupeWin]::GetForegroundWindow()
-    }
-    [void][DedupeWin]::SetForegroundWindow($h)
-    Start-Sleep -Milliseconds 400
-    $r = New-Object DedupeWin+RECT
-    [void][DedupeWin]::GetWindowRect($h, [ref]$r)
-    $w = $r.Right - $r.Left; $hh = $r.Bottom - $r.Top
-    if ($w -lt 50 -or $hh -lt 50) { Save $name "no window to capture ($w x $hh)"; return }
-    $bmp = New-Object System.Drawing.Bitmap $w, $hh
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $bmp.Size)
-    $bmp.Save((Join-Path $log "$name.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-    $g.Dispose(); $bmp.Dispose()
-    Save $name "captured $w x $hh  host=$($Host.Name)  WT_SESSION=$env:WT_SESSION"
+    # this run's title again (a command since may have changed it); the
+    # terminal shows it, and Pick can find the window by it
+    $host.UI.RawUI.WindowTitle = $title
+    Start-Sleep -Milliseconds 500
+    $how = $null
+    $h = [DedupeWin]::Pick($title, [ref]$how)
+    if ($h -eq [IntPtr]::Zero) { Save $name "no window to capture: $([DedupeWin]::Why($title))"; return }
+    $got = [DedupeWin]::Capture($h, (Join-Path $log "$name.png"))
+    if (-not $got) { Save $name "no window to capture: $how is $([DedupeWin]::Size($h))"; return }
+    Save $name "captured $got   $how ($([DedupeWin]::Class($h)))   host=$($Host.Name)  WT_SESSION=$env:WT_SESSION"
 }
 
 Step 'environment'

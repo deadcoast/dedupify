@@ -2893,9 +2893,52 @@ Build times on the runners, for the record: the `ci` profile's test
 build 8 m 46 s on Ubuntu, 16–17 min on Windows, cold; with the cache
 the suite step takes 2–3 min on Ubuntu and 5½ on Windows.
 
+## 9. On Windows, 2026-11-12 (the owner's machine)
+
+`runs/win/RUN_VERIFY.cmd` at `9be9607`, Windows 11 Home (NT 10.0.26300),
+Ryzen 7 9800X3D, Rust 1.99.0, ffmpeg 9.0.2 from WinGet (not on PATH;
+found by `dedupe` where WinGet put it). Read from its logs through the
+connected folder:
+
+```
+PASS  build        125 s   27.5 MB
+PASS  tests        160 passed, 0 failed   431 s     (128 unit, band, 31 end-to-end)
+PASS  Ctrl-C       CTRL_BREAK sent to the milk's process group 16792
+PASS  workspace    the workspace driven through a pseudo-terminal: 7 moved, 7 restored
+PASS  colour codes colour on a terminal: 24-bit ANSI colour, colour escapes back
+PASS  with model   31 passed, 0 failed
+PASS  Recycle Bin  1 passed, 0 failed
+PASS  formats      3 passed, 0 failed
+PASS  milk + undo  tree identical after milk+undo: 39 files, every SHA-256 equal
+PASS  purge + undo tree identical after purge+undo: 39 files, every SHA-256 equal
+FAIL  colour       no window to capture (0 x 0)
+```
+
+The doctor, live on that console: `PASS colour 24-bit ANSI colour`.
+
+The picture failed on the launcher's own window-finding. The console was
+started by a double-click and handed by Windows to its default terminal
+(Windows Terminal): no `WT_SESSION` in that handoff, and the console's
+window is a 0 × 0 stand-in. The launcher kept the console's window
+whenever it reported itself visible, so it took the stand-in and found
+nothing to photograph (the only other path, the window in front, would
+itself have had to measure 0 × 0). The launcher now picks the
+window the console is shown in: the console's own window when it is a
+real, sized console window; else the terminal window that owns the
+stand-in; else a terminal window carrying the run's title; else the
+terminal in front — never a window that is not a terminal (Windows
+Terminal's class or the classic console's), and when none is found the
+log says what each candidate was. The window draws itself into the
+picture (`PrintWindow`, full content), so another window over it does
+not end up in the picture; a blank drawing falls back to the screen.
+The picture is cut to the frame as drawn, and the log names how the
+window was found and its class. The C# compiles with Mono's compiler at
+language version 5, the level Windows PowerShell 5.1 compiles; nothing
+of it has run yet.
+
 ## Not verified here
 
 - QOL-10's picture: colour as a person sees it on the owner's console.
-  The launcher's next run takes it; a CI runner has no window to
-  photograph.
+  The run of § 9 could not take it; the launcher's next run does. A CI
+  runner has no window to photograph.
 - The bench on more threads or on Windows: run here only, on 2 vCPUs.
