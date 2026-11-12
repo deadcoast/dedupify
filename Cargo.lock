@@ -353,6 +353,8 @@ dependencies = [
  "unicode-width",
  "walkdir",
  "winapi-util",
+ "windows",
+ "windows-core",
 ]
 
 [[package]]

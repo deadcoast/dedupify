@@ -336,8 +336,10 @@ pub(crate) fn act_purge(
             bytes += it.size;
         }
     } else {
-        // batched bin calls (one shell operation per chunk on Windows), then
-        // confirm per file by checking it is gone; Ctrl-C stops between chunks
+        // batched bin calls (one shell operation per chunk on Windows; a
+        // file the bin cannot hold refused, never deleted outright —
+        // `recycle`), then confirm per file by checking it is gone; Ctrl-C
+        // stops between chunks
         interrupt::install();
         interrupt::changing(true);
         for chunk in to_bin.chunks(500) {
@@ -347,7 +349,8 @@ pub(crate) fn act_purge(
             }
             let paths: Vec<&Path> = chunk.iter().map(|&i| list[i].path).collect();
             let t = unix_secs(SystemTime::now());
-            let res = trash::delete_all(&paths);
+            let mut left: std::collections::HashMap<std::path::PathBuf, crate::fsops::ActError> =
+                crate::recycle::to_bin(&paths).into_iter().collect();
             for &i in chunk {
                 let it = &list[i];
                 let rel = rel_display(it.path, &inv.root);
@@ -374,7 +377,9 @@ pub(crate) fn act_purge(
                         hash: it.hash.clone(),
                     });
                 } else {
-                    let e = bin_error(&res);
+                    let e = left.remove(it.path).unwrap_or_else(|| {
+                        crate::fsops::ActError::Bin("the file is still there".into())
+                    });
                     r.action("failed", Role::Danger, &rel, &e.words());
                     failed += 1;
                     failures.push((it.path.to_path_buf(), e));
@@ -455,35 +460,6 @@ pub(crate) fn act_purge(
         code,
         journal: journal_id,
         failed: failures,
-    }
-}
-
-/// Why the bin left a file: a file held open is in use (and worth a
-/// retry); anything else is the bin refusing (and `_milked` is the
-/// fallback).
-fn bin_error(res: &Result<(), trash::Error>) -> crate::fsops::ActError {
-    use crate::fsops::ActError;
-    match res {
-        // the freedesktop bin's file-system errors carry the io error
-        #[cfg(all(
-            unix,
-            not(target_os = "macos"),
-            not(target_os = "ios"),
-            not(target_os = "android")
-        ))]
-        Err(trash::Error::FileSystem { source, .. }) => ActError::from_io(source),
-        // Windows HRESULTs: 0x80070020 sharing violation, 0x80070021 lock
-        Err(trash::Error::Os { code, description })
-            if *code == 32
-                || *code == 33
-                || *code as u32 == 0x8007_0020
-                || *code as u32 == 0x8007_0021 =>
-        {
-            let _ = description;
-            ActError::InUse
-        }
-        Err(e) => ActError::Bin(e.to_string()),
-        Ok(()) => ActError::Bin("the file is still there".into()),
     }
 }
 

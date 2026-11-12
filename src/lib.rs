@@ -79,6 +79,7 @@ pub mod perceptual;
 pub mod preview;
 pub mod raw;
 pub mod recent;
+pub mod recycle;
 pub mod render;
 pub mod skip;
 pub mod theme;

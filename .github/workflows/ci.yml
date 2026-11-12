@@ -82,14 +82,15 @@ jobs:
       - name: Ctrl-C, the workspace and colour, shown
         run: cargo test --profile ci --test e2e -- --nocapture interrupted_milk_leaves_a_journal_undo_can_use find_on_a_terminal_acts_from_the_result a_terminal_gets_colour
 
-      # the Recycle Bin refusing a file too large for it: the test caps the
-      # temp volume's bin at 1 MB and puts it back; only on a runner, which
-      # is thrown away after the job (Phase 13, TECH-11)
-      - name: the Recycle Bin refusing a file
+      # the Recycle Bin: a purge and its undo through it, and a file too
+      # large for it refused (the test caps the temp volume's bin at 1 MB
+      # and puts it back); only on a runner, which is thrown away after
+      # the job (Phase 13, TECH-11)
+      - name: the Recycle Bin, taking and refusing
         if: runner.os == 'Windows'
         env:
           DEDUPE_TEST_BIN_CAP: "1"
-        run: cargo test --profile ci --test e2e -- --ignored --nocapture the_bin_refusing_a_file_leaves_it_on_disk
+        run: cargo test --profile ci --test e2e -- --ignored --nocapture purge_then_undo_through_the_bin the_bin_refusing_a_file_leaves_it_on_disk
 
       - name: doctor
         run: cargo run --profile ci -- --doctor

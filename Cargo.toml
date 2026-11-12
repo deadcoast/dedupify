@@ -35,6 +35,11 @@ tract-onnx = { version = "0.23", optional = true }
 [target.'cfg(windows)'.dependencies]
 # the volume a path lives on (doctor: is `_milked` on another drive)
 winapi-util = "0.1"
+# the Recycle Bin through the shell's file operation, a progress sink
+# refusing what the bin cannot hold (src/recycle.rs); the versions the
+# `trash` crate already builds
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+windows-core = "0.62"
 
 [features]
 # The deep tier (SSCD embeddings through tract). On by default so one
