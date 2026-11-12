@@ -2530,6 +2530,53 @@ fn a_stalled_ffmpeg_is_stopped_and_named() {
     assert!(text.contains("IMG_0041 (1).jpg"), "{text}");
 }
 
+/// Visible top-level windows of process `pid`: (title, class).
+#[cfg(windows)]
+fn windows_of(pid: u32) -> Vec<(String, String)> {
+    type Hwnd = *mut std::ffi::c_void;
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(f: extern "system" fn(Hwnd, isize) -> i32, p: isize) -> i32;
+        fn GetWindowThreadProcessId(h: Hwnd, pid: *mut u32) -> u32;
+        fn IsWindowVisible(h: Hwnd) -> i32;
+        fn GetWindowTextW(h: Hwnd, s: *mut u16, n: i32) -> i32;
+        fn GetClassNameW(h: Hwnd, s: *mut u16, n: i32) -> i32;
+    }
+    struct Find {
+        pid: u32,
+        found: Vec<(String, String)>,
+    }
+    extern "system" fn each(h: Hwnd, p: isize) -> i32 {
+        // SAFETY: `p` is the `Find` passed below, alive for the call
+        let find = unsafe { &mut *(p as *mut Find) };
+        let mut pid = 0u32;
+        let mut title = [0u16; 256];
+        let mut class = [0u16; 256];
+        // SAFETY: a window handle from EnumWindows; buffers of the sizes given
+        unsafe {
+            GetWindowThreadProcessId(h, &mut pid);
+            if pid == find.pid && IsWindowVisible(h) != 0 {
+                let t = GetWindowTextW(h, title.as_mut_ptr(), 256).max(0) as usize;
+                let c = GetClassNameW(h, class.as_mut_ptr(), 256).max(0) as usize;
+                find.found.push((
+                    String::from_utf16_lossy(&title[..t]),
+                    String::from_utf16_lossy(&class[..c]),
+                ));
+            }
+        }
+        1
+    }
+    let mut find = Find {
+        pid,
+        found: Vec::new(),
+    };
+    // SAFETY: the callback reads `find` only during this call
+    unsafe {
+        EnumWindows(each, &mut find as *mut Find as isize);
+    }
+    find.found
+}
+
 /// The Recycle Bin refusing a file (Phase 13, TECH-11). `purge` promises
 /// never to delete outright; that rests on the `trash` crate's flags
 /// (`FOF_NO_UI | FOF_ALLOWUNDO | FOF_WANTNUKEWARNING`), never seen with a
@@ -2612,7 +2659,12 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
             break Some(s);
         }
         if t0.elapsed() > Duration::from_secs(120) {
+            // what holds it: the child's own windows, by title and class
+            for (title, class) in windows_of(child.id()) {
+                eprintln!("window of the purge: {title:?}  class {class:?}");
+            }
             let _ = child.kill();
+            let _ = child.wait();
             break None;
         }
         std::thread::sleep(Duration::from_millis(200));
@@ -2640,10 +2692,15 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
             reg(&["delete", &key, "/v", "MaxCapacity", "/f"]);
         }
     }
-    let status = status.expect("purge did not end in 120 s: a dialog may be waiting");
     eprintln!("{out}");
     let copy = fx.root.join("big/copy/keep.bin");
     let kept = fx.root.join("big/keep.bin");
+    eprintln!(
+        "after: keeper on disk {}, copy on disk {}",
+        kept.exists(),
+        copy.exists()
+    );
+    let status = status.expect("purge did not end in 120 s: a dialog may be waiting");
     assert!(kept.exists(), "the keeper\n{out}");
     assert!(
         copy.exists(),
