@@ -1228,11 +1228,13 @@ fn with_caption_bar(fx: &Fx, share: f32, name: &str) {
 #[test]
 fn milk_leaves_unconfirmed_near_duplicates_in_place() {
     let fx = fixture_with_photos();
-    // the beach with a caption bar over its lower 35 %: the two hashes
-    // still land inside their thresholds (d 7, p 14), PDQ (q 50; 48 before
-    // Phase 15's fixed working size) and the fit (0.90, its cells
-    // included) do not. Until Phase 11 a 15 % bar
-    // was this test's case; the fit's cells now confirm that one (below).
+    // the beach with a caption bar over its lower 35 %: it joins the group
+    // through the mirrored export (d 7, p 14 against it), and against the
+    // original, which keeps since Phase 15 (CORE-13), pHash is over (d 9,
+    // p 16) and PDQ too (q 50) — listed, confirmed by nothing. Until Phase
+    // 15 the mirror kept and the line read `d 7 p 14 q 48 fit 0.90`; until
+    // Phase 11 a 15 % bar was this test's case, which the fit's cells now
+    // confirm (below).
     with_caption_bar(&fx, 0.35, "photos/beach_bar.png");
     let (code, out, _) = run(&fx, &["find", ".", "img"]);
     assert_eq!(code, 0, "{out}");
@@ -1241,8 +1243,8 @@ fn milk_leaves_unconfirmed_near_duplicates_in_place() {
         .find(|l| l.contains("beach_bar.png"))
         .unwrap_or_else(|| panic!("the hashes group it\n{out}"));
     assert!(
-        line.contains("similar, unconfirmed") && line.contains("q  50") && line.contains("fit 0.9"),
-        "PDQ over, fit under\n{out}"
+        line.contains("similar, unconfirmed") && line.contains("p 16") && line.contains("q  50"),
+        "pHash and PDQ over against the original\n{out}"
     );
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);
     assert_eq!(code, 0, "{out}");
@@ -1259,6 +1261,30 @@ fn milk_leaves_unconfirmed_near_duplicates_in_place() {
     assert!(
         !fx.root.join("photos/beach_small.jpg").exists(),
         "confirmed members still move\n{out}"
+    );
+}
+
+/// Both caption-bar edits beside the beach's copies: the original keeps.
+/// Until Phase 15 the mirrored export kept by one more direct match on the
+/// two 64-bit hashes; the keeper's degree now counts matches PDQ agrees
+/// with, and within one of the most matched the picture and the copy
+/// marks decide (CORE-13).
+#[test]
+fn both_caption_bars_leave_the_original_its_seat() {
+    let fx = fixture_with_photos();
+    with_caption_bar(&fx, 0.15, "photos/beach_bar.png");
+    with_caption_bar(&fx, 0.35, "photos/beach_bar35.png");
+    let (code, out, _) = run(&fx, &["find", ".", "img"]);
+    assert_eq!(code, 0, "{out}");
+    let keeps: Vec<&str> = out
+        .lines()
+        .filter(|l| l.trim_start().starts_with("keep") && l.contains("beach"))
+        .collect();
+    assert!(
+        keeps
+            .iter()
+            .any(|l| l.contains("photos/beach.png") || l.contains("photos\\beach.png")),
+        "{out}"
     );
 }
 

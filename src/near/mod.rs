@@ -296,8 +296,10 @@ pub fn hash_all(
 }
 
 /// Keeper order inside one group: the member the most other members match
-/// directly on the two 64-bit hashes (the hub — an original is what its
-/// derivatives all resemble, derivatives need not resemble each other),
+/// directly on the two 64-bit hashes with PDQ agreeing (the hub — an
+/// original is what its derivatives all resemble, derivatives need not
+/// resemble each other; within one match of the most, `group` lets the
+/// rest of this order decide, Phase 15),
 /// then most pixels of the picture itself (a downscaled copy is the
 /// derivative; a padded or letterboxed one counts the picture inside its
 /// bars, `picture_pixels`), then the path that does not name or file it

@@ -303,7 +303,7 @@ found the shipped route's own soft spot: a 12 MP photo and its 70 %,
 half or quarter copies were up to 22–24 PDQ bits apart (95th percentile
 10), because the box prefilter's integer factor gave copies of different
 sizes different working sizes — closed in Phase 15 by the 576 working
-size (§ 2.3).
+size (§ 2.2b).
 
 ### 2.6 The deep tier — Phase 4, optional **[CLAUDE]**
 
@@ -781,9 +781,18 @@ stranger's group through one near-threshold edge is still acted on
 value and need no graph; the near pass runs over exact-group keepers and
 singletons only, so a byte copy is never reported twice.
 
-Near keeper **[CLAUDE]**: most pixels (a downscaled copy is the
-derivative), then oldest, then largest file (at equal age and size a
-lossless encoding outweighs a lossy one), then path.
+Near keeper **[CLAUDE]**: the member sharing a known capture moment with
+the most others (a stray burst frame is the kin, not the family), the
+camera RAW, then the most matched — the members matching it directly on
+the two 64-bit hashes with PDQ agreeing (Phase 15: a match on the 64-bit
+hashes alone, near their thresholds, no longer counts) — then most pixels
+of the picture inside any bars (a downscaled copy is the derivative), the
+path not named or filed as a copy, oldest, largest file (at equal age and
+size a lossless encoding outweighs a lossy one), path. Within one match
+of the most matched, that degree does not decide: the rest of the order
+does, so one near-threshold match more cannot seat a copy over the
+original, and pixels still come before the copy marks (Phase 15,
+CORE-13).
 
 ---
 

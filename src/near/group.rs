@@ -78,11 +78,18 @@ pub fn group(
     stats.pairs = pairs.len() as u64;
 
     let mut uf = UnionFind::new(n);
+    // the keeper's degree counts the matches PDQ confirms as well (two
+    // families): a near-threshold match on the 64-bit hashes alone — a
+    // caption-barred copy against a mirror — no longer seats a copy
+    // (Phase 15, CORE-13)
     let mut degree = vec![0usize; n];
     for m in &pairs {
         uf.union(m.a, m.b);
-        degree[m.a] += 1;
-        degree[m.b] += 1;
+        let quality = hashed[m.a].sig.pdq_quality.min(hashed[m.b].sig.pdq_quality);
+        if m.q <= PDQ_MAX && quality >= PDQ_QUALITY_MIN {
+            degree[m.a] += 1;
+            degree[m.b] += 1;
+        }
     }
     let mut buckets: std::collections::HashMap<usize, Vec<usize>> =
         std::collections::HashMap::new();
@@ -126,6 +133,7 @@ pub fn group(
                 keeper_order_with_degree(&hashed[a], degree[a], &hashed[b], degree[b])
             })
         });
+        seat_keeper(c, |i| same[&i], |i| &hashed[i], |i| degree[i]);
     }
 
     // deep attachments: singletons join the keeper they are closest to
@@ -354,6 +362,36 @@ pub fn group(
     groups
 }
 
+/// Seats the keeper of a component `group` has sorted (most known-same
+/// capture moments, the RAW, degree, then `keeper_order`): among the
+/// members level with the first on moments and RAW and within one match
+/// of its degree, the one `keeper_order` puts first — most pixels of the
+/// picture, then fewest copy marks — moves to the front. One match more
+/// near the thresholds no longer outranks the picture and the marks; a
+/// smaller copy still never outranks a larger original, pixels coming
+/// before marks. Chosen after the sort, so the sort keeps a total order
+/// (Phase 15, CORE-13). [CLAUDE]
+fn seat_keeper<'a>(
+    c: &mut [usize],
+    same: impl Fn(usize) -> usize,
+    h: impl Fn(usize) -> &'a Hashed,
+    deg: impl Fn(usize) -> usize,
+) {
+    let Some(&top) = c.first() else {
+        return;
+    };
+    let best = c
+        .iter()
+        .copied()
+        .take_while(|&i| same(i) == same(top) && h(i).raw == h(top).raw)
+        .filter(|&i| deg(i) + 1 >= deg(top))
+        .min_by(|&a, &b| keeper_order(h(a), h(b)))
+        .unwrap_or(top);
+    if let Some(pos) = c.iter().position(|&i| i == best) {
+        c[..=pos].rotate_right(1);
+    }
+}
+
 /// Whether a member's relation leaves a question only the fit answers:
 /// hash-grouped and PDQ did not confirm, or admitted by the descriptor.
 /// Kin members are decided already.
@@ -455,6 +493,7 @@ fn split_chained(
                     )
                 })
             });
+            seat_keeper(&mut order, same_of, hashed_at, |p| degree[idx[p]]);
             comp = order;
             let keeper = hashed_at(comp[0]);
             let mut rels: Vec<Relation> = comp[1..]

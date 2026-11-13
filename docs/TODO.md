@@ -12,7 +12,7 @@ order top to bottom. Previous milestone: Phase 14, delivered 2026-11-12
 - [x] **CORE-12** PDQ at a fixed working size; the Phase 11 § 8 tables
   re-run: ships only if copies' distances fall and no negative comes
   under 31
-- [ ] **CORE-13** the near keeper's degree counts confirmed relations
+- [x] **CORE-13** the near keeper's degree counts confirmed relations
   only, the copy marks ahead of degree within one; the Phase 11 caption
   fixture keeps `photos/`
 - [ ] **CORE-14** dark blurred bars on video handed to the flat pass; the
