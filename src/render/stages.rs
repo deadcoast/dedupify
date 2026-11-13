@@ -8,11 +8,11 @@ use std::time::{Duration, Instant};
 use crate::exact::{PipelineStats, Progress, Stage};
 use crate::near::NearStats;
 use crate::theme::{Role, Theme};
-use crate::util::{fit, fmt_bytes, fmt_count, fmt_duration, join_fit, plural};
+use crate::util::{fit, fmt_bytes, fmt_count, fmt_duration, join_fit, plural, visible_width};
 use crate::video::VideoStats;
 use crate::walk::ScanStats;
 
-use super::{Renderer, BAR_CELLS, REDRAW_EVERY, STAGE_LEAD};
+use super::{Renderer, BAR_CELLS, REDRAW_EVERY};
 
 struct StageLine {
     stage: Stage,
@@ -120,37 +120,15 @@ impl LiveProgress {
         }
         st.last_draw = Instant::now();
 
+        let cells = bar_cells(t.width);
         let filled = match (c.total, c.finished) {
-            (_, true) => BAR_CELLS,
+            (_, true) => cells,
             (Some(total), _) if total > 0 => {
-                ((c.done as f64 / total as f64) * BAR_CELLS as f64).round() as usize
+                ((c.done as f64 / total as f64) * cells as f64).round() as usize
             }
             _ => usize::MAX, // sweep
         };
-        let bar = if filled == usize::MAX {
-            sweep(t, st.ticks)
-        } else {
-            let on = filled.min(BAR_CELLS);
-            format!(
-                "{}{}",
-                t.paint(
-                    if c.finished { Role::Ok } else { Role::Keep },
-                    &t.glyphs.bar_on.repeat(on)
-                ),
-                t.paint(Role::Rule, &t.glyphs.bar_off.repeat(BAR_CELLS - on))
-            )
-        };
-        let label = fit(c.stage.label(), 6);
-        let label = if c.finished {
-            t.paint(Role::Plate, &label)
-        } else {
-            t.paint_bold(Role::Plate, &label)
-        };
-        // the text is segments joined by three spaces; drop from the right
-        // rather than wrap, which would leave the in-place redraw behind
-        let segs: Vec<String> = c.text.split("   ").map(str::to_string).collect();
-        let text = join_fit(&segs, t.width.saturating_sub(STAGE_LEAD + 1));
-        let line = format!(" {label} {bar}  {text}");
+        let line = compose(t, c.stage, c.finished, filled, st.ticks, &c.text);
         let mut out = io::stdout().lock();
         if t.live {
             let _ = write!(out, "\r\x1b[2K{line}");
@@ -437,17 +415,97 @@ fn eta_text(stage: Stage, elapsed: Duration, done: u64, total: u64) -> Option<St
     })
 }
 
-fn sweep(t: &Theme, ticks: u64) -> String {
-    let len = 6usize;
-    let span = BAR_CELLS - len;
-    let period = span * 2;
+/// Cells before a stage line's bar (margin, label, space) and after it
+/// (the gap before the text).
+const STAGE_PRE: usize = 1 + 6 + 1;
+const STAGE_GAP: usize = 2;
+
+/// The text a stage line keeps at least, the bar giving way first.
+const STAGE_TEXT_MIN: usize = 24;
+
+/// The bar's cells on a line `width` wide: `BAR_CELLS`, fewer when the
+/// text would keep under `STAGE_TEXT_MIN`, never under 8 — at 40 columns
+/// the bar took every cell and the text none (Phase 16, QOL-11).
+pub(crate) fn bar_cells(width: usize) -> usize {
+    width
+        .saturating_sub(STAGE_PRE + STAGE_GAP + 1 + STAGE_TEXT_MIN)
+        .clamp(8, BAR_CELLS)
+}
+
+/// One stage line: label, bar (`filled` cells of `bar_cells`, or the
+/// sweep when `usize::MAX`), and the text's segments, dropped from the
+/// right rather than wrapped, which would leave the in-place redraw
+/// behind.
+fn compose(
+    t: &Theme,
+    stage: Stage,
+    finished: bool,
+    filled: usize,
+    ticks: u64,
+    text: &str,
+) -> String {
+    let cells = bar_cells(t.width);
+    let bar = if filled == usize::MAX {
+        sweep(t, ticks, cells)
+    } else {
+        let on = filled.min(cells);
+        format!(
+            "{}{}",
+            t.paint(
+                if finished { Role::Ok } else { Role::Keep },
+                &t.glyphs.bar_on.repeat(on)
+            ),
+            t.paint(Role::Rule, &t.glyphs.bar_off.repeat(cells - on))
+        )
+    };
+    let label = fit(stage.label(), 6);
+    let label = if finished {
+        t.paint(Role::Plate, &label)
+    } else {
+        t.paint_bold(Role::Plate, &label)
+    };
+    let segs: Vec<String> = text.split("   ").map(str::to_string).collect();
+    let room = t.width.saturating_sub(STAGE_PRE + cells + STAGE_GAP + 1);
+    let mut text = join_fit(&segs, room);
+    if visible_width(&text) > room {
+        // one segment longer than the room: its words up to the edge
+        text = crate::util::fit(&text, room);
+    }
+    format!(" {label} {bar}  {text}")
+}
+
+/// A finished stage's line at `width`, as `draw` leaves it behind.
+pub(crate) fn stage_line(t: &Theme, width: usize, stage: Stage, text: &str) -> String {
+    let mut t = *t;
+    t.width = width;
+    compose(&t, stage, true, usize::MAX - 1, 0, text)
+}
+
+/// Stage texts as long as a real scan writes them, for the width test.
+#[cfg(test)]
+pub(crate) fn sample_stage_texts() -> Vec<(Stage, String)> {
+    vec![
+        (Stage::Scan, "1,492 files   269 MB   2 bin and system folders left out   3 online only, not read   0.2 s".into()),
+        (Stage::Size, "1,204 share a size   0.004 s".into()),
+        (Stage::Sample, "400 share a sample   135 MB read   0.04 s".into()),
+        (Stage::Hash, "400 confirmed   78 MB read   200 groups   0.02 s".into()),
+        (Stage::Decode, "280 images hashed   2 timed out   12 undecodable   1 RAW preview   3.3 s".into()),
+        (Stage::Match, "120 near groups   100 fits   2 split from another   1.8 s".into()),
+        (Stage::Frames, "12 videos hashed   1,800 frames at 15 fps   1 timed out   12.6 s".into()),
+    ]
+}
+
+fn sweep(t: &Theme, ticks: u64, cells: usize) -> String {
+    let len = 6usize.min(cells);
+    let span = cells - len;
+    let period = (span * 2).max(1);
     let p = (ticks as usize) % period;
     let pos = if p <= span { p } else { period - p };
     format!(
         "{}{}{}",
         t.paint(Role::Rule, &t.glyphs.bar_off.repeat(pos)),
         t.paint(Role::Keep, &t.glyphs.bar_on.repeat(len)),
-        t.paint(Role::Rule, &t.glyphs.bar_off.repeat(BAR_CELLS - len - pos))
+        t.paint(Role::Rule, &t.glyphs.bar_off.repeat(cells - len - pos))
     )
 }
 

@@ -13,6 +13,10 @@ use crate::video::VideoGroup;
 
 use super::{Renderer, EXACT_POST, ROW_LEAD};
 
+/// The fewest cells a path is shown in: at 40 columns the date or the
+/// words take the rest.
+const PATH_FLOOR: usize = 8;
+
 /// One listing section's columns at each compaction level (index):
 /// `pre` the cells between the path and the date-or-words column
 /// (dimensions, size, ... with their gaps), `post` the widest date, words
@@ -120,7 +124,7 @@ impl Renderer {
             self.line(&format!(" {}", join_fit(&parts, t.width.saturating_sub(1))));
 
             // member lines:  "   keep  <path>  <date>"
-            let path_cells = col.saturating_sub(ROW_LEAD).max(12);
+            let path_cells = col.saturating_sub(ROW_LEAD).max(PATH_FLOOR);
             for (j, m) in g.members.iter().enumerate() {
                 let rel = rel_display(&m.path, root);
                 let shown = shorten_middle(&rel, path_cells, t.glyphs.ellipsis);
@@ -166,9 +170,10 @@ impl Renderer {
             plain: String,
             painted: String,
         }
-        // Two steps of compaction when the width is short: first the
-        // evidence numbers go (the words stay), then the dimensions column,
-        // so the path keeps at least 14 cells.
+        // Compaction when the width is short: 1 drops the evidence numbers
+        // (the words stay), 2 the dimensions, 3 the `+GROUP` link (the
+        // exact group still lists the file), 4 the size; the date and the
+        // words stay to the narrowest (Phase 16).
         let compact = std::cell::Cell::new(0usize);
         // a RAW shows `RAW` where the size goes: its preview's size is not
         // the picture's (Phase 10)
@@ -182,7 +187,9 @@ impl Renderer {
                 };
                 cols.push(fit(&dims, 11));
             }
-            cols.push(fit(&fmt_bytes(size), 7));
+            if compact.get() < 4 {
+                cols.push(fit(&fmt_bytes(size), 7));
+            }
             (
                 cols.join("  "),
                 cols.iter()
@@ -194,9 +201,10 @@ impl Renderer {
         let keeper_tail = |c: &crate::walk::Candidate, w: u32, h: u32, raw: bool| -> Tail {
             let (lp, lq) = lead_cols(w, h, raw, c.size);
             let date = fmt_date(c.mtime);
+            let gap = if lp.is_empty() { "" } else { "  " };
             Tail {
-                plain: format!("{lp}  {date}"),
-                painted: format!("{lq}  {}", t.paint(Role::Dupe, &date)),
+                plain: format!("{lp}{gap}{date}"),
+                painted: format!("{lq}{gap}{}", t.paint(Role::Dupe, &date)),
             }
         };
         // the words column is as wide as the longest words in the list
@@ -234,15 +242,19 @@ impl Renderer {
             } else {
                 Role::Dupe
             };
-            let mut plain = format!("{lp}  {}", fit(&words, words_cells));
-            let mut painted = format!("{lq}  {}", t.paint(words_role, &fit(&words, words_cells)));
+            let gap = if lp.is_empty() { "" } else { "  " };
+            let mut plain = format!("{lp}{gap}{}", fit(&words, words_cells));
+            let mut painted = format!(
+                "{lq}{gap}{}",
+                t.paint(words_role, &fit(&words, words_cells))
+            );
             // the evidence, dim, dropped first when the width is short
             if compact.get() < 1 {
                 let numbers = r.numbers();
                 plain.push_str(&format!("  {numbers}"));
                 painted.push_str(&format!("  {}", t.paint(Role::Rule, &numbers)));
             }
-            if let Some(eg) = m.hashed.rep.exact_group {
+            if let Some(eg) = m.hashed.rep.exact_group.filter(|_| compact.get() < 3) {
                 let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
                 plain.push_str(&format!("  {txt}"));
                 painted.push_str(&format!("  {}", t.paint(Role::Dupe, &txt)));
@@ -276,15 +288,23 @@ impl Renderer {
                 .unwrap_or(0)
         };
         // the columns before the date or words, with their gap
-        let pre = || width(&lead_cols(0, 0, false, 0).0) + 2;
+        let pre = || {
+            let w = width(&lead_cols(0, 0, false, 0).0);
+            if w == 0 {
+                0
+            } else {
+                w + 2
+            }
+        };
         // The path is the identifier: the evidence numbers go before it
-        // drops under 32 cells, the dimensions before it drops under 18.
+        // drops under 32 cells, the dimensions before 18, the link and
+        // then the size before 14.
         let Some((col, level)) = plan else {
             let mut m = Measure {
                 pre: Vec::new(),
                 post: Vec::new(),
-                room: &[32, 18],
-                cost: &[0, 1, 3],
+                room: &[32, 18, 14, 14],
+                cost: &[0, 1, 3, 4, 5],
             };
             for l in 0..=m.room.len() {
                 compact.set(l);
@@ -294,7 +314,7 @@ impl Renderer {
             return m;
         };
         compact.set(level);
-        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(12);
+        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(PATH_FLOOR);
         self.blank();
 
         for (i, g) in groups.iter().enumerate() {
@@ -393,8 +413,8 @@ impl Renderer {
         }
         // "1920×1080  04:12  h264   1.1 GB" is common to both line kinds.
         // Compaction when the width is short: 1 drops the evidence numbers
-        // (the words stay), 2 drops the codec, 3 drops the dimensions
-        // (duration and size stay).
+        // (the words stay), 2 the codec, 3 the dimensions, 4 the `+GROUP`
+        // link, 5 the size, 6 the duration (Phase 16).
         let compact = std::cell::Cell::new(0usize);
         let meta_cols = |m: &crate::video::VideoMember| -> (String, String) {
             let c = &m.hashed.rep.cand;
@@ -406,11 +426,15 @@ impl Renderer {
                     11,
                 ));
             }
-            cols.push(fit(&fmt_clock(meta.duration), 6));
+            if compact.get() < 6 {
+                cols.push(fit(&fmt_clock(meta.duration), 6));
+            }
             if compact.get() < 2 {
                 cols.push(fit(&meta.codec, 5));
             }
-            cols.push(fit(&fmt_bytes(c.size), 7));
+            if compact.get() < 5 {
+                cols.push(fit(&fmt_bytes(c.size), 7));
+            }
             (
                 cols.join("  "),
                 cols.iter()
@@ -422,9 +446,10 @@ impl Renderer {
         let keeper_tail = |m: &crate::video::VideoMember| -> Tail {
             let (plain, painted) = meta_cols(m);
             let date = fmt_date(m.hashed.rep.cand.mtime);
+            let gap = if plain.is_empty() { "" } else { "  " };
             Tail {
-                plain: format!("{plain}  {date}"),
-                painted: format!("{painted}  {}", t.paint(Role::Dupe, &date)),
+                plain: format!("{plain}{gap}{date}"),
+                painted: format!("{painted}{gap}{}", t.paint(Role::Dupe, &date)),
             }
         };
         let words_cells = groups
@@ -454,9 +479,10 @@ impl Renderer {
                 } else {
                     Role::Info
                 };
-                plain.push_str(&format!("  {}", fit(&words, words_cells)));
+                let gap = if plain.is_empty() { "" } else { "  " };
+                plain.push_str(&format!("{gap}{}", fit(&words, words_cells)));
                 painted.push_str(&format!(
-                    "  {}",
+                    "{gap}{}",
                     t.paint(words_role, &fit(&words, words_cells))
                 ));
                 // the evidence, dim, dropped first
@@ -465,7 +491,7 @@ impl Renderer {
                     plain.push_str(&format!("  {numbers}"));
                     painted.push_str(&format!("  {}", t.paint(Role::Rule, &numbers)));
                 }
-                if let Some(eg) = m.hashed.rep.exact_group {
+                if let Some(eg) = m.hashed.rep.exact_group.filter(|_| compact.get() < 4) {
                     let txt = format!("+GROUP {:0width$}", eg + 1, width = digits);
                     plain.push_str(&format!("  {txt}"));
                     painted.push_str(&format!("  {}", t.paint(Role::Dupe, &txt)));
@@ -491,15 +517,23 @@ impl Renderer {
                 .unwrap_or(0)
         };
         // the columns before the date or words, with their gap
-        let pre = || width(&meta_cols(&groups[0].members[0]).0) + 2;
+        let pre = || {
+            let w = width(&meta_cols(&groups[0].members[0]).0);
+            if w == 0 {
+                0
+            } else {
+                w + 2
+            }
+        };
         // the path is the identifier: the evidence numbers go before it
-        // drops under 32 cells, the codec and the dimensions under 18
+        // drops under 32 cells, the codec and the dimensions under 18, the
+        // link, the size and the duration under 14
         let Some((col, level)) = plan else {
             let mut m = Measure {
                 pre: Vec::new(),
                 post: Vec::new(),
-                room: &[32, 18, 18],
-                cost: &[0, 1, 2, 3],
+                room: &[32, 18, 18, 14, 14, 14],
+                cost: &[0, 1, 2, 3, 4, 5, 6],
             };
             for l in 0..=m.room.len() {
                 compact.set(l);
@@ -509,7 +543,7 @@ impl Renderer {
             return m;
         };
         compact.set(level);
-        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(12);
+        let path_cells = col.saturating_sub(ROW_LEAD + pre()).max(PATH_FLOOR);
         self.blank();
 
         for (i, g) in groups.iter().enumerate() {

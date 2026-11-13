@@ -129,6 +129,57 @@ pub fn visible_width(s: &str) -> usize {
 }
 
 /// "1 file" / "3 files".
+/// `s` without its colour codes (`ESC [ … m`).
+pub fn strip_sgr(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' && chars.peek() == Some(&'[') {
+            for d in chars.by_ref() {
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Segments packed onto lines of at most `max` cells, joined by three
+/// spaces, a new line where the next would not fit; a segment wider than
+/// `max` on its own lines, broken at spaces (`wrap`, given its plain text,
+/// paints them). Nothing is dropped. (Phase 16, QOL-11)
+pub fn pack(segments: &[String], max: usize, wrap: impl Fn(&str) -> String) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for seg in segments {
+        let w = visible_width(seg);
+        if w > max {
+            if !cur.is_empty() {
+                lines.push(std::mem::take(&mut cur));
+            }
+            lines.extend(
+                wrap_words(&strip_sgr(seg), max, max)
+                    .iter()
+                    .map(|l| wrap(l)),
+            );
+        } else if cur.is_empty() {
+            cur = seg.clone();
+        } else if visible_width(&cur) + 3 + w <= max {
+            cur.push_str("   ");
+            cur.push_str(seg);
+        } else {
+            lines.push(std::mem::replace(&mut cur, seg.clone()));
+        }
+    }
+    if !cur.is_empty() {
+        lines.push(cur);
+    }
+    lines
+}
+
 pub fn plural<'a>(n: u64, one: &'a str, many: &'a str) -> &'a str {
     if n == 1 {
         one

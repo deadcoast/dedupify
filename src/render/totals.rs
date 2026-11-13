@@ -8,7 +8,7 @@ use crate::pdq::PDQ_MAX;
 use crate::perceptual::{DHASH_MAX, PHASH_MAX};
 use crate::theme::Role;
 use crate::util::{
-    counted, fit, fmt_bytes, fmt_count, join_fit, plural, shorten_middle, visible_width, width,
+    counted, fit, fmt_bytes, fmt_count, pack, plural, shorten_middle, visible_width, width,
 };
 use crate::video::{VideoGroup, LEVEL2_CONFIRM, LEVEL2_MIN, VIDEO_POLICY_LABEL};
 use crate::walk::ScanStats;
@@ -28,9 +28,16 @@ impl Renderer {
             self.line(&format!(" {one}"));
             return;
         }
-        self.line(&format!(" {}", counts.join("   ")));
-        if !policy.is_empty() {
-            self.line(&format!("   {}", join_fit(&policy, max.saturating_sub(3))));
+        // the counts, then the policy indented under them; a part too long
+        // for the width breaks at spaces (Phase 16: at 40 columns the near
+        // policy ran 30 cells past the edge)
+        for l in pack(&counts, max, |l| l.to_string()) {
+            self.line(&format!(" {l}"));
+        }
+        for l in pack(&policy, max.saturating_sub(3), |l| {
+            self.theme.paint(Role::Dupe, l)
+        }) {
+            self.line(&format!("   {l}"));
         }
     }
 

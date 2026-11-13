@@ -16,6 +16,8 @@ mod plan;
 mod scan;
 mod undo;
 mod view;
+#[cfg(test)]
+mod widths;
 
 pub(crate) use act::{act_milk, act_purge, Acted};
 pub(crate) use plan::{default_items, items, shot_items, verify_items, Item};

@@ -18,14 +18,14 @@ mod hints;
 mod stages;
 mod totals;
 
+#[cfg(test)]
+pub(crate) use stages::sample_stage_texts;
+pub(crate) use stages::stage_line;
 pub use stages::LiveProgress;
 
 pub const BAR_CELLS: usize = 30;
 
 const REDRAW_EVERY: Duration = Duration::from_millis(40);
-
-/// Cells a stage line spends before its text: margin, label, space, bar, gap.
-const STAGE_LEAD: usize = 1 + 6 + 1 + BAR_CELLS + 2;
 
 /// The verb column of the `next` / `near` / `video` / `undo` lines.
 const HINT_VERB: usize = 5;
@@ -111,14 +111,43 @@ impl Renderer {
         if inv.dry_run && matches!(inv.command, Command::Milk | Command::Purge | Command::Undo) {
             tail.push(t.paint_bold(Role::Warn, "dry run"));
         }
-        let used =
-            1 + visible_width(&lead) + 2 + tail.iter().map(|p| visible_width(p) + 2).sum::<usize>();
+        // on a narrow line the root keeps at least 16 cells: the parts
+        // that say least go first (the kind, then the depth; the dry run
+        // and the quick search stay), and the root takes what is left —
+        // the floor of 24 ran the header past a 40-cell edge (Phase 16)
+        let used = |tail: &[String]| {
+            1 + visible_width(&lead) + 2 + tail.iter().map(|p| visible_width(p) + 2).sum::<usize>()
+        };
+        let mut drop_order: Vec<usize> = (0..tail.len()).rev().collect();
+        drop_order.sort_by_key(|&i| {
+            let w = crate::util::strip_sgr(&tail[i]);
+            (
+                w == "dry run" || w.starts_with("quick"),
+                std::cmp::Reverse(i),
+            )
+        });
+        let mut dropped: Vec<usize> = Vec::new();
+        for &i in &drop_order {
+            let kept: Vec<String> = tail
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| !dropped.contains(j))
+                .map(|(_, p)| p.clone())
+                .collect();
+            if t.width.saturating_sub(used(&kept) + 1) >= 16 {
+                break;
+            }
+            dropped.push(i);
+        }
+        let tail: Vec<String> = tail
+            .into_iter()
+            .enumerate()
+            .filter(|(j, _)| !dropped.contains(j))
+            .map(|(_, p)| p)
+            .collect();
         let root = inv.root.to_string_lossy();
-        let root = shorten_middle(
-            &root,
-            t.width.saturating_sub(used + 1).max(24),
-            t.glyphs.ellipsis,
-        );
+        let room = t.width.saturating_sub(used(&tail) + 1);
+        let root = shorten_middle(&root, room.max(8), t.glyphs.ellipsis);
         let mut parts = vec![lead, t.paint(Role::Info, &root)];
         parts.extend(tail);
         self.line(&format!(" {}", parts.join("  ")));

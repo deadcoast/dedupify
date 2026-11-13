@@ -9,8 +9,8 @@ Milestone: `PLAN.md` § Phase 16 · items: `SHELVED.md` § Phase 16 · source:
 order top to bottom. Previous milestone: Phase 15, delivered 2026-11-12
 (`SHELVED.md` § Phase 15 `[done]`).
 
-- [ ] **SC-10** unit tests for the width logic, 40–200 columns
-- [ ] **QOL-11** narrow terminals: no line past the edge down to 40
+- [x] **SC-10** unit tests for the width logic, 40–200 columns
+- [x] **QOL-11** narrow terminals: no line past the edge down to 40
 - [ ] **SC-12** split `workspace/state.rs` (state and keys / screen)
 - [ ] **QOL-12** sort and filter in the workspace
 - [ ] **NF-10** prefer a folder (`f`)
