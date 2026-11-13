@@ -1243,20 +1243,29 @@ fn milk_leaves_unconfirmed_near_duplicates_in_place() {
         .find(|l| l.contains("beach_bar.png"))
         .unwrap_or_else(|| panic!("the hashes group it\n{out}"));
     assert!(
-        line.contains("similar, unconfirmed") && line.contains("p 16") && line.contains("q  50"),
+        // with the model installed the descriptor's word (`looks alike`,
+        // deep 0.77, the fit's 0.90 not confirming): listed only either way
+        (line.contains("similar, unconfirmed") || line.contains("looks alike"))
+            && line.contains("p 16")
+            && line.contains("q  50"),
         "pHash and PDQ over against the original\n{out}"
     );
+    let by_model = line.contains("looks alike");
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        out.contains("kept~     photos/beach_bar.png")
-            || out.contains("kept~     photos\\beach_bar.png"),
-        "{out}"
-    );
-    assert!(
-        out.contains("1 kept~: similar on two hashes, confirmed by nothing else"),
-        "{out}"
-    );
+    if by_model {
+        assert!(out.contains("milk and purge leave them"), "{out}");
+    } else {
+        assert!(
+            out.contains("kept~     photos/beach_bar.png")
+                || out.contains("kept~     photos\\beach_bar.png"),
+            "{out}"
+        );
+        assert!(
+            out.contains("1 kept~: similar on two hashes, confirmed by nothing else"),
+            "{out}"
+        );
+    }
     assert!(fx.root.join("photos/beach_bar.png").exists());
     assert!(
         !fx.root.join("photos/beach_small.jpg").exists(),

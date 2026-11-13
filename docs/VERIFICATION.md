@@ -3426,7 +3426,14 @@ confirms those); negatives' closest 74 → 70, no false positive at any
 threshold up to 64.
 
 The 35 % caption-bar copy in `e2e` now reads `q 50` (48 before); its
-verdict is unchanged.
+verdict is unchanged. Small pictures hash faster: the old route
+Lanczos-upscaled a picture whose short side is under 384 by a whole
+factor (×3 for 192 × 144), the new one resamples straight to 576 — the
+100,000-file run's 8,000 small photographs decoded and hashed at 292 a
+second against 163.
+
+The 100,000-file run's check after CORE-12 and CORE-13: all 1,000
+planted copies acted on, the 22 strangers listed only, 407 fits (335).
 
 ## 3. The near keeper's degree (CORE-13)
 
@@ -3442,7 +3449,10 @@ caption-bar edits beside the beach's copies, `photos/export/
 beach_mirror.png` kept before (one near-threshold match more);
 `photos/beach.png` keeps now. The 35 % caption copy then reads against
 the original (`d 9 p 16 q 50`, listed) instead of the mirror (`d 7 p 14
-fit 0.90`, listed); `milk` leaves it in place as before.
+fit 0.90`, listed); `milk` leaves it in place as before. With the model
+installed it reads `looks alike` (deep 0.77, the fit's 0.90 not
+confirming), listed for review, and `milk` leaves it too; the test takes
+either word.
 
 `dedupe find <set> . img` before and after, with and without the model,
 on the real set, Copydays, the bench corpus, the HDR+ results and the
