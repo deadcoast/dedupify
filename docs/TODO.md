@@ -14,8 +14,8 @@ order top to bottom. Previous milestone: Phase 15, delivered 2026-11-12
 - [x] **SC-12** split `workspace/state.rs` (state and keys / screen)
 - [x] **QOL-12** sort and filter in the workspace
 - [x] **NF-10** prefer a folder (`f`)
-- [ ] **TECH-12** a resize during a sitting, driven
-- [ ] **TECH-13** the launcher photographs the workspace and `v`
+- [x] **TECH-12** a resize during a sitting, driven
+- [x] **TECH-13** the launcher photographs the workspace and `v`
 - [ ] **QOL-13** `v` sized right in Windows Terminal (from TECH-13's picture)
 - [ ] **NF-09** the model fetched by the doctor
 

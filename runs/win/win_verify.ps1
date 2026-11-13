@@ -230,6 +230,74 @@ public static class DedupeWin {
             return crop.Width + " x " + crop.Height + "   " + method;
         }
     }
+
+    // ---- keys into this console's own input, and pictures between them
+    // (Phase 16, TECH-13): what a person would press, queued while a live
+    // `find` runs in the same console and reads them as typed keys
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr GetStdHandle(int n);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool WriteConsoleInputW(IntPtr h, KeyRecord[] recs, uint n, out uint written);
+    [StructLayout(LayoutKind.Explicit, CharSet = CharSet.Unicode)]
+    public struct KeyRecord {
+        [FieldOffset(0)] public ushort EventType;
+        [FieldOffset(4)] public int KeyDown;
+        [FieldOffset(8)] public ushort RepeatCount;
+        [FieldOffset(10)] public ushort VirtualKeyCode;
+        [FieldOffset(12)] public ushort VirtualScanCode;
+        [FieldOffset(14)] public char UnicodeChar;
+        [FieldOffset(16)] public uint ControlKeyState;
+    }
+    static KeyRecord Rec(ushort vk, char c, bool down) {
+        KeyRecord r = new KeyRecord();
+        r.EventType = 1; // KEY_EVENT
+        r.KeyDown = down ? 1 : 0;
+        r.RepeatCount = 1;
+        r.VirtualKeyCode = vk;
+        r.UnicodeChar = c;
+        return r;
+    }
+    static bool Press(ushort vk, char c) {
+        uint n;
+        KeyRecord[] recs = { Rec(vk, c, true), Rec(vk, c, false) };
+        return WriteConsoleInputW(GetStdHandle(-10), recs, 2, out n) && n == 2;
+    }
+    static bool Type(string s) {
+        foreach (char c in s) {
+            ushort vk = (ushort)char.ToUpperInvariant(c);
+            if (c == '/') vk = 0xBF;
+            if (c == '_') vk = 0xBD;
+            if (!Press(vk, c)) return false;
+            Thread.Sleep(80);
+        }
+        return true;
+    }
+    public static string Driven = "";
+    static Thread driver;
+    // a plan of steps, one per line: "wait 6000", "type castle",
+    // "enter", "esc", "shot <path>"; run on a thread of its own while the
+    // caller runs `find` in this console. What it did lands in Driven.
+    public static void Drive(string plan, IntPtr window) {
+        Driven = "";
+        driver = new Thread(delegate () {
+            StringBuilder log = new StringBuilder();
+            foreach (string raw in plan.Split('\n')) {
+                string step = raw.Trim();
+                if (step.Length == 0) continue;
+                string arg = step.IndexOf(' ') > 0 ? step.Substring(step.IndexOf(' ') + 1) : "";
+                bool ok = true;
+                string said = "";
+                if (step.StartsWith("wait ")) { Thread.Sleep(int.Parse(arg)); continue; }
+                else if (step.StartsWith("type ")) ok = Type(arg);
+                else if (step == "enter") ok = Press(0x0D, '\r');
+                else if (step == "esc") ok = Press(0x1B, (char)27);
+                else if (step.StartsWith("shot ")) { said = Capture(window, arg) ?? "no picture"; ok = said != "no picture"; }
+                log.AppendLine(step + (ok ? "   ok" : "   FAILED") + (said.Length > 0 ? "   " + said : ""));
+            }
+            Driven = log.ToString();
+        });
+        driver.IsBackground = true;
+        driver.Start();
+    }
+    public static void Join() { if (driver != null) driver.Join(60000); }
 }
 "@
 function Shot($name) {
@@ -370,6 +438,30 @@ Clear-Host
 & $exe --doctor
 Shot 'colour'
 
+# the workspace and v, photographed (Phase 16, TECH-13): keys queued into
+# this console's own input while a live find runs in it, so the sixel
+# pictures Windows Terminal draws are seen without a key pressed by hand
+Step 'the workspace and v on a near pair, photographed (keys queued into this console)'
+Clear-Host
+[void][DedupeWin]::SetProcessDPIAware()
+$host.UI.RawUI.WindowTitle = $title
+Start-Sleep -Milliseconds 500
+$how = $null
+$h = [DedupeWin]::Pick($title, [ref]$how)
+if ($h -eq [IntPtr]::Zero) {
+    Save 'view' "no window to capture: $([DedupeWin]::Why($title))"
+} else {
+    $plan = @(
+        'wait 7000', "shot $(Join-Path $log 'workspace.png')",
+        'type /castle', 'enter', 'wait 800', 'type v', 'wait 4000',
+        "shot $(Join-Path $log 'view.png')", 'esc', 'wait 800', 'type q'
+    ) -join "`n"
+    [DedupeWin]::Drive($plan, $h)
+    & $exe find (Join-Path $sample 'photos') . img
+    [DedupeWin]::Join()
+    Save 'view' (@("window: $how ($([DedupeWin]::Class($h)))   WT_SESSION=$env:WT_SESSION") + ([DedupeWin]::Driven -split "`r?`n" | Where-Object { $_ }))
+}
+
 Save 'DONE' "DONE $(Get-Date -Format s)"
 
 # the run on one screen: each part, what it gave, and where the rest is
@@ -428,6 +520,11 @@ function Summary() {
     $shot = Join-Path $log 'colour.txt'
     $s = if (Test-Path $shot) { (Get-Content $shot -Encoding UTF8 | Select-Object -First 1) } else { 'not run' }
     Line 'colour' $(if ($s -match '^captured') { $true } else { $false }) $(if ($s -match '^captured') { "$s   runs\win\log\colour.png" } else { $s })
+    $v = Join-Path $log 'view.txt'
+    $vt = if (Test-Path $v) { Get-Content $v -Encoding UTF8 } else { @('not run') }
+    $vShot = $vt | Where-Object { $_ -match '^shot .*view\.png' } | Select-Object -First 1
+    $vOk = if ($vShot -match '   ok   ') { $true } elseif ($vt[0] -eq 'not run') { $null } else { $false }
+    Line 'v picture' $vOk $(if ($vOk) { (($vShot -split '   ok   ')[1]) + '   runs\win\log\view.png, workspace.png' } else { ($vt | Select-Object -Last 1) })
     Write-Host $rule -ForegroundColor DarkGray
     Write-Host " every step, in order: runs\win\log\RUN.txt   this summary: runs\win\log\SUMMARY.txt" -ForegroundColor DarkGray
 }

@@ -382,6 +382,22 @@ fn run_tty_raw(
     columns: u32,
     colour: bool,
 ) -> Option<String> {
+    let steps: Vec<Step> = keys.iter().map(|k| Step::Key(k.to_string())).collect();
+    run_tty_steps(fx, args, &steps, columns, 50, colour).map(|(out, _)| out)
+}
+
+/// The Windows pseudo-console runner with steps: keys, and resizes of the
+/// pseudo console (`ResizePseudoConsole`, Phase 16, TECH-12). Returns what
+/// it drew and, for each step, how many bytes had come before it.
+#[cfg(windows)]
+fn run_tty_steps(
+    fx: &Fx,
+    args: &[&str],
+    steps: &[Step],
+    columns: u32,
+    rows: u32,
+    colour: bool,
+) -> Option<(String, Vec<usize>)> {
     use std::ffi::c_void;
     use std::fs::File;
     use std::io::{Read, Write};
@@ -444,6 +460,7 @@ fn run_tty_raw(
             console: *mut Handle,
         ) -> i32;
         fn ClosePseudoConsole(console: Handle);
+        fn ResizePseudoConsole(console: Handle, size: Coord) -> i32;
         fn InitializeProcThreadAttributeList(
             list: *mut c_void,
             count: u32,
@@ -535,7 +552,7 @@ fn run_tty_raw(
         let mut console: Handle = null_mut();
         let size = Coord {
             x: columns as i16,
-            y: 50,
+            y: rows as i16,
         };
         if CreatePseudoConsole(size, in_read, out_write, 0, &mut console) != 0 {
             return None;
@@ -596,34 +613,189 @@ fn run_tty_raw(
         // read everything it draws, on a thread of its own: a pseudo
         // console whose output is not drained stops drawing
         let mut output = File::from_raw_handle(out_read as RawHandle);
+        let drawn = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let sink = drawn.clone();
         let reader = std::thread::spawn(move || {
-            let mut all = Vec::new();
-            let _ = output.read_to_end(&mut all);
-            all
+            let mut buf = [0u8; 8192];
+            while let Ok(n) = output.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                sink.lock().unwrap().extend_from_slice(&buf[..n]);
+            }
         });
         let mut input = File::from_raw_handle(in_write as RawHandle);
-        let keys: Vec<String> = keys.iter().map(|k| k.to_string()).collect();
+        let steps: Vec<Step> = steps.to_vec();
+        let pc = console as usize;
+        let seen = drawn.clone();
         let writer = std::thread::spawn(move || {
+            let mut marks = Vec::new();
             std::thread::sleep(std::time::Duration::from_millis(2500));
-            for k in keys {
-                let _ = input.write_all(k.as_bytes());
-                let _ = input.flush();
+            for step in steps {
+                marks.push(seen.lock().unwrap().len());
+                match step {
+                    Step::Key(k) => {
+                        let _ = input.write_all(k.as_bytes());
+                        let _ = input.flush();
+                    }
+                    Step::Resize(c, r) => {
+                        ResizePseudoConsole(
+                            pc as Handle,
+                            Coord {
+                                x: c as i16,
+                                y: r as i16,
+                            },
+                        );
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_millis(1500));
             }
-            input
+            (input, marks)
         });
         if WaitForSingleObject(info.process, 120_000) != WAIT_OBJECT_0 {
             TerminateProcess(info.process, 1);
             WaitForSingleObject(info.process, 10_000);
         }
         CloseHandle(info.process);
-        let input = writer.join().ok();
+        let (input, marks) = writer.join().ok()?;
         // closing the pseudo console ends its output, and the reader
         ClosePseudoConsole(console);
         drop(input);
-        let all = reader.join().ok()?;
-        Some(String::from_utf8_lossy(&all).into_owned())
+        reader.join().ok()?;
+        let all = drawn.lock().unwrap().clone();
+        let marks = marks.into_iter().map(|m| text_len(&all, m)).collect();
+        Some((String::from_utf8_lossy(&all).into_owned(), marks))
     }
+}
+
+/// One thing a terminal test does in turn: type, or change the terminal's
+/// size (columns, rows).
+#[derive(Clone)]
+#[allow(dead_code)]
+enum Step {
+    Key(String),
+    Resize(u16, u16),
+}
+
+/// Where byte `at` of `bytes` lands in their lossy text.
+fn text_len(bytes: &[u8], at: usize) -> usize {
+    String::from_utf8_lossy(&bytes[..at.min(bytes.len())]).len()
+}
+
+/// The Unix runner with steps (Phase 16, TECH-12): a pseudo-terminal the
+/// test owns (`openpty`; `script(1)` cannot be resized), `dedupe` its
+/// session leader with the terminal as its controlling one, a resize sent
+/// with `TIOCSWINSZ` (the kernel signals `SIGWINCH`). Returns what it
+/// drew and, for each step, how many bytes had come before it.
+#[cfg(unix)]
+fn run_tty_steps(
+    fx: &Fx,
+    args: &[&str],
+    steps: &[Step],
+    columns: u32,
+    rows: u32,
+    colour: bool,
+) -> Option<(String, Vec<usize>)> {
+    use std::io::{Read, Write};
+    use std::os::fd::{FromRawFd, OwnedFd};
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    let size = |c: u16, r: u16| libc::winsize {
+        ws_row: r,
+        ws_col: c,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    let (mut master, mut slave) = (0, 0);
+    let ws = size(columns as u16, rows as u16);
+    // SAFETY: openpty fills two descriptors this function then owns
+    if unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            &ws,
+        )
+    } != 0
+    {
+        return None;
+    }
+    // SAFETY: both descriptors were just opened and are owned here
+    let (master, slave) = unsafe { (OwnedFd::from_raw_fd(master), OwnedFd::from_raw_fd(slave)) };
+    let mut cmd = Command::new(bin());
+    cmd.args(args)
+        .current_dir(&fx.root)
+        .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("TERM", "xterm")
+        .env_remove("COLUMNS")
+        .stdin(Stdio::from(slave.try_clone().ok()?))
+        .stdout(Stdio::from(slave.try_clone().ok()?))
+        .stderr(Stdio::from(slave));
+    if colour {
+        cmd.env_remove("NO_COLOR");
+    } else {
+        cmd.env("NO_COLOR", "1");
+    }
+    // SAFETY: only async-signal-safe calls between fork and exec
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let mut child = cmd.spawn().ok()?;
+    drop(cmd);
+    let master_fd = {
+        use std::os::fd::AsRawFd;
+        master.as_raw_fd()
+    };
+    let mut reader_end = std::fs::File::from(master.try_clone().ok()?);
+    let drawn = std::sync::Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let sink = drawn.clone();
+    let reader = std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        // EIO once the child and its terminal are gone
+        while let Ok(n) = reader_end.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            sink.lock().unwrap().extend_from_slice(&buf[..n]);
+        }
+    });
+    let mut input = std::fs::File::from(master);
+    let mut marks = Vec::new();
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+    for step in steps {
+        marks.push(drawn.lock().unwrap().len());
+        match step {
+            Step::Key(k) => {
+                let _ = input.write_all(k.as_bytes());
+                let _ = input.flush();
+            }
+            Step::Resize(c, r) => {
+                let ws = size(*c, *r);
+                // SAFETY: the master descriptor is open; the size outlives the call
+                unsafe { libc::ioctl(master_fd, libc::TIOCSWINSZ, &ws) };
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while child.try_wait().ok()?.is_none() {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    drop(input);
+    let _ = reader.join();
+    let all = drawn.lock().unwrap().clone();
+    let marks = marks.into_iter().map(|m| text_len(&all, m)).collect();
+    Some((String::from_utf8_lossy(&all).into_owned(), marks))
 }
 
 /// Terminal output without its control sequences and carriage returns:
@@ -1800,6 +1972,61 @@ fn find_on_a_terminal_acts_from_the_result() {
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
     // shown by `--nocapture`: the Windows launcher's summary reads it
     eprintln!("the workspace driven through a pseudo-terminal: 7 moved, 7 restored");
+}
+
+/// A resize during a sitting (Phase 16, TECH-12; Phase 9 left it
+/// unverified): the screen is redrawn at the new width — its rules 78
+/// cells at 80 columns, none wider than the terminal — with the cursor's
+/// group and the selection as they were before.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection() {
+    let fx = fixture_with_photos();
+    let steps = [
+        Step::Key("\x1b[B".into()),
+        Step::Key(" ".into()),
+        Step::Resize(80, 30),
+        Step::Key("q".into()),
+    ];
+    let Some((raw, marks)) = run_tty_steps(&fx, &["find", ".", "img"], &steps, 160, 40, false)
+    else {
+        eprintln!("no pseudo-terminal; skipped");
+        return;
+    };
+    let before = plain_text(&raw[..marks[2]]);
+    let after = plain_text(&raw[marks[2]..marks[3]]);
+    let rules = |s: &str| -> Vec<usize> {
+        s.split(|c| c != '─')
+            .map(|r| r.chars().count())
+            .filter(|&n| n >= 20)
+            .collect()
+    };
+    assert!(rules(&before).contains(&158), "at 160 columns\n{before}");
+    assert!(
+        rules(&after).contains(&78),
+        "redrawn at 80 columns\n{after}"
+    );
+    assert!(
+        rules(&after).iter().all(|&n| n <= 80),
+        "nothing wider\n{after}"
+    );
+    // the status line's selection and cursor group, last before and after
+    let status = |s: &str| -> Option<(String, String)> {
+        let l = s
+            .lines()
+            .rev()
+            .find(|l| l.contains(" selected") && l.contains("group "))?;
+        let words: Vec<&str> = l.split_whitespace().collect();
+        let n = words.iter().position(|w| *w == "selected")?;
+        let g = words.iter().position(|w| *w == "group")?;
+        Some((words[n - 1].to_string(), words.get(g + 1)?.to_string()))
+    };
+    let (b, a) = (status(&before), status(&after));
+    assert!(b.is_some(), "a status line before\n{before}");
+    assert_eq!(
+        a, b,
+        "the selection and the cursor's group kept\nbefore {before}\nafter {after}"
+    );
 }
 
 /// `/` in the workspace (Phase 16, QOL-12): typing `backup` leaves the one
