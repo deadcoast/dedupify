@@ -93,6 +93,11 @@ fn measure_bars() {
     let mut rows: Vec<(String, String, bool, bool, String, String)> = Vec::new();
     let mut false_found: Vec<(String, &'static str, Bars)> = Vec::new();
     let mut negatives = 0;
+    // the black pass's band detail where it found bars, and how often the
+    // shipped decision (`detect_any_bars`) found the picture
+    let mut details: Vec<(String, f64)> = Vec::new();
+    let mut shipped_right = 0;
+    let mut shipped_false: Vec<String> = Vec::new();
     for src in &sources {
         let Ok(meta) = probe(src) else { continue };
         if meta.duration < 1.0 || meta.width.min(meta.height) < 240 {
@@ -112,6 +117,12 @@ fn measure_bars() {
             }
             if let Some(b) = detect_flat_bars(&p, &m) {
                 false_found.push((format!("{name} {label}"), "flat", b));
+            }
+            if let Some((_, r)) = dedupe::video::black_band_detail(&p, &m) {
+                details.push((format!("{name} {label} (no bars)"), r));
+            }
+            if dedupe::video::detect_any_bars(&p, &m).is_some() {
+                shipped_false.push(format!("{name} {label}"));
             }
         }
         // the portrait original
@@ -141,6 +152,7 @@ fn measure_bars() {
                 "[0:v]scale=-2:720[fg];[0:v]scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,gblur=sigma=30,eq=brightness=-0.08[bg];[bg][fg]overlay=(W-w)/2:(H-h)/2".to_string(),
                 true,
             ),
+            ("black", "scale=-2:720,pad=1280:720:(ow-iw)/2:0:black".into(), false),
             ("white", "scale=-2:720,pad=1280:720:(ow-iw)/2:0:white".into(), false),
             ("grey", "scale=-2:720,pad=1280:720:(ow-iw)/2:0:0x808080".into(), false),
             ("dark blue", "scale=-2:720,pad=1280:720:(ow-iw)/2:0:0x203050".into(), false),
@@ -153,9 +165,16 @@ fn measure_bars() {
             let Ok(m) = probe(&v) else { continue };
             let black = detect_bars(&v, &m);
             let flat = detect_flat_bars(&v, &m);
+            let shipped = dedupe::video::detect_any_bars(&v, &m);
+            if let Some((_, r)) = dedupe::video::black_band_detail(&v, &m) {
+                details.push((format!("{name} {label}"), r));
+            }
             let want = (x0, 0, x0 + pw, 720);
+            if close(shipped, want, 1280, 720) {
+                shipped_right += 1;
+            }
             let before = hash_video_inside(&v, &m, None).map(|s| relate(&psig, &s));
-            let after = hash_video_inside(&v, &m, black.or(flat)).map(|s| relate(&psig, &s));
+            let after = hash_video_inside(&v, &m, shipped).map(|s| relate(&psig, &s));
             let fmt = |r: Result<dedupe::video::VideoRelation, _>| match r {
                 Ok(r) => format!(
                     "{:.2} {}",
@@ -197,9 +216,13 @@ fn measure_bars() {
                     let want = (0, (720 - ih) / 2, 960, (720 - ih) / 2 + ih);
                     let black = detect_bars(&v, &m);
                     let flat = detect_flat_bars(&v, &m);
+                    let shipped = dedupe::video::detect_any_bars(&v, &m);
+                    if close(shipped, want, 960, 720) {
+                        shipped_right += 1;
+                    }
                     let osig = hash_video_inside(src, &om, None);
                     let before = hash_video_inside(&v, &m, None);
-                    let after = hash_video_inside(&v, &m, black.or(flat));
+                    let after = hash_video_inside(&v, &m, shipped);
                     let fmt = |a: &Result<dedupe::video::VideoSig, _>| match (&osig, a) {
                         (Ok(o), Ok(s)) => {
                             let r = relate(o, s);
@@ -257,5 +280,18 @@ fn measure_bars() {
         false_found.len(),
         false_found
     );
+    eprintln!(
+        "the shipped decision: the picture found in {shipped_right} of {} framed copies; bars in {} of {negatives} without: {shipped_false:?}",
+        rows.len(),
+        shipped_false.len()
+    );
+    details.sort_by(|a, b| a.1.total_cmp(&b.1));
+    eprintln!(
+        "black pass's band detail against the picture's (BLACK_DETAIL_MAX {}):",
+        dedupe::video::BLACK_DETAIL_MAX
+    );
+    for (n, r) in &details {
+        eprintln!("    {r:>6.3}  {n}");
+    }
     eprintln!("total {:.0}s", t0.elapsed().as_secs_f64());
 }

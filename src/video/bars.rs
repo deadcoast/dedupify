@@ -258,6 +258,150 @@ pub fn detect_flat_bars(path: &Path, meta: &Meta) -> Option<Bars> {
 
 /// `detect_flat_bars`, a stall said apart (as `detect_bars_clocked`).
 pub fn detect_flat_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>, VideoError> {
+    Ok(flat_frames_clocked(path)?.and_then(|f| flat_bars_of_frames(&f, meta)))
+}
+
+/// A band's detail at or under this share of the picture's is a black
+/// bar's: ffmpeg's `cropdetect` takes any edge band under luma 24 for
+/// black, and a platform's dark, blurred copy of the picture behind it
+/// (`ambient`) can be that dark at its edges while still carrying the
+/// blurred picture's detail. Measured on 25 real clips framed both ways
+/// (VERIFICATION § Phase 15, CORE-14): black bars 0.000–0.023, the dark
+/// edges of blurred ones 0.057–0.650. [CLAUDE]
+pub const BLACK_DETAIL_MAX: f64 = 0.04;
+
+/// Bars around a video's picture: black ones (`cropdetect`), unless the
+/// band it found carries detail (over `BLACK_DETAIL_MAX` of the
+/// picture's, in the flat pass's keyframes) — a dark blurred background,
+/// handed to the flat pass, which finds the picture inside it or nothing —
+/// or the flat pass finds a picture that holds the black pass's (cropdetect
+/// took the picture's own dark edge rows with the bars); and bars of any
+/// flat colour when there are no black ones. A pass that stalls ends the
+/// file here. (Phase 15, CORE-14)
+pub fn detect_any_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>, VideoError> {
+    let black = detect_bars_clocked(path, meta)?;
+    let frames = flat_frames_clocked(path)?;
+    Ok(match (black, frames) {
+        (Some(b), Some(f)) => match band_detail(&f, fractions(b, meta, &f)) {
+            Some(r) if r > BLACK_DETAIL_MAX => flat_bars_of_frames(&f, meta),
+            _ => match flat_bars_of_frames(&f, meta) {
+                Some(flat) if holds(flat, b) => Some(flat),
+                _ => Some(b),
+            },
+        },
+        (Some(b), None) => Some(b),
+        (None, f) => f.and_then(|f| flat_bars_of_frames(&f, meta)),
+    })
+}
+
+/// Whether picture `outer` holds picture `inner` and is larger.
+fn holds(outer: Bars, inner: Bars) -> bool {
+    outer != inner
+        && outer.x <= inner.x
+        && outer.y <= inner.y
+        && outer.x + outer.width >= inner.x + inner.width
+        && outer.y + outer.height >= inner.y + inner.height
+}
+
+/// The black pass's bars and their band's detail against the picture's,
+/// for the measure that sets `BLACK_DETAIL_MAX`.
+#[doc(hidden)]
+pub fn black_band_detail(path: &Path, meta: &Meta) -> Option<(Bars, f64)> {
+    let b = detect_bars(path, meta)?;
+    let f = flat_frames_clocked(path).ok().flatten()?;
+    Some((b, band_detail(&f, fractions(b, meta, &f))?))
+}
+
+/// `detect_any_bars_clocked`, a stall taken as no bars (for the measures).
+pub fn detect_any_bars(path: &Path, meta: &Meta) -> Option<Bars> {
+    detect_any_bars_clocked(path, meta).ok().flatten()
+}
+
+/// Black bars as fractions of the decoded frame (left, top, right,
+/// bottom), the probed size turned when the frames are.
+fn fractions(b: Bars, meta: &Meta, frames: &[image::GrayImage]) -> (f64, f64, f64, f64) {
+    let (fw, fh) = frames
+        .first()
+        .map_or((meta.width, meta.height), |f| (f.width(), f.height()));
+    let (w, h) = if (fw >= fh) == (meta.width >= meta.height) {
+        (meta.width, meta.height)
+    } else {
+        (meta.height, meta.width)
+    };
+    let (w, h) = (w.max(1) as f64, h.max(1) as f64);
+    (
+        (b.x as f64 / w).clamp(0.0, 1.0),
+        (b.y as f64 / h).clamp(0.0, 1.0),
+        ((b.x + b.width) as f64 / w).clamp(0.0, 1.0),
+        ((b.y + b.height) as f64 / h).clamp(0.0, 1.0),
+    )
+}
+
+/// The detail of the bands outside `inner` (fractions left, top, right,
+/// bottom) against the picture's, averaged over the frames whose picture
+/// has detail: columns measured along the column, rows along the row, as
+/// `flat_bars` measures them, the picture by the median of its own.
+/// `None` when no frame can judge or there is no band.
+pub fn band_detail(frames: &[image::GrayImage], inner: (f64, f64, f64, f64)) -> Option<f64> {
+    let mut ratios = Vec::new();
+    for f in frames {
+        let (w, h) = (f.width() as usize, f.height() as usize);
+        if w < 16 || h < 16 {
+            continue;
+        }
+        let px = f.as_raw();
+        let at = |x: usize, y: usize| px[y * w + x] as f64;
+        let col = |x: usize| {
+            (0..h - 1)
+                .map(|y| (at(x, y + 1) - at(x, y)).abs())
+                .sum::<f64>()
+                / (h - 1) as f64
+        };
+        let row = |y: usize| {
+            (0..w - 1)
+                .map(|x| (at(x + 1, y) - at(x, y)).abs())
+                .sum::<f64>()
+                / (w - 1) as f64
+        };
+        let (x0, x1) = (
+            (inner.0 * w as f64) as usize,
+            (inner.2 * w as f64).ceil() as usize,
+        );
+        let (y0, y1) = (
+            (inner.1 * h as f64) as usize,
+            (inner.3 * h as f64).ceil() as usize,
+        );
+        let (x1, y1) = (x1.min(w), y1.min(h));
+        // the band's own lines, one in from the picture's edge so a
+        // sampled pixel straddling it does not count
+        let mut band: Vec<f64> = Vec::new();
+        let mut pic: Vec<f64> = Vec::new();
+        if x0 > 1 || x1 + 1 < w {
+            band.extend((0..x0.saturating_sub(1)).map(col));
+            band.extend((x1 + 1..w).map(col));
+            pic.extend((x0..x1).map(col));
+        }
+        if y0 > 1 || y1 + 1 < h {
+            band.extend((0..y0.saturating_sub(1)).map(row));
+            band.extend((y1 + 1..h).map(row));
+            pic.extend((y0..y1).map(row));
+        }
+        if band.is_empty() || pic.is_empty() {
+            continue;
+        }
+        pic.sort_by(|a, b| a.total_cmp(b));
+        let p = pic[pic.len() / 2];
+        if p < FLAT_PICTURE_MIN {
+            continue;
+        }
+        ratios.push(band.iter().sum::<f64>() / band.len() as f64 / p);
+    }
+    (!ratios.is_empty()).then(|| ratios.iter().sum::<f64>() / ratios.len() as f64)
+}
+
+/// The flat pass's keyframes: up to `FLAT_FRAMES` at `FLAT_WIDTH` wide,
+/// upright, grey. `None` when ffmpeg gives none.
+fn flat_frames_clocked(path: &Path) -> Result<Option<Vec<image::GrayImage>>, VideoError> {
     let mut cmd = crate::tools::ffmpeg();
     cmd.args([
         "-nostdin",
@@ -294,17 +438,18 @@ pub fn detect_flat_bars_clocked(path: &Path, meta: &Meta) -> Result<Option<Bars>
         Err(e) if e.kind() == std::io::ErrorKind::TimedOut => return Err(VideoError::Stalled),
         Err(_) => return Ok(None),
     };
-    Ok(flat_bars_of(&out.stdout, meta))
+    Ok(crate::decode::ppm_frames(&out.stdout).map(|frames| {
+        frames
+            .into_iter()
+            .map(|f| image::DynamicImage::ImageRgb8(f).to_luma8())
+            .collect::<Vec<_>>()
+    }))
 }
 
-/// The keyframes the flat-bar pass decoded, to the inner picture.
-fn flat_bars_of(stdout: &[u8], meta: &Meta) -> Option<Bars> {
-    let frames: Vec<image::GrayImage> = crate::decode::ppm_frames(stdout)?
-        .into_iter()
-        .map(|f| image::DynamicImage::ImageRgb8(f).to_luma8())
-        .collect();
+/// The flat pass's keyframes, to the inner picture.
+fn flat_bars_of_frames(frames: &[image::GrayImage], meta: &Meta) -> Option<Bars> {
     let (fw, fh) = (frames.first()?.width(), frames.first()?.height());
-    let (l, t, r, b) = flat_bars(&frames)?;
+    let (l, t, r, b) = flat_bars(frames)?;
     // the decoded size: the probed one, turned if the frames are
     let (w, h) = if (fw >= fh) == (meta.width >= meta.height) {
         (meta.width, meta.height)
@@ -345,6 +490,30 @@ mod tests {
                 image::Luma([bar(x, y)])
             }
         })
+    }
+
+    #[test]
+    fn a_black_band_has_no_detail_and_a_dark_blurred_one_has_some() {
+        // the picture in the middle 96 columns; bands left and right
+        let inner = (80.0 / 256.0, 0.0, 176.0 / 256.0, 1.0);
+        let black: Vec<_> = (0..4)
+            .map(|s| framed(80, 176, 0, 144, s, &|_, _| 16))
+            .collect();
+        let r = band_detail(&black, inner).unwrap();
+        assert!(r <= BLACK_DETAIL_MAX, "{r}");
+        // dark, softly varying (luma 4–22, under cropdetect's 24)
+        let dark_blur: Vec<_> = (0..4)
+            .map(|s| {
+                framed(80, 176, 0, 144, s, &|x, y| {
+                    (13.0 + 9.0 * ((x as f32 * 0.9).sin() * (y as f32 * 0.7 + s as f32).cos()))
+                        as u8
+                })
+            })
+            .collect();
+        let r = band_detail(&dark_blur, inner).unwrap();
+        assert!(r > BLACK_DETAIL_MAX, "{r}");
+        // no band, no measure
+        assert!(band_detail(&black, (0.0, 0.0, 1.0, 1.0)).is_none());
     }
 
     #[test]

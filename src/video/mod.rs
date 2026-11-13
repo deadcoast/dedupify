@@ -32,8 +32,9 @@ mod probe;
 mod tmk;
 
 pub use bars::{
-    detect_bars, detect_bars_clocked, detect_flat_bars, detect_flat_bars_clocked, flat_bars,
-    parse_cropdetect, Bars, BAR_KEEP_MIN, BAR_LIMIT, BAR_MIN_SHARE, FLAT_FRAMES, FLAT_PICTURE_MIN,
+    band_detail, black_band_detail, detect_any_bars, detect_any_bars_clocked, detect_bars,
+    detect_bars_clocked, detect_flat_bars, detect_flat_bars_clocked, flat_bars, parse_cropdetect,
+    Bars, BAR_KEEP_MIN, BAR_LIMIT, BAR_MIN_SHARE, BLACK_DETAIL_MAX, FLAT_FRAMES, FLAT_PICTURE_MIN,
     FLAT_RATIO, FLAT_START, FLAT_WIDTH,
 };
 pub use group::{
@@ -135,13 +136,10 @@ pub fn position_indices(duration: f64) -> Vec<u32> {
 
 /// Stream and hash one file: the bar pass, then the frame pass.
 pub fn hash_video(path: &Path, meta: &Meta) -> Result<VideoSig, VideoError> {
-    // black bars first (cropdetect, measured in Phase 7); bars of any
-    // other colour when there are none
+    // black bars (cropdetect, Phase 7) unless their band carries detail,
+    // bars of any other colour otherwise (Phases 11 and 15)
     // (a pass that stalled ends the file here: the frame pass would too)
-    let bars = match detect_bars_clocked(path, meta)? {
-        Some(b) => Some(b),
-        None => detect_flat_bars_clocked(path, meta)?,
-    };
+    let bars = detect_any_bars_clocked(path, meta)?;
     hash_video_inside(path, meta, bars)
 }
 
