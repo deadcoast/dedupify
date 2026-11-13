@@ -3377,3 +3377,129 @@ acted on. One fit more (the split pair's), MATCH's time unchanged.
 `cargo test --profile ci`: 132 unit tests (1 ignored), the band test, 34
 end-to-end tests (3 ignored); the band test and the 34 again with the
 model installed.
+
+## 2. PDQ at one working size (CORE-12)
+
+The PDQ input was the box-prefiltered plane at its own size (short side
+576–1151, set by the file's size), so a photo and its copies went
+through different Jarosz windows and decimation grids. It is now that
+plane resampled by a tent filter to 576 × 576 (`pdq::WORK_SIDE`,
+`PdqPrep::Fixed`), the published algorithm after it.
+
+`tests/pdq_fixed.rs` on the 215 JPEGs of Phase 11 § 8 (Copydays
+originals, the HDR+ results, Meta's PDQ regression inputs; 0.1–13.1 MP),
+decoded upright as the program decodes them. PDQ to the original, max /
+95th percentile / median (a turned or mirrored copy by the best of the
+eight orientations):
+
+```
+copy               shipped until now   512, tent       576, tent (shipped)   576, Lanczos
+re-save q85          12  2  0           12  2  0          12  2  0           12  2  0
+70 % q85             56 14  4           22  4  0          18  4  0           20  4  0
+half q85             46 10  2           34  6  0          22  4  0           30  4  0
+35 % q85             56 12  6           40  6  2          36  4  2           40  4  0
+quarter q85          54 12  4           42  6  2          36  6  2           40  6  2
+half png             48 10  2           26  4  0          24  4  0           28  4  0
+half, turned         64 14  6           76 26 16          28  4  0           32  4  0
+mirror               62 14  2           60 26 16           6  4  0            6  4  0
+the tool's own hash  72 18  8           64 12  4          88 20 10           92 20 10
+```
+
+Different originals, all 23,005 pairs: the closest at 86 bits before,
+84 after; none within 31 or 40 in any preparation (by the best of eight
+orientations 28 come within 31 in every one: the regression set's eight
+turns and flips of one bridge photograph).
+
+512 was tried first and turned mirrors worse (median 16): at 512 the
+Jarosz window is 4 and the decimation samples pixel 8i + 4 of each
+8-pixel cell, neither centred, so a mirrored picture is not filtered as
+the mirror of the original. At 576 the window is 5 and the cell 9, both
+odd. The first run of the fixed route hashed every picture alike: the
+image crate's float resize holds a pixel in 0–1 and clamped the 0–255
+plane; the plane is scaled into 0–1 around the resize.
+
+The procedural corpus (`tests/corpus.rs`, 150 sources × 21
+perturbations), against its Phase 2b table: scale 25 % from 14 bits at
+most to 6, upscale 150 % 12 → 4, rotate 90° 18 → 0, mirror 14 → 0,
+squeeze 10 → 2; rotate 2° within 31 in 20.0 % (22.0 % before; the fit
+confirms those); negatives' closest 74 → 70, no false positive at any
+threshold up to 64.
+
+The 35 % caption-bar copy in `e2e` now reads `q 50` (48 before); its
+verdict is unchanged.
+
+## 3. The near keeper's degree (CORE-13)
+
+The degree that seats a keeper counted every match on the two 64-bit
+hashes; it now counts only those PDQ confirms as well, and among the
+members within one of the most matched (same capture-moment count, same
+RAW standing) `keeper_order` decides — most pixels, then the copy marks.
+The choice is made after the sort, so the comparator stays a total
+order.
+
+`e2e::both_caption_bars_leave_the_original_its_seat`: with both
+caption-bar edits beside the beach's copies, `photos/export/
+beach_mirror.png` kept before (one near-threshold match more);
+`photos/beach.png` keeps now. The 35 % caption copy then reads against
+the original (`d 9 p 16 q 50`, listed) instead of the mirror (`d 7 p 14
+fit 0.90`, listed); `milk` leaves it in place as before.
+
+`dedupe find <set> . img` before and after, with and without the model,
+on the real set, Copydays, the bench corpus, the HDR+ results and the
+burst set: 742 group lines, 0 different.
+
+## 4. Bars the black pass gets wrong (CORE-14)
+
+`video::detect_any_bars_clocked` now makes the whole decision: the black
+pass (`cropdetect`); the flat pass's 16 keyframes, read whenever the
+black pass finds bars as well; a black band carrying detail (over
+`BLACK_DETAIL_MAX` of the picture's, measured as the flat pass measures
+bands) handed to the flat pass; and the flat pass's picture taken when
+it holds the black pass's.
+
+`tests/bars_measure.rs`, with a black framing added to the four of Phase
+11 and the decision itself measured. The black band's detail against
+the picture's: black bars 0.000–0.023 (25 copies), the darkened edges of
+blurred backgrounds the black pass took for bars 0.057–0.650 (5) —
+`BLACK_DETAIL_MAX` 0.04. Confirmed after the crop:
+
+```
+framing          copies   Phase 11   now
+ambient            25        6        7    100_0306: black pass wrong, now the flat pass's crop, 0.00 → 1.00
+black              25        —       22    ftyp3gp5 0.56 → 0.99 (the flat picture holds cropdetect's);
+                                           uuid540, xmp480qt grouped at 0.89, 0.88, as their white copies
+white / grey / dark blue   23 / 24 / 23    unchanged
+letterbox white     6        5        5
+the 25 clips and re-encodes without bars: bars in none
+```
+
+Of the five ambient copies the black pass cropped wrongly, one is now
+cropped right; the other four (Megamind three times, ftyp3gp5) are no
+longer cropped wrongly but stay apart, uncropped. Their blurred
+background carries as much detail as the picture — Megamind is a smooth
+animation, its picture's median detail 2.6 grey levels a pixel, the
+background's columns 0.57–0.71 of it — so no ratio separates them (0.5
+was tried in this path and found none more). The edge where picture
+meets background, sharp in every frame, is the cue left; a detector of
+its own, with its own negatives, open.
+
+`dedupe find . vid` before and after on the real video set and the 25
+clips: no group or line changed. The pass now also reads the 16
+keyframes for files with black bars: at 256 wide, keyframes only.
+
+## 5. SSCD's export against Meta's original (TECH-14)
+
+`.github/workflows/sscd.yml`, started by hand or by `[sscd]` in a push's
+message: downloads the ONNX export and Meta's TorchScript checkpoint,
+each checked against its pinned SHA-256, and CPU PyTorch;
+`tests/sscd_agreement.rs` writes 200 pictures at exactly 320 × 320 (100
+procedural photographs and a crop, rotation, brightness, JPEG or mirror
+copy of each; the deep tier's resize checked to be the identity at that
+size) and our embeddings; `tests/sscd_agreement.py` feeds the same
+tensors to TorchScript and to ONNX Runtime.
+
+SSCD_RESULT
+
+## 6. Suite and CI
+
+SUITE_RESULT
