@@ -15,7 +15,7 @@ order top to bottom. Previous milestone: Phase 14, delivered 2026-11-12
 - [x] **CORE-13** the near keeper's degree counts confirmed relations
   only, the copy marks ahead of degree within one; the Phase 11 caption
   fixture keeps `photos/`
-- [ ] **CORE-14** dark blurred bars on video handed to the flat pass; the
+- [x] **CORE-14** dark blurred bars on video handed to the flat pass; the
   25 real clips (5 corrected, 20 unchanged) and the 79 without bars
 - [ ] **TECH-14** the ONNX export against Meta's TorchScript model, in a
   CI job started by hand; a note unless agreement is under 0.99

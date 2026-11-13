@@ -978,6 +978,26 @@ strips, and a 190 × 240 sample clip. The
 pass costs 16 % of the frame stage on those 29 clips (25 s → 29 s), whose
 groups and words are unchanged.
 
+**When the black pass is wrong — Phase 15 (CORE-14) [CLAUDE].** The
+flat pass's keyframes are now read whenever the black pass finds bars
+too, and decide two cases. A black bar carries no detail; the darkened
+edge of a blurred background does: the band `cropdetect` found is
+measured against the picture as the flat pass measures its bands, and
+over `BLACK_DETAIL_MAX` (0.04) it is handed to the flat pass, which finds
+the picture inside it or nothing — on the 25 clips black bars measure
+0.000–0.023 and the darkened blurred edges 0.057–0.650. And `cropdetect`
+can take the picture's own dark top and bottom rows with the black bars;
+when the flat pass finds a picture that holds the black pass's, the flat
+pass's is taken. On the 25 clips framed in black as well (VERIFICATION §
+Phase 15): the five ambient copies the black pass cropped wrongly are no
+longer cropped wrongly — one now cropped right and confirmed at 1.00,
+four left uncropped, their blurred background carrying as much detail as
+a smooth picture (an animation's 0.57–0.71) so that no ratio finds it;
+the sharp edge where picture meets background is the cue left, for a
+detector of its own. Of the black-framed copies, 22 of 25 confirm, one
+(0.56 → 0.99) through the second rule; nothing changed elsewhere, and
+none of the 50 clips and re-encodes without bars shows any.
+
 Audio fingerprinting (Chromaprint) is out of scope.
 
 ## 4. Undo — the journal
