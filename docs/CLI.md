@@ -283,6 +283,12 @@ exceeds 260 characters, and the state of the journals (pending, and any
 file that could not be read). The write check creates and removes one
 probe file in the root.
 
+On a terminal, with no model installed, the doctor ends on an offer:
+`enter download the model, 93.6 MB, SHA-256 checked` — curl fetches it
+into a `.part` beside its place, its size and SHA-256 are compared with
+the published file's, and only then is it kept; anything else leaves
+nothing behind. Any other key leaves. No flag for it (Phase 16).
+
 ---
 
 ## 3. Output design — theme "MILK" **[CLAUDE]**

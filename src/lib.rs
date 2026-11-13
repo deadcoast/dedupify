@@ -26,6 +26,8 @@ pub mod deep {
     pub const MODEL_SHA256: &str =
         "e65e2a5b9a5e44a0b0f011bddaa6f28621021f6120ca7ce8b526c19f2f6156f8";
     pub const MODEL_BYTES: u64 = 98_156_202;
+    pub const MODEL_URL: &str =
+        "https://huggingface.co/nutszebra/sscd_onnx/resolve/main/sscd_disc_mixup.onnx";
     pub const DIM: usize = 512;
     pub const DEEP_MIN: f32 = 0.70;
     pub const DEEP_FIT_MIN: f32 = 0.60;
@@ -63,6 +65,7 @@ pub mod deep {
 }
 pub mod doctor;
 pub mod exact;
+pub mod fetch;
 pub mod fsops;
 pub mod geometry;
 pub mod hamming;

@@ -17,7 +17,7 @@ order top to bottom. Previous milestone: Phase 15, delivered 2026-11-12
 - [x] **TECH-12** a resize during a sitting, driven
 - [x] **TECH-13** the launcher photographs the workspace and `v`
 - [ ] **QOL-13** `v` sized right in Windows Terminal (from TECH-13's picture)
-- [ ] **NF-09** the model fetched by the doctor
+- [x] **NF-09** the model fetched by the doctor
 
 Done when: every box ticked, the suite green on Linux and in the CI
 matrix on Windows, `VERIFICATION` § Phase 16 written, and `PLAN.md` marks

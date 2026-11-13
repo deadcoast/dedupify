@@ -3547,3 +3547,124 @@ and refusing (3 tests), the doctor.
   (crops and edits rely on the fit, unchanged).
 - The bench on the owner's machine (§ Phase 14) still waits for
   `runs\win\RUN_BENCH.cmd`.
+
+---
+
+# VERIFICATION — Phase 16 (the workspace at size), begun 2026-11-13
+
+Environment: this container (Linux, 2 vCPUs, Rust 1.97.0 and 1.100.0),
+`--profile ci`; CI on Ubuntu and Windows (§ 7). Source: IDENTIFIED
+2026-11-12 (`f9227ee`), items SC-10, QOL-11, SC-12, QOL-12, NF-10,
+TECH-12, TECH-13, QOL-13, NF-09.
+
+## 1. Every line inside the width, 40 to 200 (SC-10, QOL-11)
+
+`actions::widths::every_line_fits_from_40_to_200_cells` scans one
+fixture once — exact copies, a near group with a mirror, a resize, a
+caption bar and a `+GROUP` link, a RAW with its camera JPEG and an
+export, a letterboxed video, a root of 120 characters — and renders the
+header, the listing, the totals and the hints at each of the 161 widths,
+and seven stage lines as long as a real scan writes them. Before QOL-11
+it failed: 17 lines past the edge at 40, 5 at 50, 2 at 60–69, 1 up to
+84 (M3 counted 8 at 50 and 1 at 60 on a smaller listing). Now none, and
+the keepers' dates share one column at every width.
+
+What changed: the header drops the kind, then the depth (never `dry run`
+or `quick`) before the root goes under 16 cells, and the root takes what
+is left (it was floored at 24); the listing has narrower levels — the
+near block drops the `+GROUP` link and then the size, the video block
+the link, the size and the duration — and a path keeps at least 8 cells
+(12 before); a totals line packs its counts onto lines of the width and
+wraps its policy at spaces (the near policy ran 30 cells past a
+40-column edge); a stage's bar gives way below 64 columns so its text
+keeps 24 cells (at 40 the bar took every cell).
+
+## 2. The workspace in two files (SC-12)
+
+`workspace/state.rs` (the state and its keys) and `workspace/screen.rs`
+(the screen composed from it, `fit_parts`); the 9 tests unchanged, the
+screen's in `screen.rs`, sharing the state's fixtures.
+
+## 3. Sort and filter (QOL-12)
+
+The state shows a view: the groups' indices in the order shown, built
+from `s`'s order (as listed, most reclaimable first, by the keeper's
+folder) and `/`'s text (a member's listed path containing it, any case).
+Rows and effects still name a group by its place in the layout, so a
+group keeps its number and every effect reaches the right group; the
+listing lines are mapped to rows by (group, member). `a`, the counts,
+`n`, `m` and `p` take the groups shown; a choice in a hidden group is
+kept for when it shows again; `g` to a hidden group says so.
+
+State tests: `s_cycles_the_order_and_the_cursor_stays_on_its_file`,
+`a_filter_shows_matching_groups_keeps_choices_and_acts_on_what_it_shows`
+(narrowed as typed, esc puts the last filter back, an empty one shows
+all, the filter survives a change to the groups). End to end on a
+terminal: `a_filter_then_milk_moves_only_what_it_shows` — `/backup`,
+enter, `m`, enter: `1 of 3 groups` on the bar, `2 moved`, the hidden
+groups' files in place.
+
+## 4. A preferred folder (NF-10)
+
+`f` on a file: every group with a member in its folder or below takes
+the first such member for keeper (`GroupView::set_keeper`, re-related as
+`k` does); the status line says `keeping in backup/old`; `f` on a file
+of that folder again takes the rule back, each changed group getting its
+old keeper when both are still in it. State test:
+`f_asks_for_a_files_folder_and_again_there_takes_it_back`. End to end:
+`a_preferred_folder_keeps_its_copies` — narrowed to the photo's group,
+the cursor on `backup/old/IMG_0041 (1).jpg`, `f`, `m`, enter: `keeping
+in backup` on the bar, `2 moved`, the preferred copy kept, nothing in
+`_milked` from `backup/old`.
+
+## 5. A resize during a sitting (TECH-12)
+
+`a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection`: a
+step runner on each system — on Unix a pseudo-terminal the test owns
+(`openpty`, the binary its session leader, `TIOCSWINSZ`; `script(1)`
+cannot resize), on Windows the pseudo console resized with
+`ResizePseudoConsole` — records how much had been drawn before each
+step. Down, space, a resize from 160 × 40 to 80 × 30, `q`: before it the
+rules are 158 cells, after it 78 and none wider than 80; the status
+line's selection count and the cursor's group are the same on both
+sides. Linux here; Windows in CI (§ 7).
+
+## 6. The launcher photographs the workspace and `v` (TECH-13); QOL-13
+
+`runs\win\win_verify.ps1`: the C# helper queues keys into its own
+console's input (`WriteConsoleInput`, key down and up) from a thread,
+with waits, while a live `find` on the sample's photos runs in that
+console, and photographs the window between them: the workspace as it
+opens, then `/castle`, enter, `v` on the near pair — `log\workspace.png`
+and `log\view.png`, the summary's `v picture` line. Stray keys are
+flushed from the input before and after; the live doctor's model offer
+is answered with a queued esc. Compiled here with Mono; run on the
+owner's machine only.
+
+QOL-13 — the cell size Windows Terminal draws `v` at — is decided from
+that picture: open until the launcher has run.
+
+## 7. The model fetched by the doctor (NF-09)
+
+`fetch::fetch_verified`: curl into a `.part` beside the destination, its
+growth the progress and the stall clock, then its size and SHA-256
+against the published file's, and only then the rename; anything else
+removes the `.part`. `fetch::tests::the_right_file_is_kept_and_a_short_or_wrong_one_leaves_nothing`,
+against a server on this machine: a truncated file (`100 KB arrived`),
+one of the right size with one byte changed (SHA-256), and no server at
+all are refused with nothing left in the folder; the right file is kept,
+the `.part` gone, the progress heard to the last byte. The doctor ends
+on the offer only on a terminal with no model and the deep tier built
+in; piped, nothing changes.
+
+## 8. Suite and CI
+
+SUITE_RESULT
+
+## Not verified here
+
+- QOL-13 and the pictures of TECH-13: Windows Terminal on the owner's
+  machine (`runs\win\RUN_VERIFY.cmd`).
+- The doctor's download of the real 93.6 MB model from Hugging Face:
+  the container cannot reach it; the fetch is tested against a server
+  on the machine.

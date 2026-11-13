@@ -45,6 +45,11 @@ fn in_dir(dir: &Path, name: &str) -> Option<PathBuf> {
     p.is_file().then_some(p)
 }
 
+/// `name` on PATH (`.exe` added on Windows), as the shell would find it.
+pub fn on_path_pub(name: &str) -> Option<PathBuf> {
+    on_path(name)
+}
+
 fn on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).find_map(|d| in_dir(&d, name))

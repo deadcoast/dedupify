@@ -42,6 +42,10 @@ brings a member in only when the fit confirms it, and that member acts
 
 ## Install
 
+`dedupe --doctor` on a terminal, then enter: when no model is installed
+the doctor ends on that offer, fetches the file with curl, and keeps it
+only at the published size and SHA-256 (Phase 16). By hand:
+
 Put the ONNX model at (Windows) `%LOCALAPPDATA%\dedupe\models\sscd_disc_mixup.onnx`
 or (Linux) `~/.local/share/dedupe/models/sscd_disc_mixup.onnx`, or point
 `DEDUPE_MODEL` at any path.

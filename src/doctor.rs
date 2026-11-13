@@ -272,7 +272,15 @@ pub fn checks(inv: &Invocation, r: &Renderer) -> Vec<Check> {
             name: "deep",
             status: Status::Pass,
             detail: "no model (optional)   docs/DEEP.md".to_string(),
-            fix: format!("expected at {}", mp.to_string_lossy()),
+            fix: if offers_model(r) {
+                format!(
+                    "enter: download the model ({}, SHA-256 checked) to {}",
+                    fmt_bytes(crate::deep::MODEL_BYTES),
+                    mp.to_string_lossy()
+                )
+            } else {
+                format!("expected at {}", mp.to_string_lossy())
+            },
         }
     });
 
@@ -420,16 +428,7 @@ fn heif_check(ffmpeg: bool) -> Check {
 
 /// SHA-256 of a file, hex.
 fn sha256_file(p: &Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
-    let mut f = fs::File::open(p).ok()?;
-    let mut h = Sha256::new();
-    std::io::copy(&mut f, &mut h).ok()?;
-    Some(
-        h.finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>(),
-    )
+    crate::fetch::sha256_file(p)
 }
 
 /// Folders under `root` (up to `limit` of them looked at) whose volume is
@@ -508,9 +507,114 @@ pub fn page(inv: &Invocation, r: &Renderer) -> i32 {
         ),
     };
     println!(" {}", t.paint_bold(role, summary));
+    if offers_model(r) {
+        offer_model(r);
+    }
     if worst == Status::Fail {
         2
     } else {
         0
+    }
+}
+
+/// Whether the doctor offers to fetch the model: none installed, the deep
+/// tier built in, and a person at a terminal to say yes (Phase 16, NF-09).
+fn offers_model(r: &Renderer) -> bool {
+    use std::io::IsTerminal;
+    cfg!(feature = "deep")
+        && !crate::deep::model_path().is_file()
+        && r.theme.live
+        && std::io::stdin().is_terminal()
+}
+
+/// The bar under the doctor's summary: enter fetches the model (curl, the
+/// published size and SHA-256 checked before it is kept), any other key
+/// leaves.
+fn offer_model(r: &Renderer) {
+    use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+    use std::io::Write;
+    let t = &r.theme;
+    let dest = crate::deep::model_path();
+    let size = crate::deep::MODEL_BYTES;
+    println!();
+    print!(
+        " {}  {} {}   {}",
+        t.paint_bold(Role::Keep, t.glyphs.pointer),
+        t.paint_bold(Role::Keep, "enter"),
+        t.paint(
+            Role::Plate,
+            &format!("download the model, {}, SHA-256 checked", fmt_bytes(size))
+        ),
+        t.paint(Role::Dupe, "any other key: leave")
+    );
+    let _ = std::io::stdout().flush();
+    let yes = (|| -> std::io::Result<bool> {
+        crossterm::terminal::enable_raw_mode()?;
+        let k = loop {
+            if let Event::Key(k) = event::read()? {
+                if k.kind == KeyEventKind::Press {
+                    break k.code;
+                }
+            }
+        };
+        crossterm::terminal::disable_raw_mode()?;
+        Ok(k == KeyCode::Enter)
+    })()
+    .unwrap_or(false);
+    let _ = crossterm::terminal::disable_raw_mode();
+    print!("\r\x1b[2K");
+    if !yes {
+        let _ = std::io::stdout().flush();
+        return;
+    }
+    let cells = 30usize;
+    let mut draw = |got: u64| {
+        let on = ((got as f64 / size as f64) * cells as f64)
+            .round()
+            .min(cells as f64) as usize;
+        print!(
+            "\r\x1b[2K {} {}{}  {} of {}",
+            t.paint_bold(Role::Plate, "MODEL "),
+            t.paint(Role::Keep, &t.glyphs.bar_on.repeat(on)),
+            t.paint(Role::Rule, &t.glyphs.bar_off.repeat(cells - on)),
+            fmt_bytes(got),
+            fmt_bytes(size)
+        );
+        let _ = std::io::stdout().flush();
+    };
+    let result = crate::fetch::fetch_verified(
+        crate::deep::MODEL_URL,
+        &dest,
+        size,
+        crate::deep::MODEL_SHA256,
+        &mut draw,
+    );
+    println!();
+    match result {
+        Ok(()) => println!(
+            " {}  {}  {}",
+            t.paint_bold(Role::Ok, "PASS"),
+            t.paint(Role::Plate, &fit("deep", 8)),
+            t.paint(
+                Role::Dupe,
+                &format!(
+                    "{}   {}   SHA-256 matches; installed",
+                    dest.to_string_lossy(),
+                    fmt_bytes(size)
+                )
+            )
+        ),
+        Err(e) => {
+            println!(
+                " {}  {}  {}",
+                t.paint_bold(Role::Warn, "WARN"),
+                t.paint(Role::Plate, &fit("deep", 8)),
+                t.paint(Role::Dupe, &format!("not installed: {e}; nothing kept"))
+            );
+            println!(
+                "                 {}",
+                t.paint(Role::Plate, "the steps by hand are in docs/DEEP.md")
+            );
+        }
     }
 }

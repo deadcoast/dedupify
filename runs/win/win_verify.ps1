@@ -298,6 +298,9 @@ public static class DedupeWin {
         driver.Start();
     }
     public static void Join() { if (driver != null) driver.Join(60000); }
+    [DllImport("kernel32.dll")] static extern bool FlushConsoleInputBuffer(IntPtr h);
+    // a key queued for a prompt that did not come stays in the input; gone
+    public static void Flush() { FlushConsoleInputBuffer(GetStdHandle(-10)); }
 }
 "@
 function Shot($name) {
@@ -435,7 +438,13 @@ Save 'journal_dir' (@("app dir $j") + $(if (Test-Path $j) { Get-ChildItem $j -Re
 
 Step 'colour on this console: the doctor, live, and a picture of the window'
 Clear-Host
+# esc, queued, answers the model offer the doctor ends on when no model
+# is installed (Phase 16, NF-09); with a model there is no offer
+$hd = [DedupeWin]::Pick($title, [ref]$null)
+if ($hd -ne [IntPtr]::Zero) { [DedupeWin]::Drive("wait 4000`nesc", $hd) }
 & $exe --doctor
+[DedupeWin]::Join()
+[DedupeWin]::Flush()
 Shot 'colour'
 
 # the workspace and v, photographed (Phase 16, TECH-13): keys queued into
@@ -456,9 +465,11 @@ if ($h -eq [IntPtr]::Zero) {
         'type /castle', 'enter', 'wait 800', 'type v', 'wait 4000',
         "shot $(Join-Path $log 'view.png')", 'esc', 'wait 800', 'type q'
     ) -join "`n"
+    [DedupeWin]::Flush()
     [DedupeWin]::Drive($plan, $h)
     & $exe find (Join-Path $sample 'photos') . img
     [DedupeWin]::Join()
+    [DedupeWin]::Flush()
     Save 'view' (@("window: $how ($([DedupeWin]::Class($h)))   WT_SESSION=$env:WT_SESSION") + ([DedupeWin]::Driven -split "`r?`n" | Where-Object { $_ }))
 }
 

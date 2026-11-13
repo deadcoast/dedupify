@@ -2115,7 +2115,8 @@ fn a_preferred_folder_keeps_its_copies() {
 #[test]
 fn a_terminal_gets_colour() {
     let fx = fixture_with_photos();
-    let Some(raw) = run_tty_raw(&fx, &["doctor"], &[], 120, true) else {
+    // esc answers the model offer a terminal doctor ends on (Phase 16)
+    let Some(raw) = run_tty_raw(&fx, &["doctor"], &["\x1b"], 120, true) else {
         eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
         return;
     };
