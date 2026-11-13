@@ -3821,6 +3821,12 @@ end-to-end tests (3 ignored); `cargo fmt --check`; clippy at `-D
 warnings` on all targets, with and without the deep tier, and on the
 Windows target.
 
+CI run **43526567936** at `8705533`, green. Ubuntu: 141 unit tests, the
+band test, 39 end-to-end (3 ignored) — the fold's own among them — and
+the same without the deep tier (139, 39). Windows: 141, the band test,
+38 end-to-end (5 ignored), the Ctrl-C and pseudo-console steps, the
+Recycle Bin step, the doctor.
+
 ## Not verified here
 
 - The launcher itself: PowerShell is not in this container. Its first
