@@ -12,6 +12,7 @@
 //! printed, so the scrollback is the record of the sitting; the groups
 //! screen is the alternate screen and leaves no trace.
 
+mod screen;
 pub mod state;
 
 use std::collections::HashSet;
@@ -182,7 +183,7 @@ fn pause(r: &Renderer, parts: &[(&str, &str)]) -> Key {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect();
     r.blank();
-    print!("{}", state::fit_parts(t, t.glyphs.pointer, &v, t.width));
+    print!("{}", screen::fit_parts(t, t.glyphs.pointer, &v, t.width));
     let _ = io::stdout().flush();
     let key = (|| -> io::Result<Key> {
         terminal::enable_raw_mode()?;
@@ -619,7 +620,7 @@ fn view(
         &shorten_middle(&words, img_cols, t.glyphs.ellipsis),
     ));
     let _ = execute!(out, cursor::MoveTo(0, (rows - 1) as u16));
-    let bar = state::fit_parts(
+    let bar = screen::fit_parts(
         t,
         t.glyphs.pointer,
         &[
