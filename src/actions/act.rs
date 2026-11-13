@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use crate::cli::{Command, Invocation};
 use crate::interrupt;
 use crate::journal::{Entry, Op, Writer};
+use crate::render::fold::Hue;
 use crate::render::Renderer;
 use crate::theme::Role;
 use crate::util::{fmt_count, rel_display, under_root, unix_secs};
@@ -104,6 +105,11 @@ pub(crate) fn act_milk(
     let mut by_hand: u64 = 0;
     let mut failures: Vec<(PathBuf, crate::fsops::ActError)> = Vec::new();
     let mut copied_n: u64 = 0;
+    r.act_open(
+        Hue::Milk,
+        list.iter().filter(|it| it.taken()).count() as u64,
+        dry_run,
+    );
     for it in list {
         if !dry_run && interrupt::requested() {
             stopped = true;
@@ -207,7 +213,7 @@ pub(crate) fn act_milk(
         Some(&format!("into {MILKED_DIR}")),
         journal_id.as_deref(),
     );
-    if !f.near.is_empty() || !f.video.is_empty() {
+    if (!f.near.is_empty() || !f.video.is_empty()) && !r.folding() {
         r.note_fit(
             Role::Dupe,
             tilde_legend(by_hand),
@@ -220,8 +226,9 @@ pub(crate) fn act_milk(
         r.note(
             Role::Warn,
             &format!(
-                "{} kept~: similar on two hashes, confirmed by nothing else; shown, left in place",
-                fmt_count(kept_unconfirmed)
+                "{} {}: similar on two hashes, confirmed by nothing else; shown, left in place",
+                fmt_count(kept_unconfirmed),
+                kept_word(r)
             ),
         );
     }
@@ -236,7 +243,7 @@ pub(crate) fn act_milk(
             ),
         );
     }
-    if failed > 0 {
+    if failed > 0 && !r.folding() {
         r.note(
             Role::Danger,
             &format!(
@@ -322,6 +329,7 @@ pub(crate) fn act_purge(
         .iter()
         .filter(|&&i| list[i].by_hand && !list[i].actionable())
         .count() as u64;
+    r.act_open(Hue::Purge, to_bin.len() as u64, dry_run);
     if dry_run {
         for &i in &to_bin {
             let it = &list[i];
@@ -416,7 +424,7 @@ pub(crate) fn act_purge(
         None,
         journal_id.as_deref(),
     );
-    if !f.near.is_empty() || !f.video.is_empty() {
+    if (!f.near.is_empty() || !f.video.is_empty()) && !r.folding() {
         r.note_fit(
             Role::Dupe,
             tilde_legend(by_hand),
@@ -436,14 +444,15 @@ pub(crate) fn act_purge(
         r.note(
             Role::Warn,
             &format!(
-                "{} kept~: similar on two hashes, confirmed by nothing else; shown, left in place",
-                fmt_count(kept_unconfirmed)
+                "{} {}: similar on two hashes, confirmed by nothing else; shown, left in place",
+                fmt_count(kept_unconfirmed),
+                kept_word(r)
             ),
         );
     }
     pair_note(r, kept_pairs);
     by_hand_note(r, by_hand);
-    if failed > 0 {
+    if failed > 0 && !r.folding() {
         r.note(
             Role::Danger,
             &format!(
@@ -478,10 +487,21 @@ fn pair_note(r: &Renderer, n: u64) {
         r.note(
             Role::Warn,
             &format!(
-                "{} kept~: the camera's JPEG beside its RAW stays with it; choose it by hand in the workspace",
-                fmt_count(n)
+                "{} {}: the camera's JPEG beside its RAW stays with it; choose it by hand in the workspace",
+                fmt_count(n),
+                kept_word(r)
             ),
         );
+    }
+}
+
+/// What the notes call a file left where it is: the `kept~` rows of the
+/// full listing, or the fold's `left in place`.
+fn kept_word(r: &Renderer) -> &'static str {
+    if r.folding() {
+        "left in place"
+    } else {
+        "kept~"
     }
 }
 

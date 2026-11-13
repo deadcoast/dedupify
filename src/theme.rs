@@ -12,6 +12,17 @@ use std::io::IsTerminal;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rgb(pub u8, pub u8, pub u8);
 
+impl Rgb {
+    pub const WHITE: Rgb = Rgb(0xFF, 0xFF, 0xFF);
+
+    /// `self` moved toward `to` by `k` (0 keeps `self`, 1 is `to`).
+    pub fn lerp(self, to: Rgb, k: f64) -> Rgb {
+        let k = k.clamp(0.0, 1.0);
+        let m = |a: u8, b: u8| (a as f64 + (b as f64 - a as f64) * k).round() as u8;
+        Rgb(m(self.0, to.0), m(self.1, to.1), m(self.2, to.2))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     Plate,
@@ -125,6 +136,10 @@ pub struct Theme {
     /// True when stdout is a terminal (progress can redraw in place).
     pub live: bool,
     pub glyphs: Glyphs,
+    /// The fold (docs/CLI.md §3a): a run as one line per section and the
+    /// yield. Off, the full listing (`--verbose`). Set by `main` from the
+    /// command line; every theme built elsewhere is the full listing.
+    pub fold: bool,
 }
 
 impl Theme {
@@ -161,6 +176,7 @@ impl Theme {
             width,
             live,
             glyphs: if unicode { UNICODE } else { ASCII },
+            fold: false,
         }
     }
 
@@ -177,6 +193,23 @@ impl Theme {
             return s.to_string();
         }
         format!("\x1b[1m{s}\x1b[22m")
+    }
+
+    /// `s` in any 24-bit colour (the fold's hues and gradients).
+    pub fn paint_rgb(&self, c: Rgb, s: &str) -> String {
+        if !self.color {
+            return s.to_string();
+        }
+        let Rgb(r, g, b) = c;
+        format!("\x1b[38;2;{r};{g};{b}m{s}\x1b[0m")
+    }
+
+    pub fn paint_rgb_bold(&self, c: Rgb, s: &str) -> String {
+        if !self.color {
+            return s.to_string();
+        }
+        let Rgb(r, g, b) = c;
+        format!("\x1b[1;38;2;{r};{g};{b}m{s}\x1b[0m")
     }
 
     pub fn paint_bold(&self, role: Role, s: &str) -> String {

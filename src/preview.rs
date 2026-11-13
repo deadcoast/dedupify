@@ -10,6 +10,11 @@
 //! The protocol is chosen from the environment, never by querying the
 //! terminal: a query's reply arrives on the same input the key loop reads,
 //! and on Windows crossterm reads console input records, not the VT reply.
+//! On Windows the terminal is also known by its window: Windows hands a
+//! console started outside it to its default terminal without setting
+//! `WT_SESSION` (the Windows run of Phase 16 drew no picture for that
+//! reason), and the console's hidden window is then owned by Windows
+//! Terminal's own, class `CASCADIA_HOSTING_WINDOW_CLASS`.
 //! `DEDUPE_GRAPHICS=sixel|kitty|iterm|none` overrides the choice.
 
 use std::io::{self, Write};
@@ -39,10 +44,44 @@ impl Protocol {
     }
 }
 
-/// The protocol for this terminal, from the environment.
+/// The protocol for this terminal, from the environment, then (Windows)
+/// from the window that shows the console.
 pub fn detect() -> Protocol {
     let var = |k: &str| std::env::var(k).unwrap_or_default();
-    detect_from(&|k: &str| var(k))
+    match detect_from(&|k: &str| var(k)) {
+        Protocol::None if var(ENV_GRAPHICS).is_empty() && windows_terminal() => Protocol::Sixel,
+        p => p,
+    }
+}
+
+/// True when this console is shown by Windows Terminal: its window, or
+/// the hidden stand-in Windows Terminal owns, belongs to the class
+/// `CASCADIA_HOSTING_WINDOW_CLASS`.
+#[cfg(windows)]
+pub fn windows_terminal() -> bool {
+    use windows::Win32::System::Console::GetConsoleWindow;
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetClassNameW, GA_ROOTOWNER};
+    let class = |h: windows::Win32::Foundation::HWND| -> String {
+        let mut buf = [0u16; 128];
+        // SAFETY: the buffer outlives the call and its length is passed
+        let n = unsafe { GetClassNameW(h, &mut buf) };
+        String::from_utf16_lossy(&buf[..n.max(0) as usize])
+    };
+    // SAFETY: no arguments; a null window when there is no console
+    let con = unsafe { GetConsoleWindow() };
+    if con.is_invalid() {
+        return false;
+    }
+    // SAFETY: `con` is a window handle the system just returned
+    let owner = unsafe { GetAncestor(con, GA_ROOTOWNER) };
+    [con, owner]
+        .into_iter()
+        .any(|h| !h.is_invalid() && class(h) == "CASCADIA_HOSTING_WINDOW_CLASS")
+}
+
+#[cfg(not(windows))]
+pub fn windows_terminal() -> bool {
+    false
 }
 
 /// `detect` on an injected environment (tests).
@@ -104,8 +143,12 @@ pub fn fit_pixels(img: &DynamicImage, max_w: u32, max_h: u32) -> RgbImage {
     img.resize_exact(nw, nh, FilterType::Triangle).to_rgb8()
 }
 
-/// The pixel size of one terminal cell: from the terminal when it reports
-/// it (Unix), else 9 × 18, a usual cell at the default font sizes.
+/// The pixel size of one terminal cell, in the pixels a sixel image is
+/// measured in: from the terminal when it reports it (Unix); on Windows
+/// 10 × 20, the cell Windows Terminal and the console host lay every sixel
+/// image out on whatever the font (they emulate the VT340's, and scale the
+/// picture to the real cell — microsoft/terminal#17421; QOL-13); else
+/// 9 × 18, a usual cell at the default font sizes.
 pub fn cell_pixels() -> (u32, u32) {
     if let Ok(ws) = crossterm::terminal::window_size() {
         if ws.width > 0 && ws.height > 0 && ws.columns > 0 && ws.rows > 0 {
@@ -115,7 +158,11 @@ pub fn cell_pixels() -> (u32, u32) {
             );
         }
     }
-    (9, 18)
+    if cfg!(windows) {
+        (10, 20)
+    } else {
+        (9, 18)
+    }
 }
 
 // ---------------------------------------------------------------------------

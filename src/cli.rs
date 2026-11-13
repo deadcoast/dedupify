@@ -66,6 +66,9 @@ pub struct Invocation {
     pub min: u64,
     /// The size as typed, for the command lines this run prints.
     pub min_display: Option<String>,
+    /// `--verbose` / `-v`: the stage lines and every group and file, in
+    /// place of the fold (docs/CLI.md §3).
+    pub verbose: bool,
 }
 
 impl Invocation {
@@ -196,6 +199,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
     let mut skip_remove: Vec<String> = Vec::new();
     let mut min: u64 = 0;
     let mut min_display: Option<String> = None;
+    let mut verbose = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -235,6 +239,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
                 "--dry-run" | "-n" => dry_run = true,
                 "--quick-search" | "-q" => quick = true,
                 "--undo" | "-u" => undo = true,
+                "--verbose" | "-v" => verbose = true,
                 other => return Err(CliError::UnknownFlag(other.to_string())),
             }
             continue;
@@ -347,6 +352,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         skip: Vec::new(),
         min,
         min_display,
+        verbose,
     })
 }
 

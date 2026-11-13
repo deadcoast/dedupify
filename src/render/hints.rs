@@ -55,7 +55,12 @@ impl Renderer {
         full.quick = false;
         let milk = full.command_line_as(Command::Milk);
         let purge = full.command_line_as(Command::Purge);
-        let w = width(&milk).max(width(&purge)) + 2;
+        // the fold adds the way to every group and file, in the same column
+        let every = format!("{} -v", inv.command_line_as(Command::Find));
+        let w = width(&milk)
+            .max(width(&purge))
+            .max(if self.folding() { width(&every) } else { 0 })
+            + 2;
         let lead = 1 + HINT_VERB + 2 + w + 1;
         let room = t.width.saturating_sub(lead);
         // notes whole or not at all: the commands are the payload and a
@@ -89,6 +94,17 @@ impl Renderer {
             t.paint(Role::Plate, &fit(&purge, w)),
             t.paint(Role::Dupe, purge_note)
         ));
+        // the fold names the way to every group and file
+        if self.folding() {
+            let note = "every group and file";
+            let note = if width(note) <= room { note } else { "" };
+            self.line(&format!(
+                " {}  {}{}",
+                " ".repeat(HINT_VERB),
+                t.paint(Role::Plate, &fit(&every, w)),
+                t.paint(Role::Dupe, note)
+            ));
+        }
     }
 
     pub fn undo_hint(&self, inv: &Invocation) {

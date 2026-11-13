@@ -10,7 +10,7 @@ design is silent or in conflict; each one is reversible.
 ```
 dedupe                                   interactive workflow menu
 dedupe <command> [PATH] [.] [img|vid]    native command
-       [--skip NAME]… [--unskip NAME|all]… [--min SIZE]
+       [--skip NAME]… [--unskip NAME|all]… [--min SIZE] [-v]
 dedupe --undo | -u  [PATH]               reverse a change under PATH (several pending: choose)
 dedupe doctor | --doctor | -dr [PATH]    troubleshooting suite
 dedupe --help | -h                       help page
@@ -43,6 +43,7 @@ Flags:
 | `--dry-run` | `-n` | **[SPEC]** flag; short form **[CLAUDE]**, the convention of `make -n`, `rsync -n`, `git clean -n` |
 | `--quick-search` | `-q` | **[SPEC]** flag; short form **[CLAUDE]**. `-q` is free because `dedupe` has no quiet mode: output is designed, not silenced; piping to a non-terminal switches to plain text automatically |
 | `--undo` | `-u` | **[SPEC]** flag; the spec's `-` alias is unusable (a lone `-` is the stdin convention and cannot carry a flag), so `-u` **[CLAUDE]** |
+| `--verbose` | `-v` | **[owner, Phase 17]** the full output of §3 — a stage line per stage, every group and every file, the totals and policy lines, a line per file an action takes — in place of the fold (§3a), which is the default. `DEDUPE_VERBOSE=1` makes it the default for every run **[CLAUDE]** |
 | `--skip NAME` | — | **[CLAUDE, Phase 10]** leave out every folder and file named NAME (`*` and `?` allowed: `*.tmp`, `Lightroom*`), and remember it: later runs, in any folder, leave it out too. The list lives in the app folder beside the journals, never in the tree; every run that skips names it on its header line and counts what it left out on the SCAN line. Case is ignored on Windows, as the file system does. A folder is passed over whole |
 | `--unskip NAME` / `--unskip all` | — | **[CLAUDE, Phase 10]** forget one name, or every one |
 | `--min SIZE` | — | **[CLAUDE, Phase 10]** files under SIZE are not candidates, for this run only: `100k`, `2.5m`, `1g` or bytes, in the 1024-based units sizes are printed in. The header names the floor, the SCAN line counts what was under it, and the `next` lines and the menu's `again` carry it |
@@ -292,6 +293,144 @@ nothing behind. Any other key leaves. No flag for it (Phase 16).
 ---
 
 ## 3. Output design — theme "MILK" **[CLAUDE]**
+
+Two outputs. The default is the fold (§3a): a run as one line per pass,
+live while it works, folded to its result, then the yield. `--verbose`
+(`-v`) is the full output this section describes from "Rules" on: the
+stage lines, every group and file, the totals, a line per file an action
+takes. The owner's direction (2026-11-13): the full output stays, as
+`--verbose`; the default is redesigned from the ground up — animated,
+long lists of one kind folded into a single live line per section, each
+section marked once it is done and checked, essential data without bloat.
+The workspace (§2a) always shows the full listing.
+
+### 3a. The fold — the default output **[CLAUDE, Phase 17]**
+
+```
+ [dedupe] find  D:\photos   recursive · images
+
+ ✔ files    33 files · 8.29 MB                                              0.0 s
+ ✔ copies   2 groups · 2 copies · 339 KB                                    0.0 s
+ ✔ similar  10 groups · 11 similar · 2.69 MB · mirrored 2 · resized 2       0.4 s
+
+ 3.03 MB reclaimable   13 files · 12 groups · 36% of 8.29 MB
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ █▄▃▂▂▂▁▁▁▁▁▁  largest  graf1.png 961 KB · shot_a.jpg 935 KB · rubberwhale1.png 358 KB
+
+ next   dedupe milk D:\photos . img      move duplicates into D:\photos\_milked
+        dedupe purge D:\photos . img     send duplicates to the Recycle Bin
+        dedupe find D:\photos . img -v   every group and file
+```
+
+**The header.** The name on the brand's amber plate (dark letters on
+`#FFB000`, drawn `[dedupe]` above), the command, the root, then depth · kind · quick · dry run,
+dim, joined by `·`; the parts that say least drop first on a narrow line,
+the root keeping 16 cells. A blank line under it.
+
+**Sections.** In the order the passes run: `files` (the walk), `copies`
+(SIZE → SAMPLE → HASH, byte for byte), `similar` (DECODE → MATCH),
+`video` (FRAMES → MATCH), `verify` (purge, byte for byte against the
+keepers), then the action: `milk`, `purge` or `undo`. Each is one line,
+in one of two states.
+
+*Live*, while it works — drawn by a thread of its own at 25 frames a
+second, so it moves while a stage is silent (a large file hashing):
+
+- the orbit, `⢁ ⡈ ⠔ ⠢`: two dots opposite each other on the rim of a
+  braille cell, a quarter turn every 90 ms — a file and its copy circling;
+  its colour breathes between the section's hue and white over 1.1 s;
+- the label, bold in the section's hue, a sheen crossing it every 1.8 s;
+- the track, on a terminal 64 columns or wider (a fifth of the width,
+  12–28 cells): toward a known total it fills with heavy rule `━` shaded
+  from dark at its start to the hue at its edge, a half cell `╸` at the
+  edge and a gloss travelling along it; with no total yet (the walk) a
+  comet of seven cells, its tail fading into the groove `─`, runs along it;
+- the stage's word (`size`, `sample`, `hash`, `decode`, `match`,
+  `frames`, `verify`, `moving`, `binning`, `restoring`), the count rolling
+  toward its value (most of the way in a tenth of a second, so a burst
+  reads as a roll and a stall as still), the total, then the time left
+  (DECODE and FRAMES after 5 s, §3) or the file in hand (an action);
+- the time since the section opened, right-aligned.
+
+*Folded*, when the section is done: the line is rewritten in place to
+
+- its mark — `✔` found something; a dim `✔` done and found nothing;
+  `▲` done with something to read (a timed-out file, the quick tier,
+  unreadable files, a file an action could not take); `✖` failed;
+- the label in the section's hue (dim when it found nothing);
+- what it found, most important first, joined by a dim `·`, figures lit
+  and words dim; what does not fit the width drops from the right;
+- its time, right-aligned. The next section opens on the line under it.
+
+What each section says when it folds:
+
+| section | segments, in order |
+|---|---|
+| files | files · bytes · not listed (warn) · skipped · under the size floor · online only · bin and system folders · empty |
+| copies | groups · copies beyond the keepers · bytes they free · the quick tier (warn) · unreadable (warn) · hard links collapsed; or `no exact copies` |
+| similar | groups · the members milk and purge take (confirmed) · bytes they free · timed out, need ffmpeg, ffmpeg could not decode (warn) · the tally · `with the deep model` · not decoded; or `none among N images` / `nothing to compare in N images` |
+| video | as similar, for videos; `skipped: ffmpeg and ffprobe not found · dedupe doctor` (warn) without them |
+| verify | N of M copies · `identical to their keepers, byte for byte`; those that differ (warn) |
+| milk / purge / undo | N moved / binned / restored (`would move` in a dry run) · bytes and where to · could not be (danger) · left in place |
+
+The tally is what the members are, by their words (§3) without the
+figures — `resized 75%` and `resized 50%` count as `resized 2`; `another
+shot, 05:06:08` as `another shot`; `similar, unconfirmed` as
+`unconfirmed` — most common first, a tie in the order the listing shows
+them. The members a section counts are the ones the actions take, so the
+sections add up to the yield; the tally names the rest.
+
+An action that could not take some files adds one line under its own:
+`not taken`, then each file and its reason, as many as fit.
+
+**The yield** (after the passes of `find`, `milk` and `purge`):
+
+- the figure, bold white: what the actions would free, then the files it
+  is, the groups, and its share of everything scanned;
+- the gauge: lower half blocks `▄` across the width — everything
+  scanned — each kind's share in its hue over the groove, in section
+  order; a kind with any bytes gets a cell however small its share;
+- the skyline: one cell per group, tallest first, its height `▁`–`█` by
+  what the group frees against the largest, in its kind's hue (a group
+  that frees nothing a dim `▁`); more groups than cells (a third of the
+  width, at most 48) and each cell is a bucket of neighbours, summed;
+  then `largest` and the three largest groups by keeper name and bytes.
+
+On a terminal the yield is revealed over nine frames (0.36 s): the figure
+rolls up from 0 B, the gauge pours from the left, the skyline rises cell
+by cell. Nothing to free: one line, `no duplicates · N files · bytes
+checked`, or `nothing reclaimable · N groups listed to look at; none
+confirmed`.
+
+**After.** Notes that need words stay notes (a stalled ffmpeg's files,
+what was left in place and why, the journal not written, an interrupt).
+`find` then opens the workspace on a terminal, or prints the `next` lines
+with a third: the same `find` with `-v`, every group and file.
+
+**Hues.**
+
+| section | hue |
+|---|---|
+| files | plate `#E8E4D8` |
+| copies | amber `#FFB000` |
+| similar | blue `#5FB3FF` |
+| video | violet `#B48CFF` |
+| verify | green `#7CD992` |
+| milk | milk `#F6F3EA` |
+| purge | coral `#FF7A59` |
+| undo | blue `#5FB3FF` |
+
+**Not a terminal** (a pipe, a file): no animation, the folded lines
+only. **ASCII glyphs** (§3 below): marks `+ ! x`, gauge `#` on `.`, no
+skyline, segments joined by three spaces. **No colour** on a terminal:
+the shapes animate, the groove of the gauge is `▁`.
+
+**Sharing the screen.** Anything else printed while a line is live (a
+note, a warning) takes the same lock, clears the live line, prints, and
+the line is drawn again under it on the next frame. Ctrl-C gives the
+cursor back before the process ends.
+
+### 3b. The full output (`--verbose`)
 
 Rules the renderer enforces:
 

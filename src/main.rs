@@ -32,6 +32,13 @@ fn run(args: &[String], cwd: &std::path::Path, r: &Renderer, theme: Theme) -> i3
             return actions::EXIT_USER;
         }
     };
+    // the fold, unless the full listing is asked for: `--verbose` this
+    // time, or DEDUPE_VERBOSE=1 always
+    let verbose = inv.verbose || std::env::var("DEDUPE_VERBOSE").is_ok_and(|v| v == "1");
+    let mut folded = theme;
+    folded.fold = !verbose;
+    let renderer = Renderer::new(folded);
+    let r = &renderer;
     // the skip list in force: remembered, plus --skip, minus --unskip
     if matches!(
         inv.command,

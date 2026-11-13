@@ -92,50 +92,59 @@ fn prefer_undo(f: &mut Found, changed: &[(PathBuf, PathBuf)]) {
     }
 }
 
-/// The listing lines, one per row, rendered exactly as `find` prints them
-/// (two cells narrower: the marks take them). Falls back to plain path
-/// lines if the rendered listing does not line up with the rows.
-fn listing_lines(
-    f: &Found,
-    inv: &Invocation,
-    r: &Renderer,
-    st: &State,
-    width_cells: usize,
-) -> Vec<String> {
-    let captured = r.capture(width_cells.saturating_sub(2).max(40), |c| {
-        c.listing(&f.groups, &f.near, &f.video, &inv.root);
-    });
-    let lines: Vec<String> = captured
-        .into_iter()
-        .filter(|l| !l.trim().is_empty())
-        .collect();
-    // the listing has every group as listed; the rows are the groups shown,
-    // in the order shown
-    let all = state::all_rows(&st.layout);
-    let lines_up = lines.len() == all.len()
-        && all.iter().zip(&lines).all(|(row, l)| match row {
-            Row::Head(_) => l.starts_with(' ') && !l.starts_with("  "),
-            Row::Member(_, _) => l.starts_with("   "),
+/// The listing's line for every row of the layout, rendered exactly as
+/// `find --verbose` prints them (two cells narrower: the marks take them),
+/// once per layout and width. The rows on screen pick from it at every
+/// draw, so a filter or a sort shows its own groups — laid out once in the
+/// full order, a filter to one group drew the first group's lines over
+/// its rows (Phase 17; seen in the Windows run's view.png). Plain path
+/// lines when the rendered listing does not line up with the rows.
+struct Listing {
+    by_row: std::collections::HashMap<Row, String>,
+}
+
+impl Listing {
+    fn of(f: &Found, inv: &Invocation, r: &Renderer, st: &State, width_cells: usize) -> Listing {
+        let captured = r.capture(width_cells.saturating_sub(2).max(40), |c| {
+            c.listing(&f.groups, &f.near, &f.video, &inv.root);
         });
-    if lines_up {
-        let by_row: std::collections::HashMap<Row, String> = all.into_iter().zip(lines).collect();
-        return st
-            .rows
-            .iter()
-            .map(|row| by_row.get(row).cloned().unwrap_or_default())
+        let lines: Vec<String> = captured
+            .into_iter()
+            .filter(|l| !l.trim().is_empty())
             .collect();
+        let all = state::all_rows(&st.layout);
+        let lines_up = lines.len() == all.len()
+            && all.iter().zip(&lines).all(|(row, l)| match row {
+                Row::Head(_) => l.starts_with(' ') && !l.starts_with("  "),
+                Row::Member(_, _) => l.starts_with("   "),
+            });
+        let by_row = if lines_up {
+            all.into_iter().zip(lines).collect()
+        } else {
+            all.into_iter()
+                .map(|row| {
+                    let line = match row {
+                        Row::Head(g) => format!(" GROUP {:03}", g + 1),
+                        Row::Member(g, m) => {
+                            let mi = &st.layout.groups[g].members[m];
+                            let verb = if m == 0 { "keep" } else { "    " };
+                            format!("   {verb}  {}", rel_display(&mi.path, &inv.root))
+                        }
+                    };
+                    (row, line)
+                })
+                .collect()
+        };
+        Listing { by_row }
     }
-    st.rows
-        .iter()
-        .map(|row| match row {
-            Row::Head(g) => format!(" GROUP {:03}", g + 1),
-            Row::Member(g, m) => {
-                let mi = &st.layout.groups[*g].members[*m];
-                let verb = if *m == 0 { "keep" } else { "    " };
-                format!("   {verb}  {}", rel_display(&mi.path, &inv.root))
-            }
-        })
-        .collect()
+
+    /// The lines of the rows shown, in the order shown.
+    fn shown(&self, st: &State) -> Vec<String> {
+        st.rows
+            .iter()
+            .map(|row| self.by_row.get(row).cloned().unwrap_or_default())
+            .collect()
+    }
 }
 
 /// The paths of `sel` as action items, by-hand ones marked.
@@ -323,7 +332,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
     // the keepers `f` changed: (new, old), to take the rule back
     let mut preferred: Vec<(PathBuf, PathBuf)> = Vec::new();
     let mut st = State::new(layout_of(f, &inv.root), rows.saturating_sub(6));
-    let mut lines = listing_lines(f, inv, r, &st, cols);
+    let mut lines = Listing::of(f, inv, r, &st, cols);
     let protocol = preview::detect();
 
     if enter_screen().is_err() {
@@ -334,13 +343,13 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
     loop {
         let mut t = r.theme;
         t.width = cols;
-        let _ = draw(&st.screen(&t, &title, &lines, rows));
+        let _ = draw(&st.screen(&t, &title, &lines.shown(&st), rows));
         let key = match read_input() {
             Ok(Input::Key(k)) => k,
             Ok(Input::Resize) => {
                 (cols, rows) = term_size(r);
                 st.set_height(rows.saturating_sub(6));
-                lines = listing_lines(f, inv, r, &st, cols);
+                lines = Listing::of(f, inv, r, &st, cols);
                 continue;
             }
             Err(_) => Key::Quit,
@@ -358,7 +367,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             Effect::Keeper(g, m) => {
                 if f.set_keeper(g + 1, m) {
                     st.relayout(layout_of(f, &inv.root));
-                    lines = listing_lines(f, inv, r, &st, cols);
+                    lines = Listing::of(f, inv, r, &st, cols);
                     st.message = Some("new keeper; the group re-related to it".into());
                 }
             }
@@ -370,7 +379,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 prefer_undo(f, &preferred);
                 preferred = prefer_folder(f, &inv.root, &folder);
                 st.relayout(layout_of(f, &inv.root));
-                lines = listing_lines(f, inv, r, &st, cols);
+                lines = Listing::of(f, inv, r, &st, cols);
                 let place = if folder.is_empty() {
                     "."
                 } else {
@@ -392,7 +401,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 preferred.clear();
                 st.prefer = None;
                 st.relayout(layout_of(f, &inv.root));
-                lines = listing_lines(f, inv, r, &st, cols);
+                lines = Listing::of(f, inv, r, &st, cols);
                 st.message = Some("no preferred folder; the keepers back".into());
             }
             Effect::Reveal(g, m) => {
@@ -436,7 +445,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 loop {
                     st.changes = undo_stack.len();
                     st.relayout(layout_of(f, &inv.root));
-                    lines = listing_lines(f, inv, r, &st, cols);
+                    lines = Listing::of(f, inv, r, &st, cols);
                     match after_change(r, f, &acted, last) {
                         After::Back => {
                             if enter_screen().is_err() {
@@ -459,7 +468,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                             code = undo_last(&mut undo_stack, f, inv, r);
                             st.changes = undo_stack.len();
                             st.relayout(layout_of(f, &inv.root));
-                            lines = listing_lines(f, inv, r, &st, cols);
+                            lines = Listing::of(f, inv, r, &st, cols);
                             if !back_or_quit(r, f) || enter_screen().is_err() {
                                 return code;
                             }
@@ -474,7 +483,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 code = undo_last(&mut undo_stack, f, inv, r);
                 st.changes = undo_stack.len();
                 st.relayout(layout_of(f, &inv.root));
-                lines = listing_lines(f, inv, r, &st, cols);
+                lines = Listing::of(f, inv, r, &st, cols);
                 if !back_or_quit(r, f) || enter_screen().is_err() {
                     return code;
                 }

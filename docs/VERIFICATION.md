@@ -3678,3 +3678,154 @@ pseudo console among them — the Recycle Bin step, the doctor.
 - The doctor's download of the real 93.6 MB model from Hugging Face:
   the container cannot reach it; the fetch is tested against a server
   on the machine.
+
+---
+
+# VERIFICATION — Phase 17 (the fold: the output redesigned), 2026-11-13
+
+Environment: this container (Linux, Rust 1.97.0), the release build and
+`--profile ci`; the fold watched live in tmux (truecolour) at 120
+and 133 columns, frames captured every 30 ms and rendered; CI on Ubuntu
+and Windows (§ 6). Source: the owner's direction of 2026-11-13 after the
+Phase 16 run on Windows; items OUT-01, OUT-02, OUT-03, QOL-13
+(SHELVED § Phase 17).
+
+## 1. What the Phase 16 run on Windows showed
+
+`RUN_VERIFY.cmd` at `7a56971`, 2026-11-13, Windows 11 Home (build
+26300), Ryzen 7 9800X3D, Windows Terminal reached through Windows'
+default-terminal hand-off (`WT_SESSION` empty, the console's owner window
+of class `CASCADIA_HOSTING_WINDOW_CLASS`). Build 297 s; 176 tests passed;
+every line of the summary PASS.
+
+Its own pictures disagreed with two of those lines:
+
+- `view.png`: after `/castle` and enter, the status line read `1
+  selected  52.7 KB` — castle_q60.jpg's size, so the filter had applied —
+  and the body showed GROUP 001's three lines (starry_night). The listing
+  lines were rendered once per layout in the full order and the screen
+  took them by position in the rows shown; a filter or a sort changed the
+  rows and not the lines. § Phase 16 §3's "the listing lines are mapped
+  to rows by (group, member)" held for the mapping and not for what was
+  drawn after a filter; its end-to-end test checked what `m` moved, not
+  the screen.
+- `v` said `opening both in the system viewer (no inline graphics
+  here)`: `preview::detect` knew Windows Terminal only by `WT_SESSION`,
+  which the hand-off does not set.
+- The summary's `v picture  PASS` meant a picture was taken, not that it
+  showed `v`. The launcher now checks what the console shows (§ 5).
+
+## 2. A filter or a sort shows its own groups (OUT-03)
+
+`workspace::Listing`: the listing rendered once per layout and width,
+keyed by row (group, member); the rows shown pick their lines at every
+draw. Live in tmux on the sample's photos, 120 × 30: `/castle`, enter —
+the body is NEAR 009, `castle.jpg` and `exports/castle_q60.jpg`, the bar
+`1 selected  52.7 KB … 1 of 12 groups`. On Windows: the launcher's
+`pictures` line (§ 5).
+
+## 3. Windows Terminal known by its window; the sixel cell (QOL-13)
+
+`preview::windows_terminal`: the console's window, or its root owner
+(`GetAncestor(GA_ROOTOWNER)`), of class `CASCADIA_HOSTING_WINDOW_CLASS`
+— what the launcher's own window search found in the Phase 16 run —
+means sixel when the environment named nothing. `preview::cell_pixels`
+on Windows is 10 × 20: Windows Terminal and the console host lay every
+sixel picture out on the VT340's virtual cell of 10 × 20 and scale it to
+the real cell (microsoft/terminal#17421), so a picture sized at 10 × 20
+per cell fills the cells it is given; the 9 × 18 used before drew it a
+tenth short. Type-checked here for `x86_64-pc-windows-msvc`; drawn on
+the owner's next run, the `pictures` line saying `v drew the pair
+inline` or why not.
+
+## 4. The fold (OUT-01)
+
+The design is CLI.md §3a. `render::fold`: the live line (orbit, sheen,
+track or comet, rolling count, time) drawn by its own thread at 25
+frames a second, composed under the line's lock and written under the
+output lock only, so the hashing workers that step the line never wait
+on the terminal — with the write under the line's lock the similar pass
+on the sample took 1.7 s in tmux, 0.4 s after. A generation number
+taken with each frame keeps a frame composed before a line folded from
+being written after it.
+
+Watched live (tmux, 133 columns, frames every 30 ms): `files` and
+`copies` fold in the first 0.2 s; `similar` runs `decode 4 / 31` …
+`match 31 / 31` and folds to `10 groups · 11 similar · 2.69 MB ·
+mirrored 2 · resized 2 · same picture 2 · re-encoded 2 · near copy 2`;
+the yield reveals over nine frames (`0 B` → `1.60 MB` → `3.03 MB
+reclaimable`, the gauge pouring, the skyline rising); `purge -n` adds
+`verify  2 of 2 copies · identical to their keepers, byte for byte` and
+folds its action to `13 would bin · 3.03 MB to the Recycle Bin · 2 left
+in place`. The sections add up: 2 copies + 11 similar = the yield's 13
+files.
+
+Piped (no animation, the folded lines only), on the sample: `find`,
+`milk -n`, `milk`, `--undo`, `purge -n`, `find -q` (copies `▲` with the
+quick tier named, the `full` line), an empty folder (`no duplicates · 0
+files · 0 B checked`), and 40 columns.
+
+Unit tests: `every_fold_line_fits_from_40_to_200_cells` (the yield, a
+folded line, a live line with seven-digit counts and an hour's estimate,
+in colour, Unicode and ASCII, every width 40–200),
+`the_bar_gives_each_kind_its_share_and_a_cell_at_least`,
+`the_tally_counts_what_members_are_without_their_figures`. End to end:
+`the_fold_is_the_default_and_every_pass_is_one_line` — `find .` folds
+to `files`, `copies`, `similar` (the fixture's two undecodable images
+named), the yield and `largest`, no `GROUP`; `-v` lists them; `milk .`
+folds its four moves into one line and prints the undo line; `--undo`
+folds its four restores. Every other end-to-end test reads the full
+output (`DEDUPE_VERBOSE=1` in their environment).
+
+## 5. RUN_VERIFY, one line per workflow (OUT-02)
+
+`runs\win\win_verify.ps1`, rewritten; `RUN_VERIFY.cmd` unchanged. The
+screen: the `RUN_VERIFY` plate, the commit and the machine; then one line
+per workflow in the order it runs — environment, update, build, tests,
+Ctrl-C, terminal, model, Recycle Bin, formats, doctor, find, milk +
+undo, purge + undo, help and errors, pictures — each live while it runs
+(the same orbit, sheen, track and comet as dedupe's fold, from a thread
+of the launcher's C# helper) and folded to `✔`, `▲` or `✖` with its
+result, then one line for the run. What it reads out of each step:
+
+| line | live | folded |
+|---|---|---|
+| environment | — | Windows edition and build · rustc · Windows Terminal or the console host (by the window's class) · columns |
+| update | the command in hand | `old → new · N files changed`, or `already at …`; `win_verify.ps1 updated` (or `restored from the repo`) when the pull or checkout changed this script, whose fresh copy then runs on under these lines |
+| build | `compiling CRATE · N crates` | release · size · crates compiled |
+| tests, model, Recycle Bin, formats | `compiling …`, then the binary, its count of its total, the test in hand, the track filling | cargo's own totals: passed · failed · ignored · the first failure by name; formats adds `checked N of M files` |
+| Ctrl-C, terminal | as tests | the test's own verdict line |
+| doctor | — | N of M checks pass · where ffmpeg was found · the model · any check not passing, by name |
+| find | `find all 1 / 7` … | the runs, each exit 0 |
+| milk + undo, purge + undo | dry run, the act, the undo | `N moved and put back · 39 files, every SHA-256 equal to before`, or the tree's differences |
+| help, errors | each check | help · two kinds refused · missing folder refused · nothing to undo said — each by exit code and its words |
+| pictures | — | what failed first: the doctor in colour (the share of saturated pixels in `colour.png`) · the workspace on screen · the filter shows castle only · `v` drew the pair inline — each read from the console's own text (`ReadConsoleOutputCharacter` on `CONOUT$`, the alternate screen while dedupe holds it) at the moment of the picture |
+
+The doctor, the workspace and the final live workspace run on the
+alternate screen; what dedupe prints back on the main screen after
+leaving its own is erased, so the lines stay as they were. The logs keep
+every detail: each command's output in its own file (the `find`, `milk`,
+`purge` and `--undo` runs with `-v`), RUN.txt in order, SUMMARY.txt the
+folded lines.
+
+Checked here: the C# helper (with the fold) compiled with Mono at
+`-langversion:5`, the language PowerShell 5.1's `Add-Type` compiles;
+the fold's lines drawn under Mono in tmux at 133 columns and looked at;
+the script ASCII with CRLF endings, so PowerShell 5.1 reads it without a
+byte-order mark. Not run here: PowerShell is not in this container.
+
+## 6. Suite and CI
+
+Here, `--profile ci`: 141 unit tests (1 ignored), the band test, 39
+end-to-end tests (3 ignored); `cargo fmt --check`; clippy at `-D
+warnings` on all targets, with and without the deep tier, and on the
+Windows target.
+
+## Not verified here
+
+- The launcher itself: PowerShell is not in this container. Its first
+  run is the owner's next `RUN_VERIFY.cmd`; its `pictures` line is where
+  OUT-03 and QOL-13 are confirmed on Windows Terminal, or named as not.
+- The fold in Windows Terminal: its glyphs (braille orbit, heavy rules,
+  half and eighth blocks) are drawn by Cascadia Mono; looked at here only
+  in DejaVu Sans Mono.

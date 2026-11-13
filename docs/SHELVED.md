@@ -27,7 +27,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 5. **CORE-17** a copy chained into another picture's group is measured
    against that keeper (found in Phase 14's 100,000-file run)
 
-## Phase 16 — the workspace at size   `[todo]`
+## Phase 16 — the workspace at size   `[done]`
 
 1. **SC-10** unit tests for the width logic, 40–200 columns
 2. **QOL-11** narrow terminals: no line past the edge down to 40
@@ -38,6 +38,20 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 7. **TECH-13** the launcher photographs the workspace and `v`
 8. **QOL-13** `v` sized right in Windows Terminal (from TECH-13's picture)
 9. **NF-09** the model fetched by the doctor
+
+## Phase 17 — the fold: the output redesigned   `[done]`
+
+The owner's direction of 2026-11-13, not an IDENTIFIED item; IDs here:
+
+1. **OUT-03** a filter or a sort shows its own groups (the Windows
+   run's `view.png`: `/castle` drew GROUP 001's lines over its rows)
+2. **QOL-13** Windows Terminal known without `WT_SESSION` (its window
+   class), and the sixel cell it lays pictures out on, 10 × 20
+3. **OUT-01** the fold: the default output, animated, one line per
+   pass and the yield; the full output behind `-v` / `--verbose`
+4. **OUT-02** `RUN_VERIFY`: one live line per workflow, folded to its
+   mark and result; each result checked, the pictures by what the
+   console shows; the update step's words plain
 
 ## Not yet placed
 

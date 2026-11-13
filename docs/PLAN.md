@@ -425,12 +425,26 @@ the black one wins (one ambient copy right, four no longer wrong, a
 black-framed one 0.56 → 0.99); the export agrees with Meta's model to
 six decimals. Open: the four ambient copies, for an edge detector.
 
-## Phase 16 — the workspace at size   ← in progress (TODO.md): 8 of 9 delivered; QOL-13 waits for the launcher's picture of `v`
+## Phase 16 — the workspace at size   ← delivered 2026-11-13
 
 A result of hundreds of groups worked the way a person works it: sorted
 and filtered, a preferred folder kept in one key, every line inside a
 narrow pane, a resize mid-sitting, `v` photographed in Windows Terminal,
 and the deep tier installed from the doctor. Items: SHELVED.md § Phase 16.
+The launcher's pictures (TECH-13) decided QOL-13 and showed a filter
+drawing the wrong group; both are fixed in Phase 17, and the launcher's
+`pictures` line checks them on the owner's next run.
+
+## Phase 17 — the fold: the output redesigned   ← delivered 2026-11-13 (owner's direction, 2026-11-13; the launcher's first run on Windows is the owner's next `RUN_VERIFY.cmd`)
+
+The owner's direction after the Phase 16 run: the output comprehensively
+redesigned, start to finish — the full output kept, as `--verbose`; the
+default a new, animated output that is the product's flagship, essential
+data without bloat; long lists of one kind folded into one live line per
+section, marked once the section is done and checked; the same for
+`RUN_VERIFY`, one line per workflow, its update step saying plainly what
+was updated. The design is CLI.md §3a; the launcher's in VERIFICATION §
+Phase 17. Items: SHELVED.md § Phase 17.
 
 ## Docs chain
 

@@ -73,7 +73,9 @@ fn milk(inv: &Invocation, r: &Renderer) -> i32 {
     if f.empty() {
         return EXIT_OK;
     }
-    r.blank();
+    if !r.folding() {
+        r.blank();
+    }
     let list = default_items(&f);
     act_milk(&f, &list, inv, r, inv.dry_run).code
 }
@@ -87,7 +89,9 @@ fn purge(inv: &Invocation, r: &Renderer) -> i32 {
     if f.empty() {
         return EXIT_OK;
     }
-    r.blank();
+    if !r.folding() {
+        r.blank();
+    }
     act_purge(&f, &list, &verified, inv, r, inv.dry_run).code
 }
 

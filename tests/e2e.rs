@@ -293,6 +293,7 @@ fn run(fx: &Fx, args: &[&str]) -> (i32, String, String) {
         .args(args)
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("DEDUPE_VERBOSE", "1")
         .env("NO_COLOR", "1")
         // wide enough that no path is shortened; layout at narrow widths is
         // the audit's business (VERIFICATION.md, Phase 5), not these tests'
@@ -344,6 +345,7 @@ fn run_tty_raw(
         .args(["-qfec", &cmd, "/dev/null"])
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("DEDUPE_VERBOSE", "1")
         .env("TERM", "xterm")
         .env("COLUMNS", columns.to_string())
         .stdin(Stdio::piped())
@@ -525,6 +527,8 @@ fn run_tty_steps(
         "DEDUPE_JOURNAL_DIR".into(),
         fx.journal.to_string_lossy().into_owned(),
     ));
+    // the full listing, which the tests read (the fold is drawn for people)
+    env.push(("DEDUPE_VERBOSE".into(), "1".into()));
     if !colour {
         env.push(("NO_COLOR".into(), "1".into()));
     }
@@ -727,6 +731,7 @@ fn run_tty_steps(
     cmd.args(args)
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("DEDUPE_VERBOSE", "1")
         .env("TERM", "xterm")
         .env_remove("COLUMNS")
         .stdin(Stdio::from(slave.try_clone().ok()?))
@@ -923,6 +928,62 @@ fn find_reports_groups_and_stages() {
     assert_eq!(recent["kind"], "", "{recent}");
 }
 
+/// The default output (Phase 17, docs/CLI.md §3a): each pass one line,
+/// the yield, the action one line; `-v` the full listing.
+#[test]
+fn the_fold_is_the_default_and_every_pass_is_one_line() {
+    let fx = fixture();
+    let fold = |args: &[&str]| {
+        let out = Command::new(bin())
+            .args(args)
+            .current_dir(&fx.root)
+            .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env_remove("DEDUPE_VERBOSE")
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", "120")
+            .output()
+            .expect("spawn dedupe");
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let out = fold(&["find", "."]);
+    let line = |out: &str, lead: &str| -> String {
+        out.lines()
+            .find(|l| l.starts_with(lead))
+            .unwrap_or_else(|| panic!("no {lead:?} line\n{out}"))
+            .to_string()
+    };
+    assert!(
+        line(&out, " + files").contains("10 files   5.52 MB   1 empty"),
+        "{out}"
+    );
+    assert!(
+        line(&out, " + copies").contains("3 groups   4 copies   2.59 MB"),
+        "{out}"
+    );
+    assert!(line(&out, " + similar").contains("2 not decoded"), "{out}");
+    assert!(
+        line(&out, " 2.59 MB reclaimable").contains("4 files   3 groups"),
+        "{out}"
+    );
+    assert!(out.contains("largest  a.mp4 2.00 MB"), "{out}");
+    assert!(!out.contains("GROUP 001"), "{out}");
+    assert!(fold(&["find", ".", "-v"]).contains("GROUP 001"));
+    // the action: one line for its four files, then the way back
+    let out = fold(&["milk", "."]);
+    assert!(
+        line(&out, " + milk").contains("4 moved   2.59 MB into _milked"),
+        "{out}"
+    );
+    assert!(!out.contains("backup/IMG_0041.jpg"), "{out}");
+    assert!(out.contains("undo   dedupe --undo"), "{out}");
+    let out = fold(&["--undo"]);
+    assert!(
+        line(&out, " + undo").contains("4 restored   2.59 MB back in place"),
+        "{out}"
+    );
+}
+
 #[test]
 fn find_top_level_only_without_dot() {
     let fx = fixture();
@@ -1105,6 +1166,7 @@ fn interrupted_milk_case(
     cmd.args(["milk", "."])
         .current_dir(&root)
         .env("DEDUPE_JOURNAL_DIR", &journal)
+        .env("DEDUPE_VERBOSE", "1")
         .env("NO_COLOR", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -1712,6 +1774,7 @@ fn keepers_dates_share_one_column_across_blocks() {
             .args(["find", "."])
             .current_dir(&fx.root)
             .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("DEDUPE_VERBOSE", "1")
             .env("NO_COLOR", "1")
             .env("COLUMNS", cols)
             .output()
@@ -2745,6 +2808,7 @@ fn the_bin_is_never_scanned() {
             .args(args)
             .current_dir(&fx.root)
             .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("DEDUPE_VERBOSE", "1")
             .env("XDG_DATA_HOME", fx.root.join("share"))
             .env("NO_COLOR", "1")
             .env("COLUMNS", "200")
@@ -2857,6 +2921,7 @@ fn a_stalled_ffmpeg_is_stopped_and_named() {
         .args(["find", "."])
         .current_dir(&fx.root)
         .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+        .env("DEDUPE_VERBOSE", "1")
         .env("DEDUPE_STALL", "1")
         .env("PATH", path)
         .env("NO_COLOR", "1")
@@ -3011,6 +3076,7 @@ fn the_bin_refusing_a_file_leaves_it_on_disk() {
             .args(["purge", "big", "."])
             .current_dir(&fx.root)
             .env("DEDUPE_JOURNAL_DIR", &fx.journal)
+            .env("DEDUPE_VERBOSE", "1")
             .env("NO_COLOR", "1")
             .env("COLUMNS", "200")
             .stdout(std::process::Stdio::piped())

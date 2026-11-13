@@ -94,6 +94,11 @@ pub fn page(r: &Renderer) {
             "--undo",
             "reverse the last milk or purge under PATH; pick if several",
         ),
+        fl(
+            "-v",
+            "--verbose",
+            "every stage, group and file, in place of one line a pass",
+        ),
         fl("-dr", "--doctor", "same as the doctor command"),
         fl("-h", "--help", "this page"),
         String::new(),

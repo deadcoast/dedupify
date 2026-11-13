@@ -155,6 +155,11 @@ pub(crate) fn act_undo_which(inv: &Invocation, r: &Renderer, id: Option<&str>) -
         interrupt::install();
         interrupt::changing(true);
     }
+    r.act_open(
+        crate::render::fold::Hue::Undo,
+        j.entries.len() as u64,
+        inv.dry_run,
+    );
 
     // moves, newest first
     for e in j.entries.iter().rev() {
@@ -273,7 +278,7 @@ pub(crate) fn act_undo_which(inv: &Invocation, r: &Renderer, id: Option<&str>) -
         "restored"
     };
     r.action_totals(verb, restored, bytes, "back in place", None, Some(&j.id));
-    if failed > 0 {
+    if failed > 0 && !r.folding() {
         r.note(
             Role::Danger,
             &format!("{} could not be restored", fmt_count(failed)),

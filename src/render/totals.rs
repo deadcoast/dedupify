@@ -13,7 +13,8 @@ use crate::util::{
 use crate::video::{VideoGroup, LEVEL2_CONFIRM, LEVEL2_MIN, VIDEO_POLICY_LABEL};
 use crate::walk::ScanStats;
 
-use super::Renderer;
+use super::fold::{self, Hue, Mark};
+use super::{ActFold, Renderer};
 
 impl Renderer {
     /// A totals line: the counts, then the policy and thresholds. When the
@@ -220,6 +221,62 @@ impl Renderer {
         );
     }
 
+    /// The action's line folds: what it took and where, what it could not
+    /// take; then the files it could not, on one line, with their reasons.
+    fn act_settle(&self, a: ActFold, verb_past: &str, n: u64, bytes: u64, destination: &str) {
+        let t = &self.theme;
+        let mut segs = vec![
+            format!(
+                "{} {}",
+                fold::figure(t, &fmt_count(n)),
+                fold::dim(t, verb_past)
+            ),
+            format!(
+                "{} {}",
+                fold::figure(t, &fmt_bytes(bytes)),
+                fold::dim(t, destination)
+            ),
+        ];
+        if !a.failed.is_empty() {
+            segs.insert(
+                1,
+                t.paint(
+                    Role::Danger,
+                    &format!("{} could not be", fmt_count(a.failed.len() as u64)),
+                ),
+            );
+        }
+        if a.left > 0 {
+            segs.push(fold::dim(
+                t,
+                &format!("{} left in place", fmt_count(a.left)),
+            ));
+        }
+        let mark = match (n, a.failed.len()) {
+            (0, 0) => Mark::Empty,
+            (0, _) => Mark::Failed,
+            (_, 0) => Mark::Done,
+            _ => Mark::Warn,
+        };
+        fold::settle(t, a.hue, mark, &segs);
+        if !a.failed.is_empty() {
+            let names: Vec<String> = a
+                .failed
+                .iter()
+                .map(|(p, why)| {
+                    format!(
+                        "{} {}",
+                        t.paint(Role::Plate, &shorten_middle(p, 40, t.glyphs.ellipsis)),
+                        fold::dim(t, why)
+                    )
+                })
+                .collect();
+            let lead = t.paint(Role::Danger, "   not taken  ");
+            let room = t.width.saturating_sub(1 + 14);
+            self.line(&format!("{lead}{}", fold::fit_segments(t, &names, room)));
+        }
+    }
+
     pub fn skipped(&self, scan: &ScanStats, p: &PipelineStats) {
         let t = &self.theme;
         let mut v: Vec<String> = Vec::new();
@@ -247,10 +304,54 @@ impl Renderer {
         }
     }
 
+    /// An action begins: in the fold, its line goes live, `total` files to
+    /// take. (The full listing prints a line per file instead.)
+    pub(crate) fn act_open(&self, hue: Hue, total: u64, dry_run: bool) {
+        if !self.folding() {
+            return;
+        }
+        let phase = match (hue, dry_run) {
+            (Hue::Milk, false) => "moving",
+            (Hue::Milk, true) => "would move",
+            (Hue::Purge, false) => "binning",
+            (Hue::Purge, true) => "would bin",
+            (_, false) => "restoring",
+            (_, true) => "would restore",
+        };
+        fold::open(&self.theme, hue);
+        fold::step(phase, 0, Some(total), String::new());
+        *self.act.borrow_mut() = Some(ActFold {
+            hue,
+            total,
+            done: 0,
+            phase,
+            failed: Vec::new(),
+            left: 0,
+        });
+    }
+
     /// One condensed line per action: verb, path, and a right-aligned
     /// detail. The path is shortened first; the detail only when the path
-    /// is already at its minimum.
+    /// is already at its minimum. In the fold, the action's live line
+    /// counts it and names the file in hand.
     pub fn action(&self, verb: &str, role: Role, path: &str, detail: &str) {
+        if let Some(a) = self.act.borrow_mut().as_mut() {
+            match verb {
+                "failed" => {
+                    a.failed.push((path.to_string(), detail.to_string()));
+                    a.done += 1;
+                }
+                "kept" | "kept~" | "exists" => a.left += 1,
+                _ => a.done += 1,
+            }
+            fold::step(
+                a.phase,
+                a.done,
+                Some(a.total.max(a.done)),
+                format!("· {}", shorten_middle(path, 48, self.theme.glyphs.ellipsis)),
+            );
+            return;
+        }
         let t = &self.theme;
         let verb_cells = 8;
         if detail.is_empty() {
@@ -295,6 +396,16 @@ impl Renderer {
         journal_id: Option<&str>,
     ) {
         let t = &self.theme;
+        if let Some(a) = self.act.borrow_mut().take() {
+            self.act_settle(
+                a,
+                verb_past,
+                n,
+                bytes,
+                short_destination.unwrap_or(destination),
+            );
+            return;
+        }
         self.rule();
         let lead = format!(" {} {verb_past}   {} ", fmt_count(n), fmt_bytes(bytes));
         let destination = match short_destination {

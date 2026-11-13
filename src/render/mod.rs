@@ -13,6 +13,7 @@ use crate::cli::{Command, Invocation};
 use crate::theme::{Role, Theme};
 use crate::util::{fmt_bytes, shorten_middle, visible_width, width, wrap_words};
 
+pub(crate) mod fold;
 mod groups;
 mod hints;
 mod stages;
@@ -41,24 +42,48 @@ pub struct Renderer {
     /// When set, lines go here instead of to stdout (the workspace
     /// captures the listing to show it in its own screen).
     sink: Option<std::cell::RefCell<Vec<String>>>,
+    /// The action in the fold: one live line for every file it takes.
+    act: std::cell::RefCell<Option<ActFold>>,
+}
+
+/// An action folded into one line: its counts, and what it could not do.
+struct ActFold {
+    hue: fold::Hue,
+    total: u64,
+    done: u64,
+    phase: &'static str,
+    failed: Vec<(String, String)>,
+    left: u64,
 }
 
 impl Renderer {
     pub fn new(theme: Theme) -> Renderer {
-        Renderer { theme, sink: None }
+        Renderer {
+            theme,
+            sink: None,
+            act: std::cell::RefCell::new(None),
+        }
     }
 
     /// Run `f` against a renderer `width` cells wide whose lines are
-    /// collected instead of printed.
+    /// collected instead of printed — the full listing, as `--verbose`
+    /// prints it (the workspace shows it in its own screen).
     pub fn capture(&self, width: usize, f: impl FnOnce(&Renderer)) -> Vec<String> {
         let mut theme = self.theme;
         theme.width = width;
+        theme.fold = false;
         let r = Renderer {
             theme,
             sink: Some(std::cell::RefCell::new(Vec::new())),
+            act: std::cell::RefCell::new(None),
         };
         f(&r);
         r.sink.map(|s| s.into_inner()).unwrap_or_default()
+    }
+
+    /// The fold is drawing (not the full listing, not a capture).
+    pub(crate) fn folding(&self) -> bool {
+        self.theme.fold && self.sink.is_none()
     }
 
     pub fn line(&self, s: &str) {
@@ -66,7 +91,9 @@ impl Renderer {
             sink.borrow_mut().push(s.to_string());
             return;
         }
+        let _o = fold::OUT.lock().unwrap_or_else(|e| e.into_inner());
         let mut out = io::stdout().lock();
+        fold::clear_for_write(&mut out);
         let _ = writeln!(out, "{s}");
     }
 
@@ -80,12 +107,28 @@ impl Renderer {
 
     pub fn header(&self, inv: &Invocation) {
         let t = &self.theme;
-        // everything but the root first, so the root gets what is left
-        let lead = format!(
-            "{} {}",
-            t.paint_bold(Role::Plate, "dedupe"),
-            t.paint_bold(Role::Keep, inv.command.word())
-        );
+        // the doctor's page keeps its own frame: a rule under the header
+        // and one over its verdict
+        let folding = self.folding() && inv.command != Command::Doctor;
+        // everything but the root first, so the root gets what is left;
+        // the fold's header carries the name on the brand's amber plate
+        let lead = if folding && t.color {
+            format!(
+                "\x1b[1;38;2;24;22;18;48;2;255;176;0m dedupe \x1b[0m {}",
+                t.paint_bold(Role::Keep, inv.command.word().trim_start_matches('-'))
+            )
+        } else if folding {
+            format!(
+                "dedupe  {}",
+                t.paint_bold(Role::Keep, inv.command.word().trim_start_matches('-'))
+            )
+        } else {
+            format!(
+                "{} {}",
+                t.paint_bold(Role::Plate, "dedupe"),
+                t.paint_bold(Role::Keep, inv.command.word())
+            )
+        };
         let mut tail: Vec<String> = Vec::new();
         if matches!(inv.command, Command::Find | Command::Milk | Command::Purge) {
             tail.push(t.paint(
@@ -114,8 +157,11 @@ impl Renderer {
         // that say least go first (the kind, then the depth; the dry run
         // and the quick search stay), and the root takes what is left —
         // the floor of 24 ran the header past a 40-cell edge (Phase 16)
+        let join = if folding { 3 } else { 2 };
         let used = |tail: &[String]| {
-            1 + visible_width(&lead) + 2 + tail.iter().map(|p| visible_width(p) + 2).sum::<usize>()
+            1 + visible_width(&lead)
+                + 2
+                + tail.iter().map(|p| visible_width(p) + join).sum::<usize>()
         };
         let mut drop_order: Vec<usize> = (0..tail.len()).rev().collect();
         drop_order.sort_by_key(|&i| {
@@ -147,6 +193,17 @@ impl Renderer {
         let root = inv.root.to_string_lossy();
         let room = t.width.saturating_sub(used(&tail) + 1);
         let root = shorten_middle(&root, room.max(8), t.glyphs.ellipsis);
+        if folding {
+            let dot = t.paint(Role::Rule, if t.unicode { " · " } else { "   " });
+            let mut line = format!(" {lead}  {}", t.paint(Role::Info, &root));
+            if !tail.is_empty() {
+                line.push_str("   ");
+                line.push_str(&tail.join(&dot));
+            }
+            self.line(&line);
+            self.blank();
+            return;
+        }
         let mut parts = vec![lead, t.paint(Role::Info, &root)];
         parts.extend(tail);
         self.line(&format!(" {}", parts.join("  ")));

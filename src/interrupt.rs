@@ -22,7 +22,9 @@ pub fn install() -> bool {
         ctrlc::set_handler(|| {
             let n = PRESSES.fetch_add(1, Ordering::SeqCst) + 1;
             if !CHANGING.load(Ordering::SeqCst) || n >= 2 {
-                // nothing to protect, or the user insists
+                // nothing to protect, or the user insists; a live fold
+                // line gives the cursor back first
+                crate::render::fold::abandon();
                 let mut err = std::io::stderr().lock();
                 let _ = std::io::Write::write_all(&mut err, b"\n");
                 std::process::exit(EXIT_INTERRUPTED);

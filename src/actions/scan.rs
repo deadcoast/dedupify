@@ -10,8 +10,10 @@ use crate::exact::{self, Group, PipelineStats, Stage};
 use crate::keeper;
 use crate::kind::Kind;
 use crate::near::{self, NearGroup, NearStats, Rep};
+use crate::render::fold::{self, Hue, Mark, Yield};
 use crate::render::{LiveProgress, Renderer};
-use crate::theme::Role;
+use crate::theme::{Role, Theme};
+use crate::util::{fmt_bytes, fmt_count};
 use crate::video::{self, VRep, VideoGroup, VideoStats};
 use crate::walk::{self, Candidate, ScanStats};
 
@@ -125,9 +127,19 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         min: inv.min,
     };
     let (cands, scan) = walk::scan(&inv.root, inv.recurse, inv.kind, filter, &mut |s| {
-        lp.update_text(Stage::Scan, s.files, r.scan_text(s, None));
+        lp.scan(s);
     });
     lp.finish(Stage::Scan, r.scan_text(&scan, Some(t0.elapsed())));
+    let t = &r.theme;
+    lp.settle(
+        Hue::Files,
+        if scan.files == 0 {
+            Mark::Empty
+        } else {
+            Mark::Done
+        },
+        &files_segments(t, &scan),
+    );
 
     let near_on = near_enabled(inv);
     let video_on = video_enabled(inv);
@@ -157,6 +169,10 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         exact::find_groups(cands, inv.quick, &lp)
     };
     keeper::order(&mut groups);
+    if scan.files > 0 {
+        let (mark, segs) = copies_segments(t, &groups, &pipe);
+        lp.settle(Hue::Copies, mark, &segs);
+    }
 
     let mut stalled: Vec<PathBuf> = Vec::new();
     let mut near_groups = Vec::new();
@@ -208,6 +224,8 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
             near_groups = near::group(hashed, &mut stats, &lp);
             let e = lp.stage_elapsed(Stage::Match);
             lp.finish_stage(Stage::Match, lp.match_summary(&stats, e));
+            let (mark, segs) = similar_segments(t, &near_groups, &stats);
+            lp.settle(Hue::Similar, mark, &segs);
         } else if !reps.is_empty() {
             // one image: nothing to compare, said once; none: no stage line
             let stats = NearStats {
@@ -218,6 +236,8 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                 Stage::Decode,
                 lp.decode_summary(&stats, std::time::Duration::ZERO),
             );
+            let (mark, segs) = similar_segments(t, &[], &stats);
+            lp.settle(Hue::Similar, mark, &segs);
         }
     }
 
@@ -228,6 +248,14 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
         let (ff, fp) = video::tools_present();
         if !(ff && fp) {
             video_tools_missing = true;
+            lp.settle(
+                Hue::Video,
+                Mark::Warn,
+                &[
+                    fold::warn(t, "skipped: ffmpeg and ffprobe not found"),
+                    fold::dim(t, "dedupe doctor"),
+                ],
+            );
         } else {
             let mut role: HashMap<&Path, Option<usize>> = HashMap::new();
             for (gi, g) in groups.iter().enumerate() {
@@ -267,6 +295,8 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                 video_groups = video::group(hashed, &mut stats, &lp);
                 let e = lp.stage_elapsed(Stage::Match);
                 lp.finish_stage(Stage::Match, lp.video_match_summary(&stats, e));
+                let (mark, segs) = video_segments(t, &video_groups, &stats);
+                lp.settle(Hue::Video, mark, &segs);
             } else if !reps.is_empty() {
                 let stats = VideoStats {
                     probed: reps.len() as u64,
@@ -277,6 +307,8 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
                     Stage::Frames,
                     lp.frames_summary(&stats, std::time::Duration::ZERO),
                 );
+                let (mark, segs) = video_segments(t, &[], &stats);
+                lp.settle(Hue::Video, mark, &segs);
             }
         }
     }
@@ -295,6 +327,18 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
 }
 
 pub(crate) fn report(f: &Found, inv: &Invocation, r: &Renderer) {
+    if r.folding() {
+        // the sections said what each pass found; the yield says what it
+        // comes to
+        r.blank();
+        fold::reveal(&r.theme, &yield_of(f));
+        if !f.stalled.is_empty() {
+            r.blank();
+            r.note(Role::Warn, &stalled_note(&f.stalled, &inv.root));
+        }
+        r.blank();
+        return;
+    }
     r.listing(&f.groups, &f.near, &f.video, &inv.root);
     r.skipped(&f.scan, &f.pipe);
     r.totals(
@@ -333,4 +377,334 @@ pub(crate) fn stalled_note(paths: &[PathBuf], root: &Path) -> String {
         names.join(", "),
         crate::tools::stall().as_secs()
     )
+}
+
+// ---------------------------------------------------------------------------
+// the fold's sections (docs/CLI.md §3a)
+// ---------------------------------------------------------------------------
+
+/// What the walk found and what it left out.
+fn files_segments(t: &Theme, s: &ScanStats) -> Vec<String> {
+    let mut v = vec![
+        fold::count(t, s.files, "file", "files"),
+        fold::figure(t, &fmt_bytes(s.bytes)),
+    ];
+    if s.errors > 0 {
+        v.push(fold::warn(
+            t,
+            &format!("{} not listed", fmt_count(s.errors)),
+        ));
+    }
+    for (n, what) in [
+        (s.skipped, "skipped".to_string()),
+        (s.small, format!("under {}", fmt_bytes(s.min))),
+        (s.online, "online only, not read".to_string()),
+        (s.system, "bin and system folders left out".to_string()),
+        (s.empty, "empty".to_string()),
+    ] {
+        if n > 0 {
+            v.push(fold::dim(t, &format!("{} {what}", fmt_count(n))));
+        }
+    }
+    v
+}
+
+/// The byte-for-byte pass: groups, the copies beyond their keepers, what
+/// they free.
+fn copies_segments(t: &Theme, groups: &[exact::Group], p: &PipelineStats) -> (Mark, Vec<String>) {
+    let mut v = Vec::new();
+    let mut mark = Mark::Done;
+    if groups.is_empty() {
+        mark = Mark::Empty;
+        v.push(fold::dim(t, "no exact copies"));
+    } else {
+        let copies: u64 = groups.iter().map(|g| g.members.len() as u64 - 1).sum();
+        v.push(fold::count(t, groups.len() as u64, "group", "groups"));
+        v.push(fold::count(t, copies, "copy", "copies"));
+        v.push(fold::figure(
+            t,
+            &fmt_bytes(groups.iter().map(exact::Group::reclaimable).sum()),
+        ));
+        if groups.iter().any(|g| g.tier == exact::Tier::Sample) {
+            mark = Mark::Warn;
+            v.push(fold::warn(t, "quick: size and sample, not full content"));
+        }
+    }
+    if p.unreadable > 0 {
+        mark = Mark::Warn;
+        v.push(fold::warn(
+            t,
+            &format!("{} unreadable", fmt_count(p.unreadable)),
+        ));
+    }
+    if p.hardlinks_collapsed > 0 {
+        v.push(fold::dim(
+            t,
+            &format!("{} hard links collapsed", fmt_count(p.hardlinks_collapsed)),
+        ));
+    }
+    (mark, v)
+}
+
+/// What each member is, by its words without their figures, most common
+/// first: `resized 3 · mirrored 2`.
+fn tally(words: impl Iterator<Item = String>) -> Vec<(String, u64)> {
+    let mut v: Vec<(String, u64)> = Vec::new();
+    for w in words {
+        let k = if w.starts_with("another shot") {
+            "another shot".to_string()
+        } else if w == "similar, unconfirmed" {
+            "unconfirmed".to_string()
+        } else {
+            w.split(',')
+                .next()
+                .unwrap_or("")
+                .split_whitespace()
+                .filter(|x| !x.chars().any(|c| c.is_ascii_digit()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        if k.is_empty() {
+            continue;
+        }
+        match v.iter_mut().find(|e| e.0 == k) {
+            Some(e) => e.1 += 1,
+            None => v.push((k, 1)),
+        }
+    }
+    // most common first; a tie keeps the order the listing shows
+    v.sort_by_key(|e| std::cmp::Reverse(e.1));
+    v
+}
+
+fn tally_segments(t: &Theme, v: Vec<(String, u64)>) -> Vec<String> {
+    v.into_iter()
+        .map(|(k, n)| format!("{} {}", fold::dim(t, &k), fold::figure(t, &fmt_count(n))))
+        .collect()
+}
+
+/// The image pass: groups, similar members, what they free, what could
+/// not be read, then what the members are.
+fn similar_segments(t: &Theme, groups: &[NearGroup], n: &NearStats) -> (Mark, Vec<String>) {
+    let mut v = Vec::new();
+    let mut warned = Vec::new();
+    let stalled = n.stalled.len() as u64;
+    for (k, what) in [
+        (stalled, "timed out"),
+        (n.need_ffmpeg, "need ffmpeg"),
+        (n.ffmpeg_failed, "ffmpeg could not decode"),
+    ] {
+        if k > 0 {
+            warned.push(fold::warn(t, &format!("{} {what}", fmt_count(k))));
+        }
+    }
+    let unreadable = n
+        .undecodable
+        .saturating_sub(n.need_ffmpeg + n.ffmpeg_failed + n.no_preview + stalled);
+    if groups.is_empty() {
+        v.push(format!(
+            "{} {}",
+            fold::dim(
+                t,
+                if n.decoded < 2 {
+                    "nothing to compare in"
+                } else {
+                    "none among"
+                }
+            ),
+            fold::count(t, n.decoded, "image", "images")
+        ));
+        let mark = if warned.is_empty() {
+            Mark::Empty
+        } else {
+            Mark::Warn
+        };
+        v.extend(warned);
+        if unreadable + n.no_preview > 0 {
+            v.push(fold::dim(
+                t,
+                &format!("{} not decoded", fmt_count(unreadable + n.no_preview)),
+            ));
+        }
+        return (mark, v);
+    }
+    // the members the actions take: what the yield counts, so the
+    // sections add up to it; the rest are named in the tally
+    let similar: u64 = groups
+        .iter()
+        .flat_map(|g| g.members[1..].iter())
+        .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
+        .count() as u64;
+    v.push(fold::count(t, groups.len() as u64, "group", "groups"));
+    v.push(fold::count(t, similar, "similar", "similar"));
+    v.push(fold::figure(
+        t,
+        &fmt_bytes(groups.iter().map(NearGroup::reclaimable).sum()),
+    ));
+    let mark = if warned.is_empty() {
+        Mark::Done
+    } else {
+        Mark::Warn
+    };
+    v.extend(warned);
+    let words = groups.iter().flat_map(|g| {
+        let k = &g.members[0].hashed;
+        g.members[1..]
+            .iter()
+            .filter_map(move |m| m.relation.map(|r| r.words(k, &m.hashed)))
+    });
+    v.extend(tally_segments(t, tally(words)));
+    if n.deep {
+        v.push(fold::dim(t, "with the deep model"));
+    }
+    if unreadable + n.no_preview > 0 {
+        v.push(fold::dim(
+            t,
+            &format!("{} not decoded", fmt_count(unreadable + n.no_preview)),
+        ));
+    }
+    (mark, v)
+}
+
+/// The video pass, as the image pass.
+fn video_segments(t: &Theme, groups: &[VideoGroup], s: &VideoStats) -> (Mark, Vec<String>) {
+    let mut v = Vec::new();
+    let stalled = s.stalled.len() as u64;
+    let warned: Vec<String> = if stalled > 0 {
+        vec![fold::warn(t, &format!("{} timed out", fmt_count(stalled)))]
+    } else {
+        Vec::new()
+    };
+    if groups.is_empty() {
+        v.push(format!(
+            "{} {}",
+            fold::dim(
+                t,
+                if s.hashed < 2 {
+                    "nothing to compare in"
+                } else {
+                    "none among"
+                }
+            ),
+            fold::count(t, s.hashed, "video", "videos")
+        ));
+        let mark = if warned.is_empty() {
+            Mark::Empty
+        } else {
+            Mark::Warn
+        };
+        v.extend(warned);
+        return (mark, v);
+    }
+    let similar: u64 = groups
+        .iter()
+        .flat_map(|g| g.members[1..].iter())
+        .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
+        .count() as u64;
+    v.push(fold::count(t, groups.len() as u64, "group", "groups"));
+    v.push(fold::count(t, similar, "similar", "similar"));
+    v.push(fold::figure(
+        t,
+        &fmt_bytes(groups.iter().map(VideoGroup::reclaimable).sum()),
+    ));
+    let mark = if warned.is_empty() {
+        Mark::Done
+    } else {
+        Mark::Warn
+    };
+    v.extend(warned);
+    let words = groups.iter().flat_map(|g| {
+        let k = &g.members[0].hashed;
+        g.members[1..]
+            .iter()
+            .filter_map(move |m| m.relation.map(|r| r.words(&k.sig, &m.hashed.sig)))
+    });
+    v.extend(tally_segments(t, tally(words)));
+    if s.unreadable > stalled {
+        v.push(fold::dim(
+            t,
+            &format!("{} unreadable", fmt_count(s.unreadable - stalled)),
+        ));
+    }
+    (mark, v)
+}
+
+/// What the run can give back, for the yield: each kind's bytes, the
+/// files they are, and every group with its keeper's name.
+fn yield_of(f: &Found) -> Yield {
+    let name = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let mut groups: Vec<(Hue, u64, String)> = Vec::new();
+    let mut files = 0u64;
+    for g in &f.groups {
+        groups.push((Hue::Copies, g.reclaimable(), name(&g.members[0].path)));
+        files += g.members.len() as u64 - 1;
+    }
+    for g in &f.near {
+        groups.push((
+            Hue::Similar,
+            g.reclaimable(),
+            name(&g.members[0].hashed.rep.cand.path),
+        ));
+        files += g.members[1..]
+            .iter()
+            .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
+            .count() as u64;
+    }
+    for g in &f.video {
+        groups.push((
+            Hue::Video,
+            g.reclaimable(),
+            name(&g.members[0].hashed.rep.cand.path),
+        ));
+        files += g.members[1..]
+            .iter()
+            .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
+            .count() as u64;
+    }
+    let part = |h: Hue| groups.iter().filter(|g| g.0 == h).map(|g| g.1).sum::<u64>();
+    Yield {
+        scanned: f.scan.bytes,
+        files_scanned: f.scan.files,
+        parts: vec![
+            (Hue::Copies, part(Hue::Copies)),
+            (Hue::Similar, part(Hue::Similar)),
+            (Hue::Video, part(Hue::Video)),
+        ],
+        files,
+        groups,
+    }
+}
+
+#[cfg(test)]
+mod fold_tests {
+    use super::tally;
+
+    #[test]
+    fn the_tally_counts_what_members_are_without_their_figures() {
+        let words = [
+            "resized 75%",
+            "mirrored",
+            "resized 50%",
+            "rotated 90°",
+            "another shot, 05:06:08",
+            "similar, unconfirmed",
+            "mirrored, re-encoded",
+            "rotated +5°",
+        ];
+        let v = tally(words.iter().map(|w| w.to_string()));
+        assert_eq!(
+            v,
+            [
+                ("resized".to_string(), 2),
+                ("mirrored".to_string(), 2),
+                ("rotated".to_string(), 2),
+                ("another shot".to_string(), 1),
+                ("unconfirmed".to_string(), 1),
+            ]
+        );
+    }
 }

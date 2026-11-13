@@ -12,6 +12,7 @@ use crate::util::{fit, fmt_bytes, fmt_count, fmt_duration, join_fit, plural, vis
 use crate::video::VideoStats;
 use crate::walk::ScanStats;
 
+use super::fold::{self, Hue, Mark};
 use super::{Renderer, BAR_CELLS, REDRAW_EVERY};
 
 struct StageLine {
@@ -55,6 +56,10 @@ impl LiveProgress {
 
     /// Open a stage with an unknown total (SCAN).
     pub fn begin(&self, stage: Stage) {
+        if self.theme.fold {
+            fold::open(&self.theme, self.section_of(stage));
+            return;
+        }
         let mut st = self.lock();
         st.current = Some(StageLine {
             stage,
@@ -69,6 +74,10 @@ impl LiveProgress {
     }
 
     pub fn update_text(&self, stage: Stage, done: u64, text: String) {
+        if self.theme.fold {
+            fold::step(phase_of(stage), done, None, String::new());
+            return;
+        }
         let mut st = self.lock();
         match &mut st.current {
             Some(c) if c.stage == stage => {
@@ -90,8 +99,12 @@ impl LiveProgress {
         self.draw(&mut st, false);
     }
 
-    /// Close the current stage with its final text; the line stays.
+    /// Close the current stage with its final text; the line stays. The
+    /// fold closes sections, not stages (`settle`).
     pub fn finish(&self, stage: Stage, text: String) {
+        if self.theme.fold {
+            return;
+        }
         let mut st = self.lock();
         let started = match &st.current {
             Some(c) if c.stage == stage => c.started,
@@ -143,6 +156,48 @@ impl LiveProgress {
 }
 
 impl LiveProgress {
+    /// The walk so far: a stage line, or the fold's `files` line.
+    pub fn scan(&self, s: &ScanStats) {
+        if self.theme.fold {
+            fold::step(
+                "",
+                s.files,
+                None,
+                format!(
+                    "{} · {}",
+                    plural(s.files, "file", "files"),
+                    fmt_bytes(s.bytes)
+                ),
+            );
+        } else {
+            self.update_text(Stage::Scan, s.files, scan_text(&self.theme, s, None));
+        }
+    }
+
+    /// Fold a section (nothing in the stage lines, which closed stage by
+    /// stage).
+    pub(crate) fn settle(&self, hue: Hue, mark: Mark, segments: &[String]) {
+        if self.theme.fold {
+            fold::settle(&self.theme, hue, mark, segments);
+        }
+    }
+
+    /// The fold's section for a stage: MATCH belongs to whichever of the
+    /// image and video passes is live.
+    fn section_of(&self, stage: Stage) -> Hue {
+        match stage {
+            Stage::Scan => Hue::Files,
+            Stage::Size | Stage::Sample | Stage::Hash => Hue::Copies,
+            Stage::Verify => Hue::Verify,
+            Stage::Decode => Hue::Similar,
+            Stage::Frames => Hue::Video,
+            Stage::Match => match fold::current() {
+                Some(Hue::Video) => Hue::Video,
+                _ => Hue::Similar,
+            },
+        }
+    }
+
     pub fn stage_summary(&self, stage: Stage, p: &PipelineStats, elapsed: Duration) -> String {
         let t = &self.theme;
         match stage {
@@ -332,6 +387,36 @@ impl LiveProgress {
 
 impl Progress for LiveProgress {
     fn done(&self, stage: Stage, stats: &PipelineStats) {
+        if self.theme.fold {
+            // VERIFY is a section of its own; the others fold with theirs
+            if stage == Stage::Verify {
+                let total = fold::total().unwrap_or(stats.confirmed);
+                let t = &self.theme;
+                let mark = if stats.confirmed == total {
+                    Mark::Done
+                } else {
+                    Mark::Warn
+                };
+                let mut segs = vec![format!(
+                    "{} {} {}",
+                    fold::figure(t, &fmt_count(stats.confirmed)),
+                    fold::dim(t, "of"),
+                    fold::count(t, total, "copy", "copies")
+                )];
+                segs.push(fold::dim(t, "identical to their keepers, byte for byte"));
+                if stats.confirmed < total {
+                    segs.insert(
+                        1,
+                        fold::warn(
+                            t,
+                            &format!("{} differ, kept", fmt_count(total - stats.confirmed)),
+                        ),
+                    );
+                }
+                fold::settle(t, Hue::Verify, mark, &segs);
+            }
+            return;
+        }
         let elapsed = {
             let st = self.lock();
             match &st.current {
@@ -344,6 +429,17 @@ impl Progress for LiveProgress {
     }
 
     fn tick(&self, stage: Stage, done: u64, total: u64) {
+        if self.theme.fold {
+            let hue = self.section_of(stage);
+            if fold::current() != Some(hue) {
+                fold::open(&self.theme, hue);
+            }
+            let eta = eta_text(stage, fold::since_open(), done, total)
+                .map(|e| format!("· {e}"))
+                .unwrap_or_default();
+            fold::step(phase_of(stage), done, Some(total), eta);
+            return;
+        }
         let mut st = self.lock();
         let fresh = !matches!(&st.current, Some(c) if c.stage == stage);
         if fresh {
@@ -372,6 +468,20 @@ impl Progress for LiveProgress {
         }
         st.ticks += 1;
         self.draw(&mut st, false);
+    }
+}
+
+/// The stage's word on a fold line.
+fn phase_of(stage: Stage) -> &'static str {
+    match stage {
+        Stage::Scan => "",
+        Stage::Size => "size",
+        Stage::Sample => "sample",
+        Stage::Hash => "hash",
+        Stage::Verify => "verify",
+        Stage::Decode => "decode",
+        Stage::Match => "match",
+        Stage::Frames => "frames",
     }
 }
 
@@ -513,48 +623,52 @@ fn sweep(t: &Theme, ticks: u64, cells: usize) -> String {
 
 impl Renderer {
     pub fn scan_text(&self, s: &ScanStats, elapsed: Option<Duration>) -> String {
-        let t = &self.theme;
-        let mut v = vec![
-            format!(
-                "{} {}",
-                t.paint(Role::Info, &fmt_count(s.files)),
-                plural(s.files, "file", "files")
-            ),
-            t.paint(Role::Info, &fmt_bytes(s.bytes)),
-        ];
-        // what the filters left out, so a short count is never a mystery
-        if s.skipped > 0 {
-            v.push(t.paint(Role::Dupe, &format!("{} skipped", fmt_count(s.skipped))));
-        }
-        if s.small > 0 {
-            v.push(t.paint(
-                Role::Dupe,
-                &format!("{} under {}", fmt_count(s.small), fmt_bytes(s.min)),
-            ));
-        }
-        // files a sync client keeps online: reading them would fetch them
-        if s.online > 0 {
-            v.push(t.paint(
-                Role::Dupe,
-                &format!("{} online only, not read", fmt_count(s.online)),
-            ));
-        }
-        // the bin and the system's own folders, never entered (Phase 13)
-        if s.system > 0 {
-            v.push(t.paint(
-                Role::Dupe,
-                &format!(
-                    "{} {} left out",
-                    fmt_count(s.system),
-                    plural(s.system, "bin or system folder", "bin and system folders")
-                ),
-            ));
-        }
-        if let Some(e) = elapsed {
-            v.push(t.paint(Role::Dupe, &fmt_duration(e)));
-        }
-        v.join("   ")
+        scan_text(&self.theme, s, elapsed)
     }
+}
+
+/// The SCAN stage's text: files, bytes, and what the filters left out.
+fn scan_text(t: &Theme, s: &ScanStats, elapsed: Option<Duration>) -> String {
+    let mut v = vec![
+        format!(
+            "{} {}",
+            t.paint(Role::Info, &fmt_count(s.files)),
+            plural(s.files, "file", "files")
+        ),
+        t.paint(Role::Info, &fmt_bytes(s.bytes)),
+    ];
+    // what the filters left out, so a short count is never a mystery
+    if s.skipped > 0 {
+        v.push(t.paint(Role::Dupe, &format!("{} skipped", fmt_count(s.skipped))));
+    }
+    if s.small > 0 {
+        v.push(t.paint(
+            Role::Dupe,
+            &format!("{} under {}", fmt_count(s.small), fmt_bytes(s.min)),
+        ));
+    }
+    // files a sync client keeps online: reading them would fetch them
+    if s.online > 0 {
+        v.push(t.paint(
+            Role::Dupe,
+            &format!("{} online only, not read", fmt_count(s.online)),
+        ));
+    }
+    // the bin and the system's own folders, never entered (Phase 13)
+    if s.system > 0 {
+        v.push(t.paint(
+            Role::Dupe,
+            &format!(
+                "{} {} left out",
+                fmt_count(s.system),
+                plural(s.system, "bin or system folder", "bin and system folders")
+            ),
+        ));
+    }
+    if let Some(e) = elapsed {
+        v.push(t.paint(Role::Dupe, &fmt_duration(e)));
+    }
+    v.join("   ")
 }
 
 #[cfg(test)]

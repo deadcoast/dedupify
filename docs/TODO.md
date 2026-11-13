@@ -1,31 +1,27 @@
-# TODO — Phase 16: the workspace at size
+# TODO — Phase 17: the fold, the output redesigned
 
 ```
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 16 · items: `SHELVED.md` § Phase 16 · source:
-`IDENTIFIED.md` § 4 (IDs below), review of 2026-11-12 at `f9227ee`. Build
-order top to bottom. Previous milestone: Phase 15, delivered 2026-11-12
-(`SHELVED.md` § Phase 15 `[done]`).
+Milestone: `PLAN.md` § Phase 17 · items: `SHELVED.md` § Phase 17 ·
+source: the owner's direction of 2026-11-13 (the Phase 16 Windows run's
+output and log). Build order top to bottom. Previous milestone: Phase 16,
+delivered 2026-11-13 (`SHELVED.md` § Phase 16 `[done]`).
 
-- [x] **SC-10** unit tests for the width logic, 40–200 columns
-- [x] **QOL-11** narrow terminals: no line past the edge down to 40
-- [x] **SC-12** split `workspace/state.rs` (state and keys / screen)
-- [x] **QOL-12** sort and filter in the workspace
-- [x] **NF-10** prefer a folder (`f`)
-- [x] **TECH-12** a resize during a sitting, driven
-- [x] **TECH-13** the launcher photographs the workspace and `v`
-- [ ] **QOL-13** `v` sized right in Windows Terminal (from TECH-13's picture)
-- [x] **NF-09** the model fetched by the doctor
+- [x] **OUT-03** a filter or a sort shows its own groups
+- [x] **QOL-13** Windows Terminal known by its window; sixel cell 10 × 20
+- [x] **OUT-01** the fold, the default output; `-v` / `--verbose` the full one
+- [x] **OUT-02** `RUN_VERIFY`, one live line per workflow
 
 Done when: every box ticked, the suite green on Linux and in the CI
-matrix on Windows, `VERIFICATION` § Phase 16 written, and `PLAN.md` marks
-Phase 16 delivered.
+matrix on Windows, `VERIFICATION` § Phase 17 written, and `PLAN.md` marks
+Phase 17 delivered.
 
 ---
 
 ## Next
 
-When this list is complete: mark `SHELVED.md` § Phase 16 `[done]`. No
-`[shelved]` section remains after it: run the IDENTIFIED workflow.
+This list is complete and `SHELVED.md` § Phase 17 is `[done]`. No
+`[shelved]` section remains: the next milestone comes from a new
+IDENTIFIED pass.

@@ -897,6 +897,7 @@ pub(super) mod tests {
             width: w,
             live: true,
             glyphs: UNICODE,
+            fold: false,
         }
     }
 
