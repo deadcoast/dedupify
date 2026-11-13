@@ -18,10 +18,9 @@ mod hints;
 mod stages;
 mod totals;
 
-#[cfg(test)]
-pub(crate) use stages::sample_stage_texts;
-pub(crate) use stages::stage_line;
 pub use stages::LiveProgress;
+#[cfg(test)]
+pub(crate) use stages::{sample_stage_texts, stage_line};
 
 pub const BAR_CELLS: usize = 30;
 

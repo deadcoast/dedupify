@@ -474,7 +474,9 @@ fn compose(
     format!(" {label} {bar}  {text}")
 }
 
-/// A finished stage's line at `width`, as `draw` leaves it behind.
+/// A finished stage's line at `width`, as `draw` leaves it behind (for
+/// the width test).
+#[cfg(test)]
 pub(crate) fn stage_line(t: &Theme, width: usize, stage: Stage, text: &str) -> String {
     let mut t = *t;
     t.width = width;
