@@ -174,8 +174,8 @@ pub fn planes_from_image(img: &DynamicImage) -> (Vec<f32>, Pdq) {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PdqPrep {
     /// The box-prefiltered luma the grid uses, with the small-input
-    /// upscale floor of Phase 2b. Shipped: on real photographs it keeps
-    /// 98.3 % of half-size copies and 100 % of rotations and mirrors
+    /// upscale floor of Phase 2b. Shipped until Phase 15: on real
+    /// photographs it keeps 98.3 % of half-size copies and 100 % of rotations and mirrors
     /// within PDQ_MAX, where the tool's input keeps 91.7 % and 93–95 %
     /// (VERIFICATION.md, Phase 7). Hashes land 2–8 bits from the tool's
     /// on the reference regression images — inside PDQ_MAX, so a hash
@@ -186,10 +186,23 @@ pub enum PdqPrep {
     /// conformance check and the measurement harness; nearest-neighbour
     /// decimation aliases, which is what costs it recall above.
     Tool,
+    /// The prefiltered plane resampled to `side` square, by a tent filter
+    /// (the image crate's Triangle, its support widened with the
+    /// reduction) or by Lanczos3: one working size for every file
+    /// (Phase 15, CORE-12). Shipped at `pdq::WORK_SIDE` with the tent: on
+    /// 215 real JPEGs a half-size copy's PDQ fell from 46 to 22 at most
+    /// (95th percentile 10 → 4), a quarter-size copy's from 54 to 36, a
+    /// mirror's from 62 to 6, and different pictures came no closer than 84
+    /// (VERIFICATION § Phase 15).
+    Fixed { side: usize, lanczos: bool },
 }
 
-/// The preparation this build ships (measured in VERIFICATION.md, Phase 7).
-pub const PDQ_PREP: PdqPrep = PdqPrep::Prefiltered;
+/// The preparation this build ships (measured in VERIFICATION.md, Phases
+/// 7 and 15).
+pub const PDQ_PREP: PdqPrep = PdqPrep::Fixed {
+    side: pdq::WORK_SIDE,
+    lanczos: false,
+};
 
 pub fn planes_from_image_with(img: &DynamicImage, prep: PdqPrep) -> (Vec<f32>, Pdq) {
     let (pre, pw, ph) = prefiltered_luma(img);
@@ -201,6 +214,19 @@ pub fn planes_from_image_with(img: &DynamicImage, prep: PdqPrep) -> (Vec<f32>, P
             height: ph,
         }),
         PdqPrep::Tool => pdq::compute_tool(img),
+        PdqPrep::Fixed { side, lanczos } => pdq::compute_fixed(
+            &pdq::Luma {
+                data: &pre,
+                width: pw,
+                height: ph,
+            },
+            if lanczos {
+                FilterType::Lanczos3
+            } else {
+                FilterType::Triangle
+            },
+            side,
+        ),
     };
     (grid, p)
 }

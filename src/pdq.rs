@@ -11,15 +11,15 @@
 //! 6. bit = value > median of the 256 values; bit index row·16 + col
 //! 7. seven dihedral variants in the DCT domain by sign flips and transposes
 //!
-//! Where this differs from the reference **[CLAUDE]**: the Jarosz filter
-//! runs on the integer-box-prefiltered luminance that `perceptual.rs`
-//! already produces (short side kept between 576 and 1151) instead of the
-//! full-resolution image. A 24-megapixel file would otherwise need two
-//! 96 MB float buffers per image under a parallel decode. The prefilter is
-//! itself a box average, which the Jarosz passes would mostly subsume;
-//! hashes are therefore not bit-identical to the reference tool's, and
-//! `dedupe` never needs them to be — it compares its own hashes with its
-//! own hashes.
+//! Where this differs from the reference **[CLAUDE]**: the input is the
+//! integer-box-prefiltered luminance that `perceptual.rs` already produces
+//! (short side kept between 576 and 1151), resampled to one working size,
+//! `WORK_SIDE` square, for every file (Phase 15) — instead of the
+//! full-resolution image, which for a 24-megapixel file would need two
+//! 96 MB float buffers per image under a parallel decode. Hashes are
+//! therefore not bit-identical to the reference tool's, and `dedupe` never
+//! needs them to be — it compares its own hashes with its own hashes; the
+//! tool's input (`compute_tool`) stays for the conformance check.
 
 use crate::perceptual::{Variant, VARIANTS, VARIANT_ORDER};
 
@@ -333,6 +333,51 @@ pub fn compute_tool(img: &image::DynamicImage) -> Pdq {
         width: w,
         height: h,
     })
+}
+
+/// The side every picture's PDQ input is resampled to, aspect discarded as
+/// the 64 × 64 decimation discards it (Phase 15, CORE-12). On the
+/// box-prefiltered plane the Jarosz window was ⌈side / 128⌉ of a side that
+/// depends on the file (576–1151), so a photo and its half-size copy were
+/// filtered and decimated differently. At 576 the window is 5 and each
+/// output cell 9 pixels, both odd: the box is centred and the decimation
+/// samples each cell's middle pixel, so a mirrored or turned picture is
+/// filtered and sampled as the mirror of the original and the DCT-domain
+/// orientations hold. (At 512 the window is 4 and the sample sits at
+/// 8i + 4: mirrors moved 16 bits at the median.)
+pub const WORK_SIDE: usize = 576;
+
+/// PDQ of a plane resampled to `side` × `side` with `filter` (the image
+/// crate's, on the float plane: no rounding), then the published
+/// algorithm. A plane already that size is hashed as it is.
+pub fn compute_fixed(l: &Luma, filter: image::imageops::FilterType, side: usize) -> Pdq {
+    if l.width < MIN_DIM || l.height < MIN_DIM {
+        return Pdq {
+            hashes: [[0; 4]; VARIANTS],
+            quality: 0,
+        };
+    }
+    if (l.width, l.height) == (side, side) {
+        return finish(downsample(l));
+    }
+    // the image crate holds a float pixel in 0–1 and clamps to it
+    let Some(plane) = image::ImageBuffer::<image::Luma<f32>, Vec<f32>>::from_raw(
+        l.width as u32,
+        l.height as u32,
+        l.data.iter().map(|v| v / 255.0).collect(),
+    ) else {
+        return compute_plain(l);
+    };
+    let work: Vec<f32> = image::imageops::resize(&plane, side as u32, side as u32, filter)
+        .into_raw()
+        .into_iter()
+        .map(|v| v * 255.0)
+        .collect();
+    finish(downsample(&Luma {
+        data: &work,
+        width: side,
+        height: side,
+    }))
 }
 
 /// The reference algorithm exactly as published: Jarosz filter, decimate,

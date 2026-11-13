@@ -222,22 +222,36 @@ Two departures from the reference *tool* in what the algorithm is fed,
 both measured:
 
 - The hash runs on the integer-box-prefiltered luma that the grid path
-  already produces (short side 576–1151 px), not on the tool's 512
-  nearest-neighbour squash and not on the full image (a 24-megapixel file
-  would need two 96 MB float buffers per concurrent decode). Nearest-
+  already produces (short side 576–1151 px), resampled by a tent filter
+  to one working size, 576 × 576, for every file (Phase 15) — not on the
+  tool's 512 nearest-neighbour squash and not on the full image (a
+  24-megapixel file would need two 96 MB float buffers per concurrent
+  decode). Until Phase 15 the plane went in at its own size, so a photo
+  and its half-size copy were filtered with different Jarosz windows and
+  decimated on different grids: on 215 real JPEGs, copies at 70–25 % came
+  up to 46–56 bits from their originals (95th percentile 10–14) and
+  mirrors up to 62. At 576 they come within 18–36 (95th percentile 4–6),
+  mirrors within 6, and different pictures no closer than 84
+  (VERIFICATION § Phase 15). 576 and not 512: at 576 the Jarosz window
+  (5) and the decimation cell (9) are odd, so the box is centred and each
+  cell's middle pixel is sampled, and a mirrored picture is filtered as
+  the mirror of the original; at 512 (window 4, sample at 8i + 4) mirrors
+  moved 16 bits at the median. Nearest-
   neighbour decimation aliases, and it shows: on real photographs the
   tool's input keeps 91.7 % of half-size copies, 88.3 % of quarter-size,
   95 % of 90° rotations and 93.3 % of mirrors within 31 bits, where the
   prefiltered input keeps 98.3 %, 98.3 %, 100 % and 100 % (the one miss
   is a synthetic ramp); the procedural corpus agrees in direction
-  (VERIFICATION.md, Phase 7). The prefiltered hashes land 2–8 bits from
-  the tool's on the regression images — inside the threshold, so a hash
-  published by the reference tool still matches ours. `perceptual::
+  (VERIFICATION.md, Phase 7). Ours land a median 10 bits from the tool's
+  own hash of the same picture (the 215 JPEGs; up to 88 on a picture the
+  tool's squash aliases) — `dedupe` compares its hashes with its own, and
+  a hash the reference tool published is not expected to match. `perceptual::
   PDQ_PREP` selects the preparation; `PdqPrep::Tool` reproduces the tool
   exactly and is what the conformance check and the measurement harness
   use.
-- Inputs with a short side under 384 px are Lanczos-upscaled by an integer
-  factor first. Below 128 px the reference window is 1 — no filtering —
+- Until Phase 15, inputs with a short side under 384 px were
+  Lanczos-upscaled by an integer factor first (the 576 working size now
+  brings every input up or down to one size). Below 128 px the reference window is 1 — no filtering —
   and centre sampling lands up to half a cell off. On the corpus this took
   25 % thumbnails from a worst case of 32 bits (one miss at the threshold)
   to 14; 384 measured better than 256 on every row and no worse than 512
@@ -286,9 +300,10 @@ closer, a full-size PNG export of the same JPEG went from 0 bits to 22
 (VERIFICATION § Phase 11). The working size is what both routes must
 agree on before the memory saving is worth taking. The same measurement
 found the shipped route's own soft spot: a 12 MP photo and its 70 %,
-half or quarter copies are up to 22–24 PDQ bits apart (95th percentile
-10), within 31 but with 7 bits to spare, because the box prefilter's
-integer factor gives copies of different sizes different working sizes.
+half or quarter copies were up to 22–24 PDQ bits apart (95th percentile
+10), because the box prefilter's integer factor gave copies of different
+sizes different working sizes — closed in Phase 15 by the 576 working
+size (§ 2.3).
 
 ### 2.6 The deep tier — Phase 4, optional **[CLAUDE]**
 

@@ -1229,8 +1229,9 @@ fn with_caption_bar(fx: &Fx, share: f32, name: &str) {
 fn milk_leaves_unconfirmed_near_duplicates_in_place() {
     let fx = fixture_with_photos();
     // the beach with a caption bar over its lower 35 %: the two hashes
-    // still land inside their thresholds (d 7, p 14), PDQ (q 48) and the
-    // fit (0.90, its cells included) do not. Until Phase 11 a 15 % bar
+    // still land inside their thresholds (d 7, p 14), PDQ (q 50; 48 before
+    // Phase 15's fixed working size) and the fit (0.90, its cells
+    // included) do not. Until Phase 11 a 15 % bar
     // was this test's case; the fit's cells now confirm that one (below).
     with_caption_bar(&fx, 0.35, "photos/beach_bar.png");
     let (code, out, _) = run(&fx, &["find", ".", "img"]);
@@ -1240,7 +1241,7 @@ fn milk_leaves_unconfirmed_near_duplicates_in_place() {
         .find(|l| l.contains("beach_bar.png"))
         .unwrap_or_else(|| panic!("the hashes group it\n{out}"));
     assert!(
-        line.contains("similar, unconfirmed") && line.contains("q  48") && line.contains("fit 0.9"),
+        line.contains("similar, unconfirmed") && line.contains("q  50") && line.contains("fit 0.9"),
         "PDQ over, fit under\n{out}"
     );
     let (code, out, _) = run(&fx, &["milk", ".", "img"]);

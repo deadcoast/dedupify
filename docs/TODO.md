@@ -9,7 +9,7 @@ Milestone: `PLAN.md` § Phase 15 · items: `SHELVED.md` § Phase 15 · source:
 order top to bottom. Previous milestone: Phase 14, delivered 2026-11-12
 (`SHELVED.md` § Phase 14 `[done]`).
 
-- [ ] **CORE-12** PDQ at a fixed working size; the Phase 11 § 8 tables
+- [x] **CORE-12** PDQ at a fixed working size; the Phase 11 § 8 tables
   re-run: ships only if copies' distances fall and no negative comes
   under 31
 - [ ] **CORE-13** the near keeper's degree counts confirmed relations
