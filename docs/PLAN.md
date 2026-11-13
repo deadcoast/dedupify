@@ -425,7 +425,7 @@ the black one wins (one ambient copy right, four no longer wrong, a
 black-framed one 0.56 → 0.99); the export agrees with Meta's model to
 six decimals. Open: the four ambient copies, for an edge detector.
 
-## Phase 16 — the workspace at size   ← in progress (TODO.md)
+## Phase 16 — the workspace at size   ← in progress (TODO.md): 8 of 9 delivered; QOL-13 waits for the launcher's picture of `v`
 
 A result of hundreds of groups worked the way a person works it: sorted
 and filtered, a preferred folder kept in one key, every line inside a

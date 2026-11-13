@@ -3659,7 +3659,17 @@ in; piped, nothing changes.
 
 ## 8. Suite and CI
 
-SUITE_RESULT
+Here, `--profile ci`: 138 unit tests (1 ignored), the band test, 38
+end-to-end tests (3 ignored); the band test and the 38 again with the
+model installed. clippy at `-D warnings` on all targets with Rust 1.97.0
+and 1.100.0, without the deep tier, and on the Windows target; the
+launcher's C# compiled with Mono.
+
+CI run **43509295060** at `0323e2a`, green. Ubuntu: 138 unit tests, the
+band test, 38 end-to-end (3 ignored), the doctor. Windows: 138, the band
+test, 37 end-to-end (5 ignored) — the resize through
+`ResizePseudoConsole`, the filter and the preferred folder through the
+pseudo console among them — the Recycle Bin step, the doctor.
 
 ## Not verified here
 
