@@ -1,0 +1,63 @@
+# SSCD's ONNX export against Meta's TorchScript original (Phase 15,
+# TECH-14). Started by hand from the Actions tab only: it downloads both
+# models (pinned SHA-256) and CPU PyTorch, and its table is a record for
+# VERIFICATION.md, not a test of a change.
+name: sscd agreement
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: never
+  ONNX_URL: https://huggingface.co/nutszebra/sscd_onnx/resolve/main/sscd_disc_mixup.onnx
+  ONNX_SHA256: e65e2a5b9a5e44a0b0f011bddaa6f28621021f6120ca7ce8b526c19f2f6156f8
+  TS_URL: https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt
+  TS_SHA256: 9f26bd4c848cc19b73d2ae92eea6e04886f61a7b764ceb7a13aeee62e6a6db56
+
+jobs:
+  agreement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: The two models, checked against their SHA-256
+        run: |
+          mkdir -p "$RUNNER_TEMP/models"
+          curl -sSfL -o "$RUNNER_TEMP/models/sscd.onnx" "$ONNX_URL"
+          curl -sSfL -o "$RUNNER_TEMP/models/sscd.pt" "$TS_URL"
+          echo "$ONNX_SHA256  $RUNNER_TEMP/models/sscd.onnx" | sha256sum -c -
+          echo "$TS_SHA256  $RUNNER_TEMP/models/sscd.pt" | sha256sum -c -
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: CPU PyTorch, ONNX Runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu torch
+          python -m pip install --quiet onnxruntime numpy pillow
+          python -c "import torch, onnxruntime; print(torch.__version__, onnxruntime.__version__)"
+
+      - name: The pictures and our embeddings
+        env:
+          DEDUPE_MODEL: ${{ runner.temp }}/models/sscd.onnx
+          DEDUPE_SSCD_OUT: ${{ runner.temp }}/sscd
+        run: cargo test --profile ci --test sscd_agreement -- --ignored --nocapture
+
+      - name: TorchScript, ONNX Runtime, ours
+        run: python -I tests/sscd_agreement.py "$RUNNER_TEMP/sscd" "$RUNNER_TEMP/models/sscd.onnx" "$RUNNER_TEMP/models/sscd.pt"
