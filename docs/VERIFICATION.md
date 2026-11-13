@@ -3346,10 +3346,12 @@ Started by the `[ci]` marker on the delivery commit.
 
 ---
 
-# VERIFICATION — Phase 15 (matching debts), begun 2026-11-12
+# VERIFICATION — Phase 15 (matching debts), run on 2026-11-12
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0), `--profile
-ci`. Items as they land; the suite and CI at the end.
+ci`; CI on Ubuntu and Windows (§ 6). Source: IDENTIFIED 2026-11-12
+(`f9227ee`), items CORE-12, CORE-13, CORE-14, TECH-14, and CORE-17,
+found by Phase 14's 100,000-file run.
 
 ## 1. A copy chained into a stranger's group (CORE-17)
 
@@ -3508,8 +3510,40 @@ copy of each; the deep tier's resize checked to be the identity at that
 size) and our embeddings; `tests/sscd_agreement.py` feeds the same
 tensors to TorchScript and to ONNX Runtime.
 
-SSCD_RESULT
+Run **43343615860** at `f3f0e80` (both SHA-256 checks `OK`; PyTorch
+2.15.0+cpu, ONNX Runtime 1.31.1):
+
+```
+engines                                      cosine min   p1         median     pair-cosine difference max / median
+ONNX export vs TorchScript (ONNX Runtime)    1.000000     1.000000   1.000000   0.000001 / 0.000000
+ours (tract) vs ONNX Runtime, same export    1.000000     1.000000   1.000000   0.000001 / 0.000000
+ours (tract) vs TorchScript                  1.000000     1.000000   1.000000   0.000001 / 0.000000
+```
+
+The export computes Meta's model, and `tract` computes the export, to
+six decimals; a pair's cosine — what `DEEP_MIN` and the band read — moves
+by at most 0.000001 between any two. Under 0.99 would have meant code;
+this is a note (DEEP.md, Provenance). The thresholds measured on the
+export stand for Meta's model.
 
 ## 6. Suite and CI
 
-SUITE_RESULT
+Here, `--profile ci`: 133 unit tests (1 ignored), the band test, 35
+end-to-end tests (3 ignored); the band test and the 35 again with the
+model installed. clippy at `-D warnings` on all targets with Rust
+1.97.0 and 1.100.0, and the Windows target without the deep tier;
+`cargo fmt --check` clean.
+
+CI run **43343615682** at `f3f0e80`, green. Ubuntu: 133 unit tests, the
+band test, 35 end-to-end (3 ignored), the doctor. Windows: 133, the band
+test, 34 end-to-end (5 ignored), the Recycle Bin capped at 1 MB taking
+and refusing (3 tests), the doctor.
+
+## Not verified here
+
+- The four ambient copies whose blurred background carries the picture's
+  detail (§ 4): an edge detector of their own, open.
+- PDQ at 576 on real copies other than resized, turned and mirrored ones
+  (crops and edits rely on the fit, unchanged).
+- The bench on the owner's machine (§ Phase 14) still waits for
+  `runs\win\RUN_BENCH.cmd`.

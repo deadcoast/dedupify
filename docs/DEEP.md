@@ -74,9 +74,12 @@ revision `0f03b67c…`) of Meta's checkpoint
 The export's metadata records that checkpoint's SHA-256 as
 `9f26bd4c848cc19b73d2ae92eea6e04886f61a7b764ceb7a13aeee62e6a6db56`; the
 checkpoint was downloaded and hashed during the Phase 4 build and matches
-byte for byte. Agreement of the export's *outputs* with the TorchScript
-original was not checked (no PyTorch in the build environment); the
-export was validated functionally on the corpus. SSCD is MIT-licensed.
+byte for byte. The export's *outputs* agree with the TorchScript
+original: on 200 pictures fed as the same tensor to both (Phase 15,
+`.github/workflows/sscd.yml`), cosine 1.000000 between the two models'
+embeddings and between `dedupe`'s (`tract`) and ONNX Runtime's, every
+pair's cosine within 0.000001 (VERIFICATION § Phase 15). SSCD is
+MIT-licensed.
 
 ## Cost
 

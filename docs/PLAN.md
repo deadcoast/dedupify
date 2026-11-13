@@ -409,14 +409,23 @@ was measured bit-identical and slower, so the deep tier stays one
 picture per inference. Open: the bench on the owner's machine
 (`runs\win\RUN_BENCH.cmd`), real 1–2 hour videos, a GPU.
 
-## Phase 15 — matching debts   ← in progress (TODO.md)
+## Phase 15 — matching debts   ← delivered 2026-11-12
 
 The measurements Phase 11 left open for this pass: PDQ at a fixed working
 size, the near keeper's degree against the copy marks, dark blurred bars
 on video, and the ONNX export's agreement with Meta's published model.
-Items: SHELVED.md § Phase 15.
+Items: SHELVED.md § Phase 15. Delivered (VERIFICATION § Phase 15): PDQ
+hashes every file at 576 × 576 (copies at 70–25 % from 46–56 bits at
+most to 18–36, mirrors 62 → 6, strangers no closer than 84); the keeper's
+degree counts matches PDQ confirms, and within one the picture and the
+copy marks decide; a copy chained into a stranger's group gets its own
+(CORE-17, found by Phase 14: 1,000 of 1,000 planted copies acted on); a
+black band with detail goes to the flat pass and a flat picture holding
+the black one wins (one ambient copy right, four no longer wrong, a
+black-framed one 0.56 → 0.99); the export agrees with Meta's model to
+six decimals. Open: the four ambient copies, for an edge detector.
 
-## Phase 16 — the workspace at size   ← planned
+## Phase 16 — the workspace at size   ← in progress (TODO.md)
 
 A result of hundreds of groups worked the way a person works it: sorted
 and filtered, a preferred folder kept in one key, every line inside a

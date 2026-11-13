@@ -18,16 +18,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 
 ---
 
-## Phase 14 — cost at scale   `[done]` 2026-11-12 — see PLAN.md § Phase 14, VERIFICATION.md § Phase 14
-
-1. **TECH-10** the bench on real files, the model, peak memory, 100,000
-   files; here and on the owner's machine
-2. **SC-09** split `near.rs` (relation / bars / group)
-3. **CORE-15** the fit's search coarse to fine, thumbnails reused
-4. **CORE-16** long video's decode cost
-5. **TECH-15** the deep tier's throughput
-
-## Phase 15 — matching debts   `[todo]`
+## Phase 15 — matching debts   `[done]` 2026-11-12 — see PLAN.md § Phase 15, VERIFICATION.md § Phase 15
 
 1. **CORE-12** PDQ at a fixed working size
 2. **CORE-13** the near keeper's degree against the copy marks
@@ -36,7 +27,7 @@ Source review: IDENTIFIED 2026-11-12 (`f9227ee`).
 5. **CORE-17** a copy chained into another picture's group is measured
    against that keeper (found in Phase 14's 100,000-file run)
 
-## Phase 16 — the workspace at size   `[shelved]`
+## Phase 16 — the workspace at size   `[todo]`
 
 1. **SC-10** unit tests for the width logic, 40–200 columns
 2. **QOL-11** narrow terminals: no line past the edge down to 40
