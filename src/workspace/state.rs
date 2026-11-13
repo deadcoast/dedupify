@@ -37,6 +37,8 @@ pub enum Lock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MemberInfo {
     pub path: PathBuf,
+    /// The path as listed, relative to the root: what `/` matches.
+    pub shown: String,
     pub size: u64,
     pub role: Role,
 }
@@ -45,6 +47,37 @@ pub struct MemberInfo {
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupInfo {
     pub members: Vec<MemberInfo>,
+    /// What acting on the group would free, as its header says.
+    pub reclaim: u64,
+}
+
+/// The order `s` cycles through (Phase 16, QOL-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Order {
+    /// As `find` lists them: exact, near, video.
+    Listing,
+    /// The most bytes to free first.
+    Reclaim,
+    /// By the keeper's folder, then the listing.
+    Folder,
+}
+
+impl Order {
+    fn next(self) -> Order {
+        match self {
+            Order::Listing => Order::Reclaim,
+            Order::Reclaim => Order::Folder,
+            Order::Folder => Order::Listing,
+        }
+    }
+
+    pub fn words(self) -> &'static str {
+        match self {
+            Order::Listing => "as listed",
+            Order::Reclaim => "most reclaimable first",
+            Order::Folder => "by folder",
+        }
+    }
 }
 
 /// The groups on screen, in listing order (exact, near, video).
@@ -54,7 +87,7 @@ pub struct Layout {
 }
 
 /// One line of the body: a group's header or one of its members.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Row {
     Head(usize),
     Member(usize, usize),
@@ -71,6 +104,12 @@ pub enum Mode {
     Browse,
     GoTo(String),
     Confirm(Act),
+    /// `/`: the groups narrowed as the text is typed; `before` comes back
+    /// on esc.
+    Filter {
+        typed: String,
+        before: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,12 +146,26 @@ pub enum Effect {
     Reveal(usize, usize),
     /// Reverse the newest change of this sitting.
     Undo,
+    /// Make member `.1`'s folder the preferred home: every group with a
+    /// member under it takes that member for keeper (Phase 16, NF-10).
+    Prefer(usize, usize),
+    /// Drop the preferred folder; the keepers it chose go back.
+    PreferOff,
     Quit,
 }
 
 #[derive(Debug, Clone)]
 pub struct State {
     pub layout: Layout,
+    /// The groups shown, in the order shown: all of them as listed until
+    /// `s` or `/` changes it. Rows and effects name groups by their place
+    /// in `layout`, so a group keeps its number however it is shown.
+    pub view: Vec<usize>,
+    pub order: Order,
+    /// `/`'s text: the groups with a path containing it (any case).
+    pub filter: String,
+    /// The preferred folder `f` set, as listed (relative to the root).
+    pub prefer: Option<String>,
     pub rows: Vec<Row>,
     pub selected: HashSet<PathBuf>,
     /// Each member's role when last laid out: a path whose role changes
@@ -129,21 +182,69 @@ pub struct State {
     pub message: Option<String>,
 }
 
-fn rows_of(layout: &Layout) -> Vec<Row> {
+fn rows_of(layout: &Layout, view: &[usize]) -> Vec<Row> {
     let mut rows = Vec::new();
-    for (g, group) in layout.groups.iter().enumerate() {
+    for &g in view {
         rows.push(Row::Head(g));
-        for m in 0..group.members.len() {
+        for m in 0..layout.groups[g].members.len() {
             rows.push(Row::Member(g, m));
         }
     }
     rows
 }
 
+/// Every row of `layout` in listing order: the lines `find` printed.
+pub fn all_rows(layout: &Layout) -> Vec<Row> {
+    rows_of(layout, &(0..layout.groups.len()).collect::<Vec<_>>())
+}
+
+/// The folder a listed path sits in (`/` and `\` both separators).
+fn folder_of(shown: &str) -> &str {
+    shown.rfind(['/', '\\']).map_or("", |i| &shown[..i])
+}
+
+/// The groups shown for `order` and `filter`.
+fn view_of(layout: &Layout, order: Order, filter: &str) -> Vec<usize> {
+    let needle = filter.to_lowercase();
+    let mut v: Vec<usize> = (0..layout.groups.len())
+        .filter(|&g| {
+            needle.is_empty()
+                || layout.groups[g]
+                    .members
+                    .iter()
+                    .any(|m| m.shown.to_lowercase().contains(&needle))
+        })
+        .collect();
+    let keeper_folder = |g: usize| {
+        layout.groups[g]
+            .members
+            .first()
+            .map_or(String::new(), |m| folder_of(&m.shown).to_lowercase())
+    };
+    match order {
+        Order::Listing => {}
+        Order::Reclaim => v.sort_by(|&a, &b| {
+            layout.groups[b]
+                .reclaim
+                .cmp(&layout.groups[a].reclaim)
+                .then(a.cmp(&b))
+        }),
+        Order::Folder => {
+            v.sort_by(|&a, &b| keeper_folder(a).cmp(&keeper_folder(b)).then(a.cmp(&b)))
+        }
+    }
+    v
+}
+
 impl State {
     pub fn new(layout: Layout, height: usize) -> State {
+        let view: Vec<usize> = (0..layout.groups.len()).collect();
         let mut st = State {
-            rows: rows_of(&layout),
+            rows: rows_of(&layout, &view),
+            view,
+            order: Order::Listing,
+            filter: String::new(),
+            prefer: None,
             layout,
             selected: HashSet::new(),
             roles: HashMap::new(),
@@ -199,7 +300,8 @@ impl State {
                 roles.insert(m.path.clone(), m.role);
             }
         }
-        self.rows = rows_of(&layout);
+        self.view = view_of(&layout, self.order, &self.filter);
+        self.rows = rows_of(&layout, &self.view);
         self.layout = layout;
         self.selected = selected;
         self.roles = roles;
@@ -219,6 +321,31 @@ impl State {
             .unwrap_or(0)
             .min(self.rows.len().saturating_sub(1));
         self.scroll();
+    }
+
+    /// The shown groups again after `s` or `/`: the cursor stays on its
+    /// file when it is still shown, else on the first row.
+    fn reshow(&mut self) {
+        let at = self.cursor_path();
+        let at_group = self.cursor_group();
+        self.view = view_of(&self.layout, self.order, &self.filter);
+        self.rows = rows_of(&self.layout, &self.view);
+        self.cursor = at
+            .and_then(|p| {
+                self.rows.iter().position(|r| match r {
+                    Row::Member(g, m) => self.layout.groups[*g].members[*m].path == p,
+                    Row::Head(_) => false,
+                })
+            })
+            .or_else(|| at_group.and_then(|g| self.rows.iter().position(|r| *r == Row::Head(g))))
+            .unwrap_or(0);
+        self.top = 0;
+        self.scroll();
+    }
+
+    /// Whether group `g` is shown.
+    pub fn shown(&self, g: usize) -> bool {
+        self.view.contains(&g)
     }
 
     pub fn set_height(&mut self, height: usize) {
@@ -268,9 +395,16 @@ impl State {
         self.top = self.top.min(max_top);
     }
 
-    /// The paths to act on.
-    pub fn selection(&self) -> &HashSet<PathBuf> {
-        &self.selected
+    /// The paths to act on: the selected files of the groups shown (a
+    /// filter keeps choices made outside it, and acts only on what it
+    /// shows).
+    pub fn selection(&self) -> HashSet<PathBuf> {
+        self.view
+            .iter()
+            .flat_map(|&g| self.layout.groups[g].members.iter())
+            .filter(|m| self.selected.contains(&m.path))
+            .map(|m| m.path.clone())
+            .collect()
     }
 
     /// Selected files, their bytes, and how many of them only a person's
@@ -285,7 +419,7 @@ impl State {
         let mut n = 0;
         let mut bytes = 0;
         let mut hand = 0;
-        for g in &self.layout.groups {
+        for g in self.view.iter().map(|&g| &self.layout.groups[g]) {
             for m in &g.members {
                 if matches!(m.role, Role::Act | Role::Hand | Role::Locked(Lock::Kin))
                     && self.selected.contains(&m.path)
@@ -445,15 +579,20 @@ impl State {
     /// `a`: anything chosen → nothing; nothing chosen → the program's own
     /// choice (every confirmed member).
     fn toggle_all(&mut self) {
-        if !self.selected.is_empty() {
-            self.selected.clear();
+        let shown: Vec<&MemberInfo> = self
+            .view
+            .iter()
+            .flat_map(|&g| self.layout.groups[g].members.iter())
+            .collect();
+        if shown.iter().any(|m| self.selected.contains(&m.path)) {
+            for m in shown {
+                self.selected.remove(&m.path);
+            }
             return;
         }
-        for g in &self.layout.groups {
-            for m in &g.members {
-                if m.role == Role::Act {
-                    self.selected.insert(m.path.clone());
-                }
+        for m in shown {
+            if m.role == Role::Act {
+                self.selected.insert(m.path.clone());
             }
         }
     }
@@ -492,6 +631,14 @@ impl State {
                     Key::Enter => {
                         self.mode = Mode::Browse;
                         match typed.parse::<usize>() {
+                            Ok(n)
+                                if n >= 1
+                                    && n <= self.layout.groups.len()
+                                    && !self.shown(n - 1) =>
+                            {
+                                self.message =
+                                    Some(format!("group {n} is not shown; / then enter shows all"));
+                            }
                             Ok(n) if n >= 1 && n <= self.layout.groups.len() => {
                                 if let Some(i) =
                                     self.rows.iter().position(|r| *r == Row::Head(n - 1))
@@ -522,6 +669,36 @@ impl State {
                 } else {
                     Effect::None
                 }
+            }
+            Mode::Filter { mut typed, before } => {
+                match key {
+                    Key::Char(c) if typed.chars().count() < 60 => typed.push(c),
+                    Key::Space => typed.push(' '),
+                    Key::Backspace => {
+                        typed.pop();
+                    }
+                    Key::Enter => {
+                        self.mode = Mode::Browse;
+                        self.message = Some(if self.filter.is_empty() {
+                            "every group shown".into()
+                        } else {
+                            format!("{} of {} groups", self.view.len(), self.layout.groups.len())
+                        });
+                        return Effect::None;
+                    }
+                    Key::Esc | Key::Quit => {
+                        self.mode = Mode::Browse;
+                        self.filter = before;
+                        self.reshow();
+                        return Effect::None;
+                    }
+                    _ => return Effect::None,
+                }
+                // the groups narrow as the text is typed
+                self.filter = typed.clone();
+                self.mode = Mode::Filter { typed, before };
+                self.reshow();
+                Effect::None
             }
             Mode::Browse => match key {
                 Key::Up => {
@@ -594,6 +771,33 @@ impl State {
                     self.mode = Mode::GoTo(String::new());
                     Effect::None
                 }
+                Key::Char('s') => {
+                    self.order = self.order.next();
+                    self.reshow();
+                    self.message = Some(self.order.words().into());
+                    Effect::None
+                }
+                Key::Char('/') => {
+                    self.mode = Mode::Filter {
+                        typed: self.filter.clone(),
+                        before: self.filter.clone(),
+                    };
+                    Effect::None
+                }
+                Key::Char('f') => match self.rows.get(self.cursor).copied() {
+                    Some(Row::Member(g, m)) => {
+                        let folder = folder_of(&self.member(g, m).shown).to_string();
+                        if self.prefer.as_deref() == Some(folder.as_str()) {
+                            Effect::PreferOff
+                        } else {
+                            Effect::Prefer(g, m)
+                        }
+                    }
+                    _ => {
+                        self.message = Some("f on a file keeps its folder's copies".into());
+                        Effect::None
+                    }
+                },
                 Key::Char('n') => {
                     if self.selected.is_empty() {
                         self.message = Some("nothing selected".into());
@@ -650,9 +854,16 @@ pub(super) mod tests {
     pub(crate) fn mi(path: &str, size: u64, role: Role) -> MemberInfo {
         MemberInfo {
             path: p(path),
+            shown: path.to_string(),
             size,
             role,
         }
+    }
+
+    /// A group whose header frees its members' bytes.
+    pub(crate) fn gi(members: Vec<MemberInfo>) -> GroupInfo {
+        let reclaim = members.iter().skip(1).map(|m| m.size).sum();
+        GroupInfo { members, reclaim }
     }
 
     /// Three groups: an exact pair; a near group with a confirmed member,
@@ -661,23 +872,20 @@ pub(super) mod tests {
     pub(crate) fn layout() -> Layout {
         Layout {
             groups: vec![
-                GroupInfo {
-                    members: vec![
-                        mi("a.jpg", 100, Role::Keeper),
-                        mi("a (1).jpg", 100, Role::Act),
-                    ],
-                },
-                GroupInfo {
-                    members: vec![
-                        mi("b.png", 300, Role::Keeper),
-                        mi("b_small.jpg", 50, Role::Act),
-                        mi("b_crop.jpg", 70, Role::Hand),
-                        mi("b_next.jpg", 290, Role::Locked(Lock::Kin)),
-                    ],
-                },
-                GroupInfo {
-                    members: vec![mi("c.jpg", 40, Role::Keeper), mi("c2.jpg", 30, Role::Hand)],
-                },
+                gi(vec![
+                    mi("a.jpg", 100, Role::Keeper),
+                    mi("a (1).jpg", 100, Role::Act),
+                ]),
+                gi(vec![
+                    mi("b.png", 300, Role::Keeper),
+                    mi("b_small.jpg", 50, Role::Act),
+                    mi("b_crop.jpg", 70, Role::Hand),
+                    mi("b_next.jpg", 290, Role::Locked(Lock::Kin)),
+                ]),
+                gi(vec![
+                    mi("c.jpg", 40, Role::Keeper),
+                    mi("c2.jpg", 30, Role::Hand),
+                ]),
             ],
         }
     }
@@ -772,15 +980,14 @@ pub(super) mod tests {
         // e.jpg keeps an exact group and stands for it in a near group
         let l = Layout {
             groups: vec![
-                GroupInfo {
-                    members: vec![
-                        mi("e.jpg", 10, Role::Keeper),
-                        mi("e (1).jpg", 10, Role::Act),
-                    ],
-                },
-                GroupInfo {
-                    members: vec![mi("e.png", 40, Role::Keeper), mi("e.jpg", 10, Role::Act)],
-                },
+                gi(vec![
+                    mi("e.jpg", 10, Role::Keeper),
+                    mi("e (1).jpg", 10, Role::Act),
+                ]),
+                gi(vec![
+                    mi("e.png", 40, Role::Keeper),
+                    mi("e.jpg", 10, Role::Act),
+                ]),
             ],
         };
         let st = State::new(l, 10);
@@ -915,12 +1122,10 @@ pub(super) mod tests {
     fn go_to_and_scrolling_keep_the_cursor_visible() {
         let mut big = Layout::default();
         for g in 0..30 {
-            big.groups.push(GroupInfo {
-                members: vec![
-                    mi(&format!("k{g}"), 1, Role::Keeper),
-                    mi(&format!("d{g}"), 1, Role::Act),
-                ],
-            });
+            big.groups.push(gi(vec![
+                mi(&format!("k{g}"), 1, Role::Keeper),
+                mi(&format!("d{g}"), 1, Role::Act),
+            ]));
         }
         let mut st = State::new(big, 10);
         assert_eq!((st.cursor, st.top), (2, 0));
@@ -943,5 +1148,131 @@ pub(super) mod tests {
         assert_eq!(st.top, st.rows.len() - st.height);
         st.handle(Key::Home);
         assert_eq!((st.cursor, st.top), (0, 0));
+    }
+
+    fn typed(st: &mut State, text: &str) {
+        for c in text.chars() {
+            st.handle(Key::Char(c));
+        }
+    }
+
+    #[test]
+    fn s_cycles_the_order_and_the_cursor_stays_on_its_file() {
+        let mut st = State::new(layout(), 30);
+        let at = st.cursor_path();
+        assert_eq!(st.view, vec![0, 1, 2]);
+        st.handle(Key::Char('s'));
+        assert_eq!(st.order, Order::Reclaim);
+        // b frees 410, a 100, c 30
+        assert_eq!(st.view, vec![1, 0, 2]);
+        assert_eq!(st.message.as_deref(), Some("most reclaimable first"));
+        assert_eq!(st.cursor_path(), at, "the cursor stays on its file");
+        st.handle(Key::Char('s'));
+        assert_eq!(st.order, Order::Folder);
+        st.handle(Key::Char('s'));
+        assert_eq!((st.order, st.view.clone()), (Order::Listing, vec![0, 1, 2]));
+        // numbers stay the groups' own: rows still name group 1 as 1
+        assert!(st.rows.contains(&Row::Head(1)));
+    }
+
+    #[test]
+    fn a_filter_shows_matching_groups_keeps_choices_and_acts_on_what_it_shows() {
+        let mut st = State::new(layout(), 30);
+        assert_eq!(st.selection().len(), 2, "a (1).jpg and b_small.jpg");
+        st.handle(Key::Char('/'));
+        typed(&mut st, "b_");
+        assert_eq!(st.view, vec![1], "narrowed as typed");
+        // the exact pair's choice is kept, but not acted on while hidden
+        assert!(st.selected.contains(&p("a (1).jpg")));
+        assert_eq!(st.selection(), [p("b_small.jpg")].into_iter().collect());
+        assert_eq!(st.stats().0, 1);
+        st.handle(Key::Enter);
+        assert_eq!(st.message.as_deref(), Some("1 of 3 groups"));
+        // `a` clears what is shown, and only that
+        st.handle(Key::Char('a'));
+        assert!(st.selection().is_empty());
+        assert!(st.selected.contains(&p("a (1).jpg")));
+        // a hidden group cannot be gone to
+        st.handle(Key::Char('g'));
+        typed(&mut st, "1");
+        st.handle(Key::Enter);
+        assert!(st.message.as_deref().unwrap().contains("not shown"));
+        // esc while typing puts the last filter back; enter on nothing shows all
+        st.handle(Key::Char('/'));
+        typed(&mut st, "zz");
+        assert!(st.view.is_empty() && st.rows.is_empty());
+        st.handle(Key::Esc);
+        assert_eq!(st.view, vec![1]);
+        st.handle(Key::Char('/'));
+        st.handle(Key::Backspace);
+        st.handle(Key::Backspace);
+        st.handle(Key::Enter);
+        assert_eq!(st.view, vec![0, 1, 2]);
+        assert_eq!(
+            st.selection().len(),
+            1,
+            "a (1).jpg again, b_small cleared by a"
+        );
+        // the filter and the order survive a change to the groups
+        st.handle(Key::Char('/'));
+        typed(&mut st, "c2");
+        st.handle(Key::Enter);
+        st.relayout(layout());
+        assert_eq!(st.view, vec![2]);
+    }
+
+    #[test]
+    fn f_asks_for_a_files_folder_and_again_there_takes_it_back() {
+        let lib = |p: &str| MemberInfo {
+            path: PathBuf::from(p),
+            shown: p.to_string(),
+            size: 10,
+            role: Role::Act,
+        };
+        let mut l = Layout {
+            groups: vec![
+                gi(vec![
+                    MemberInfo {
+                        role: Role::Keeper,
+                        ..lib("backup/a.jpg")
+                    },
+                    lib("library/2019/a.jpg"),
+                ]),
+                gi(vec![
+                    MemberInfo {
+                        role: Role::Keeper,
+                        ..lib("backup/b.jpg")
+                    },
+                    lib("backup/old/b.jpg"),
+                ]),
+            ],
+        };
+        let mut st = State::new(l.clone(), 30);
+        // the cursor on library/2019/a.jpg
+        let at = st
+            .rows
+            .iter()
+            .position(|r| *r == Row::Member(0, 1))
+            .unwrap();
+        st.cursor = at;
+        assert_eq!(st.handle(Key::Char('f')), Effect::Prefer(0, 1));
+        // the shell changes the keeper and says so; the state names the rule
+        l.groups[0].members.swap(0, 1);
+        l.groups[0].members[0].role = Role::Keeper;
+        l.groups[0].members[1].role = Role::Act;
+        st.relayout(l);
+        st.prefer = Some("library/2019".into());
+        // f on a file of the preferred folder takes the rule back
+        let at = st
+            .rows
+            .iter()
+            .position(|r| *r == Row::Member(0, 0))
+            .unwrap();
+        st.cursor = at;
+        assert_eq!(st.handle(Key::Char('f')), Effect::PreferOff);
+        // f on a header says what it does
+        st.cursor = 0;
+        assert_eq!(st.handle(Key::Char('f')), Effect::None);
+        assert!(st.message.as_deref().unwrap().contains("folder"));
     }
 }

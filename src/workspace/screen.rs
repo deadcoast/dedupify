@@ -87,6 +87,18 @@ impl State {
                 text
             ));
         }
+        if self.rows.is_empty() && !self.filter.is_empty() {
+            out.push(format!(
+                "   {}",
+                t.paint(
+                    Paint::Dupe,
+                    &crate::util::fit(
+                        &format!("no group has a path with {:?}", self.filter),
+                        t.width.saturating_sub(4)
+                    )
+                )
+            ));
+        }
         while out.len() < 2 + body {
             out.push(String::new());
         }
@@ -107,12 +119,31 @@ impl State {
             ));
             left_plain.push_str(&format!("  {hand} by hand"));
         }
+        // the rule, the groups shown and their order, the cursor's group
+        // (Phase 16): the least telling go first on a narrow line
         let right_plain = match &self.message {
             Some(m) => m.clone(),
-            None => match self.cursor_group() {
-                Some(gi) => format!("group {}/{}", gi + 1, self.layout.groups.len()),
-                None => String::new(),
-            },
+            None => {
+                let mut parts: Vec<String> = Vec::new();
+                if let Some(p) = &self.prefer {
+                    parts.push(format!("keeping in {}", if p.is_empty() { "." } else { p }));
+                }
+                if self.view.len() < self.layout.groups.len() {
+                    parts.push(format!(
+                        "{} of {} groups",
+                        fmt_count(self.view.len() as u64),
+                        fmt_count(self.layout.groups.len() as u64)
+                    ));
+                }
+                if self.order != Order::Listing {
+                    parts.push(self.order.words().to_string());
+                }
+                if let Some(gi) = self.cursor_group() {
+                    parts.push(format!("group {}/{}", gi + 1, self.layout.groups.len()));
+                }
+                let room = t.width.saturating_sub(width(&left_plain) + 3);
+                crate::util::join_fit(&parts, room)
+            }
         };
         let right = if self.message.is_some() {
             t.paint(Paint::Warn, &right_plain)
@@ -147,7 +178,14 @@ impl State {
         if here.is_some_and(|g| !self.shots(g).is_empty()) {
             nav.push(("c".into(), "other shots".into()));
         }
-        nav.extend(pairs(&[("v", "view"), ("o", "reveal"), ("g", "go to")]));
+        nav.extend(pairs(&[
+            ("v", "view"),
+            ("o", "reveal"),
+            ("g", "go to"),
+            ("/", "filter"),
+            ("s", "sort"),
+            ("f", "keep this folder"),
+        ]));
         out.push(fit_parts(t, " ", &nav, t.width));
         let bar = match &self.mode {
             Mode::Browse => {
@@ -196,6 +234,23 @@ impl State {
                     t.width,
                 )
             }
+            Mode::Filter { typed, .. } => fit_parts(
+                t,
+                g.pointer,
+                &[
+                    (
+                        "/".into(),
+                        format!(
+                            "{typed}_  {} of {}",
+                            fmt_count(self.view.len() as u64),
+                            fmt_count(self.layout.groups.len() as u64)
+                        ),
+                    ),
+                    ("enter".into(), "keep".into()),
+                    ("esc".into(), "back".into()),
+                ],
+                t.width,
+            ),
             Mode::GoTo(typed) => fit_parts(
                 t,
                 g.pointer,

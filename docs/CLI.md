@@ -144,7 +144,7 @@ one-line bar under the listing; Phase 9 made it this:
  · kin   photos\shot_b.jpg                 1282×1110   642 KB   another shot, 05:06:08
  ──────────────────────────────────────────────────────────────────────
  15 selected  19.2 MB                                         group 1/14
-   ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to
+   ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to  / filter  s sort
  ▸  m milk 15 → _milked  p purge 15 → Recycle Bin  n preview  q quit
 ```
 
@@ -194,6 +194,9 @@ choice of frame and did no better than taking the first (VERIFICATION
 | `v` | the keeper beside the file under the cursor, drawn in the terminal (sixel, kitty or iTerm2 graphics; a video shows the frame a third of the way in), with both paths and the file's words; any key back, `o` reveals the member. Where the terminal draws no pictures, both files open in the system viewer |
 | `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
 | `g` | type a group's number, enter: the group at the top of the window |
+| `/` | filter: the groups narrow, as the text is typed, to those with a path containing it (any case); enter keeps it, esc puts back the last one, an empty filter shows every group. The status line says `14 of 612 groups`; `a`, `space` counts, `n`, `m` and `p` work on the groups shown, and choices made in hidden groups are kept for when they show again. A group keeps its number (`g` to a hidden one says so) (Phase 16) |
+| `s` | the order: as listed (exact, near, video), most reclaimable first, by the keeper's folder; the cursor stays on its file (Phase 16) |
+| `f` | on a file: its folder becomes the preferred home — every group with a member in it or below it takes the first such member for keeper (re-related, as `k` does) and the status line says `keeping in Photos\Library`; `f` on a file of that folder again takes the rule back and the keepers it changed with it. One key for what was one `k` per group (Phase 16) |
 | `n` | the `would` lines of `milk --dry-run` for the selection, on the main screen, under the native command; enter comes back |
 | `m` / `p` | a confirm bar, `milk 12 → _milked, 2.87 MB, 2 by hand   enter go   esc back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit`, with `r retry N` when files were in use or refused and, after a purge, `m milk the N the bin refused into _milked` (Phase 10); `u undo it` appears only when the action changed something |
 | `u` | reverse the newest change of this sitting (its own journal, by id), restore its groups, and come back; changes stack, so `u` again reverses the one before |

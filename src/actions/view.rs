@@ -33,9 +33,15 @@ pub(crate) trait GroupView {
     /// Make file `i` the keeper (`0 < i < len`); the others are related to
     /// it afresh.
     fn set_keeper(&mut self, i: usize);
+    /// What acting on the group would free, as its header says.
+    fn reclaim(&self) -> u64;
 }
 
 impl GroupView for Group {
+    fn reclaim(&self) -> u64 {
+        self.reclaimable()
+    }
+
     fn len(&self) -> usize {
         self.members.len()
     }
@@ -72,6 +78,10 @@ impl GroupView for Group {
 }
 
 impl GroupView for NearGroup {
+    fn reclaim(&self) -> u64 {
+        self.reclaimable()
+    }
+
     fn len(&self) -> usize {
         self.members.len()
     }
@@ -109,6 +119,10 @@ impl GroupView for NearGroup {
 }
 
 impl GroupView for VideoGroup {
+    fn reclaim(&self) -> u64 {
+        self.reclaimable()
+    }
+
     fn len(&self) -> usize {
         self.members.len()
     }

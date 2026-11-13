@@ -33,7 +33,7 @@ use crate::util::{fmt_count, rel_display, shorten_middle};
 use state::{Act, Effect, GroupInfo, Key, Layout, MemberInfo, Row, State};
 
 /// The workspace's view of the groups.
-pub(crate) fn layout_of(f: &Found) -> Layout {
+pub(crate) fn layout_of(f: &Found, root: &std::path::Path) -> Layout {
     Layout {
         groups: f
             .views()
@@ -41,12 +41,54 @@ pub(crate) fn layout_of(f: &Found) -> Layout {
                 members: (0..g.len())
                     .map(|i| MemberInfo {
                         path: g.path(i).to_path_buf(),
+                        shown: rel_display(g.path(i), root),
                         size: g.size(i),
                         role: g.role(i),
                     })
                     .collect(),
+                reclaim: g.reclaim(),
             })
             .collect(),
+    }
+}
+
+/// `f`: every group with a member under `folder` (as listed) takes the
+/// first such member for keeper, unless its keeper is under it already.
+/// Returns (new keeper, old keeper) for each group changed, so the rule
+/// can be taken back. (Phase 16, NF-10)
+fn prefer_folder(f: &mut Found, root: &std::path::Path, folder: &str) -> Vec<(PathBuf, PathBuf)> {
+    let under = |p: &std::path::Path| {
+        let shown = rel_display(p, root);
+        shown
+            .strip_prefix(folder)
+            .is_some_and(|rest| folder.is_empty() || rest.starts_with(['/', '\\']))
+    };
+    let mut changed = Vec::new();
+    for n in 1..=f.group_count() {
+        let Some(g) = f.view_mut(n - 1) else { continue };
+        if under(g.path(0)) {
+            continue;
+        }
+        if let Some(i) = (1..g.len()).find(|&i| under(g.path(i))) {
+            let (new, old) = (g.path(i).to_path_buf(), g.path(0).to_path_buf());
+            g.set_keeper(i);
+            changed.push((new, old));
+        }
+    }
+    changed
+}
+
+/// The preferred folder taken back: each group whose keeper `f` chose
+/// gets its old keeper again, when both are still in it.
+fn prefer_undo(f: &mut Found, changed: &[(PathBuf, PathBuf)]) {
+    for n in 1..=f.group_count() {
+        let Some(g) = f.view_mut(n - 1) else { continue };
+        let keeper = g.path(0).to_path_buf();
+        if let Some((_, old)) = changed.iter().find(|(new, _)| *new == keeper) {
+            if let Some(i) = (1..g.len()).find(|&i| g.path(i) == old) {
+                g.set_keeper(i);
+            }
+        }
     }
 }
 
@@ -67,13 +109,21 @@ fn listing_lines(
         .into_iter()
         .filter(|l| !l.trim().is_empty())
         .collect();
-    let lines_up = lines.len() == st.rows.len()
-        && st.rows.iter().zip(&lines).all(|(row, l)| match row {
+    // the listing has every group as listed; the rows are the groups shown,
+    // in the order shown
+    let all = state::all_rows(&st.layout);
+    let lines_up = lines.len() == all.len()
+        && all.iter().zip(&lines).all(|(row, l)| match row {
             Row::Head(_) => l.starts_with(' ') && !l.starts_with("  "),
             Row::Member(_, _) => l.starts_with("   "),
         });
     if lines_up {
-        return lines;
+        let by_row: std::collections::HashMap<Row, String> = all.into_iter().zip(lines).collect();
+        return st
+            .rows
+            .iter()
+            .map(|row| by_row.get(row).cloned().unwrap_or_default())
+            .collect();
     }
     st.rows
         .iter()
@@ -270,7 +320,9 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
         .next()
         .unwrap_or_default();
     let (mut cols, mut rows) = term_size(r);
-    let mut st = State::new(layout_of(f), rows.saturating_sub(6));
+    // the keepers `f` changed: (new, old), to take the rule back
+    let mut preferred: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut st = State::new(layout_of(f, &inv.root), rows.saturating_sub(6));
     let mut lines = listing_lines(f, inv, r, &st, cols);
     let protocol = preview::detect();
 
@@ -305,10 +357,43 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             }
             Effect::Keeper(g, m) => {
                 if f.set_keeper(g + 1, m) {
-                    st.relayout(layout_of(f));
+                    st.relayout(layout_of(f, &inv.root));
                     lines = listing_lines(f, inv, r, &st, cols);
                     st.message = Some("new keeper; the group re-related to it".into());
                 }
+            }
+            Effect::Prefer(g, m) => {
+                let shown = st.layout.groups[g].members[m].shown.clone();
+                let folder = shown
+                    .rfind(['/', '\\'])
+                    .map_or(String::new(), |i| shown[..i].to_string());
+                prefer_undo(f, &preferred);
+                preferred = prefer_folder(f, &inv.root, &folder);
+                st.relayout(layout_of(f, &inv.root));
+                lines = listing_lines(f, inv, r, &st, cols);
+                let place = if folder.is_empty() {
+                    "."
+                } else {
+                    folder.as_str()
+                };
+                st.message = Some(format!(
+                    "keeping in {place}: {} {} changed",
+                    preferred.len(),
+                    if preferred.len() == 1 {
+                        "keeper"
+                    } else {
+                        "keepers"
+                    }
+                ));
+                st.prefer = Some(folder);
+            }
+            Effect::PreferOff => {
+                prefer_undo(f, &preferred);
+                preferred.clear();
+                st.prefer = None;
+                st.relayout(layout_of(f, &inv.root));
+                lines = listing_lines(f, inv, r, &st, cols);
+                st.message = Some("no preferred folder; the keepers back".into());
             }
             Effect::Reveal(g, m) => {
                 let path = st.layout.groups[g].members[m].path.clone();
@@ -327,7 +412,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 r.blank();
                 r.note(Paint::Plate, &dry.command_line_as(Command::Milk));
                 r.blank();
-                let list = chosen_items(f, st.selection());
+                let list = chosen_items(f, &st.selection());
                 actions::act_milk(f, &list, inv, r, true);
                 let k = pause(r, &[("enter", "back to the groups"), ("q", "quit")]);
                 if matches!(k, Key::Char('q') | Key::Quit) {
@@ -342,7 +427,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             }
             Effect::Act(act) => {
                 leave_screen();
-                let sel: HashSet<PathBuf> = st.selection().clone();
+                let sel: HashSet<PathBuf> = st.selection();
                 let mut acted = act_on(act, f, &sel, inv, r, &mut undo_stack);
                 let mut last = act;
                 code = acted.code;
@@ -350,7 +435,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 // what failed (by kind), undo, quit — as often as needed
                 loop {
                     st.changes = undo_stack.len();
-                    st.relayout(layout_of(f));
+                    st.relayout(layout_of(f, &inv.root));
                     lines = listing_lines(f, inv, r, &st, cols);
                     match after_change(r, f, &acted, last) {
                         After::Back => {
@@ -373,7 +458,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                         After::Undo => {
                             code = undo_last(&mut undo_stack, f, inv, r);
                             st.changes = undo_stack.len();
-                            st.relayout(layout_of(f));
+                            st.relayout(layout_of(f, &inv.root));
                             lines = listing_lines(f, inv, r, &st, cols);
                             if !back_or_quit(r, f) || enter_screen().is_err() {
                                 return code;
@@ -388,7 +473,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                 leave_screen();
                 code = undo_last(&mut undo_stack, f, inv, r);
                 st.changes = undo_stack.len();
-                st.relayout(layout_of(f));
+                st.relayout(layout_of(f, &inv.root));
                 lines = listing_lines(f, inv, r, &st, cols);
                 if !back_or_quit(r, f) || enter_screen().is_err() {
                     return code;

@@ -272,6 +272,22 @@ fn write_big_photo_fixture() {
     }
 }
 
+/// Every file under `dir`, relative, `/`-separated.
+fn walk_files(dir: &Path) -> Vec<String> {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .flatten()
+        .filter(|e| e.file_type().is_file())
+        .map(|e| {
+            e.path()
+                .strip_prefix(dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect()
+}
+
 fn run(fx: &Fx, args: &[&str]) -> (i32, String, String) {
     let out = Command::new(bin())
         .args(args)
@@ -1784,6 +1800,82 @@ fn find_on_a_terminal_acts_from_the_result() {
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
     // shown by `--nocapture`: the Windows launcher's summary reads it
     eprintln!("the workspace driven through a pseudo-terminal: 7 moved, 7 restored");
+}
+
+/// `/` in the workspace (Phase 16, QOL-12): typing `backup` leaves the one
+/// group with a path in a backup folder; `m` then moves that group's two
+/// copies and nothing of the groups the filter hides.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_filter_then_milk_moves_only_what_it_shows() {
+    let fx = fixture_with_photos();
+    let Some(out) = run_tty(
+        &fx,
+        &["find", ".", "img"],
+        &["/", "b", "a", "c", "k", "u", "p", "\r", "m", "\r", "q"],
+        160,
+    ) else {
+        eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
+        return;
+    };
+    assert!(
+        out.contains("1 of "),
+        "the bar counts the groups shown\n{out}"
+    );
+    assert!(out.contains("2 moved"), "{out}");
+    assert!(!fx.root.join("backup/IMG_0041.jpg").exists(), "{out}");
+    assert!(
+        !fx.root.join("backup/old/IMG_0041 (1).jpg").exists(),
+        "{out}"
+    );
+    assert!(
+        fx.root.join("2019/trip/IMG_0041.jpg").exists(),
+        "the keeper stays"
+    );
+    // the groups the filter hid: not touched
+    assert!(
+        fx.root.join("photos/export/beach (copy).jpg").exists(),
+        "{out}"
+    );
+    assert!(fx.root.join("photos/beach_small.jpg").exists(), "{out}");
+}
+
+/// `f` in the workspace (Phase 16, NF-10): on `backup/old/IMG_0041 (1).jpg`
+/// it makes `backup/old` the preferred home; the group takes that copy for
+/// keeper, the bar names the rule, and `m` moves the original and the other
+/// copy — every moved file outside the folder.
+#[cfg(any(unix, windows))]
+#[test]
+fn a_preferred_folder_keeps_its_copies() {
+    let fx = fixture_with_photos();
+    let Some(out) = run_tty(
+        &fx,
+        &["find", ".", "img"],
+        // narrow to the group, the cursor to its last file, prefer, milk
+        &["/", "(", "1", ")", "\r", "\x1b[F", "f", "m", "\r", "q"],
+        160,
+    ) else {
+        eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
+        return;
+    };
+    assert!(
+        out.contains("keeping in backup"),
+        "the bar names the rule\n{out}"
+    );
+    assert!(out.contains("2 moved"), "{out}");
+    assert!(
+        fx.root.join("backup/old/IMG_0041 (1).jpg").exists(),
+        "the preferred copy stays\n{out}"
+    );
+    assert!(!fx.root.join("2019/trip/IMG_0041.jpg").exists(), "{out}");
+    assert!(!fx.root.join("backup/IMG_0041.jpg").exists(), "{out}");
+    let milked: Vec<String> = walk_files(&fx.root.join("_milked"));
+    assert!(
+        milked
+            .iter()
+            .all(|p| !p.contains("backup/old") && !p.contains("backup\\old")),
+        "nothing moved out of the preferred folder: {milked:?}"
+    );
 }
 
 /// Colour on a terminal (QOL-10): with `NO_COLOR` unset, the doctor finds
