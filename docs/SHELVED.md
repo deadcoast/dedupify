@@ -52,6 +52,10 @@ The owner's direction of 2026-11-13, not an IDENTIFIED item; IDs here:
 4. **OUT-02** `RUN_VERIFY`: one live line per workflow, folded to its
    mark and result; each result checked, the pictures by what the
    console shows; the update step's words plain
+5. **OUT-05** the workspace in the fold: sections by kind, a line per
+   group with its bar, the cursor's group unfolded on a tree, the
+   cursor's line lit, the gauge under the body; files fading in, the
+   gauge rolling, the pointer breathing
 
 ## Not yet placed
 

@@ -3827,11 +3827,53 @@ the same without the deep tier (139, 39). Windows: 141, the band test,
 38 end-to-end (5 ignored), the Ctrl-C and pseudo-console steps, the
 Recycle Bin step, the doctor.
 
+## 7. The owner's run of the new launcher (2026-11-14)
+
+`RUN_VERIFY.cmd` at `05719b6` (pulled from `7a56971`; the script updated
+and run on in its fresh copy): 13 of 13 verified in 13 m 53 s. The lines
+it folded to, from SUMMARY.txt: build 137 s, 28.2 MB; tests 180 passed;
+Ctrl-C; terminal (7 moved, 7 restored; 24-bit colour); model 38 passed;
+Recycle Bin; formats (22 of 34 files checked); doctor 16 of 16; find, 7
+runs; milk + undo and purge + undo, 16 files each way, every SHA-256 of
+the 39 equal to before; help and errors; pictures — the doctor in
+colour, the workspace, `the filter shows castle only` (OUT-03:
+`screen_filter.txt` shows NEAR 009, castle.jpg and castle_q60.jpg, `1 of
+12 groups`), `v drew the pair inline` (QOL-13: `screen_view.txt` reads
+`VIEW  group 9  keeper | member  sixel`; `view.png` shows the two castles
+side by side, each filling its half of the 1483 × 882 window).
+
+The same run's `workspace.png` showed the workspace unchanged by the
+fold — the screen `find` opens on a terminal, which covers the fold
+within a second of it being drawn. § 8.
+
+## 8. The workspace in the fold (OUT-05)
+
+`workspace::screen`: `State::lines` lays the body out — sections by kind
+(open when every group fits, else the cursor's), a line per group, the
+cursor's group's files — and `window` scrolls those lines, not the rows,
+keeping the cursor's group line and section above it and its files
+below it when they fit. The rows the keys move through are unchanged, so
+every key does what it did; moving off a group's last file lands on the
+next group's line, which unfolds.
+
+Watched live in tmux (truecolour) on the sample's photos at 133 × 36 and
+80 × 24, frames rendered and looked at: COPIES open with its two groups
+`in exports`; SIMILAR's ten groups with bars from 961 KB down to 23.5 KB
+and `right01.jpg +2 0 B unconfirmed 2` with none; the cursor on
+`aloeL.jpg` inside `shot_a.jpg`'s unfolded tree, its line on a blue
+ground; space on it: `12 selected 2.72 MB of 3.03 MB`, the gauge's last
+tenth back to the groove.
+
+Unit tests: `the_screen_is_exactly_the_terminal_and_fits_its_width`
+(heights 20 and 12, widths 40–200: every section open when the groups
+fit, the other kind folded to its line when not, no files but the
+cursor's group's), `moving_into_the_next_kind_folds_the_last_and_unfolds_the_group`.
+End to end: the resize test measures the gauge (158 cells at 160
+columns, 78 at 80) where it measured the rule.
+
 ## Not verified here
 
-- The launcher itself: PowerShell is not in this container. Its first
-  run is the owner's next `RUN_VERIFY.cmd`; its `pictures` line is where
-  OUT-03 and QOL-13 are confirmed on Windows Terminal, or named as not.
-- The fold in Windows Terminal: its glyphs (braille orbit, heavy rules,
-  half and eighth blocks) are drawn by Cascadia Mono; looked at here only
-  in DejaVu Sans Mono.
+- The workspace in the fold in Windows Terminal: drawn here in tmux; on
+  Windows at the launcher's next run, whose `pictures` line reads the
+  workspace's screen (it looks for a section line now: `GROUP 001` is no
+  longer drawn).

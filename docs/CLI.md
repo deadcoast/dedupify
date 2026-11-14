@@ -127,30 +127,66 @@ offers it by hand. A byte copy of a RAW is an exact duplicate as always.
 
 ### 2a. The result is the workspace **[CLAUDE, under FUOE]**
 
-On a terminal, after `find` prints its stages, groups and totals, the
-same groups open in a screen of their own (the alternate screen; the
-printed listing stays in the scrollback underneath). Phase 8 put a
-one-line bar under the listing; Phase 9 made it this:
+On a terminal, after `find` folds its passes and its yield (§3a), the
+same groups open in a screen of their own (the alternate screen; what
+`find` printed stays in the scrollback underneath). Phase 8 put a
+one-line bar under the listing; Phase 9 made it a screen; Phase 17 drew
+it in the fold **[CLAUDE; the owner's direction of 2026-11-13: the whole
+output redesigned, long lists of one kind folded to a line]**:
 
 ```
- dedupe find  C:\Photos  recursive  all kinds
- ──────────────────────────────────────────────────────────────────────
- ■ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
-   keep  clips\vtest.avi                                        2026-11-09
-▸■ dupe  clips\vtest - Copy.avi
- ◧ NEAR 005   3 similar  +1 kin   918 KB reclaimable
-   keep  photos\shot_a.jpg                 1282×1110   531 KB   2026-11-09
- ■ near  photos\exports\shot_a_export.jpg  961×832     223 KB   resized 75%
- □ near  photos\exports\shot_a_crop.jpg    1100×950    301 KB   similar, unconfirmed
- · kin   photos\shot_b.jpg                 1282×1110   642 KB   another shot, 05:06:08
- ──────────────────────────────────────────────────────────────────────
- 15 selected  19.2 MB                                         group 1/14
-   ↑↓ move  space select  a all  k keeper  v view  o reveal  g go to  / filter  s sort
- ▸  m milk 15 → _milked  p purge 15 → Recycle Bin  n preview  q quit
+ [dedupe] find  C:\Photos   recursive · all kinds
+
+ COPIES    2 groups · 339 KB · 2 chosen  ──────────────────────────────────────
+ ■ starry_night.jpg      +1    301 KB  ████          in exports
+ ■ home.jpg              +1   37.1 KB  ▌             in exports
+ SIMILAR   10 groups · 2.69 MB · 11 chosen  ───────────────────────────────────
+ ■ graf1.png             +1    961 KB  ████████████  mirrored
+ ◧ shot_a.jpg            +4    935 KB  ███████████▊  same picture 2 · resized · another shot
+   ├ keep  shot_a.jpg                    1282×1110   536 KB   2026-11-09
+ ■ ├ near  exports\shot_a_export.jpg     961×832     229 KB   resized 75%       d 0 p 0 q 2
+▸□ ├ near  aloeL.jpg                     1282×1110   313 KB   same picture      d 0 p 0 q 0
+ · ├ kin   shot_b.jpg                    1282×1110   647 KB   another shot, 05:06:08
+ ■ └ near  exports\shot_a_stripped.jpg   1282×1110   392 KB   same picture      d 0 p 0 q 0
+ ■ rubberwhale1.png      +1    358 KB  ████▌         re-encoded
+ □ right01.jpg           +2       0 B                unconfirmed 2
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ 12 selected  2.72 MB of 3.03 MB                                     group 4/12
+   ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  …
+ ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  q quit
 ```
 
-Each line is the listing's own line (words first, evidence dim), two
-cells narrower, with the cursor `▸` and a mark before it:
+The body, top to bottom:
+
+- **Sections**, one per kind, in the order `find` lists them: `COPIES`,
+  `SIMILAR`, `VIDEO`, each in its kind's colour (§3a's hues) with its
+  groups, what they free and how many files are chosen. When every
+  group fits the body every section is open, a hairline after its
+  figures; when they do not, the sections the cursor is not in fold to
+  their one line, the hairline replaced by a skyline of their groups.
+  Sorted by `s`, the sections give way to one, `GROUPS`, naming the order.
+- **Groups**, one line each: the keeper's name, how many files beside
+  it, what the group frees, a bar of that against the largest group
+  shown (eighths of a cell, in the kind's colour; from 70 columns), then
+  what its files are — the members' words without their figures, most
+  common first (§3a's tally); for copies, where they are: `in exports`,
+  `beside it`.
+- **The cursor's group** unfolds under its line: its files on a tree
+  (`├`, `└` in the kind's colour), each the full output's own line —
+  role, path, size and date, the words, the evidence dim. Moving off
+  the group folds it and unfolds the next.
+- **The cursor's line** is lit across the width on a ground of its
+  kind's colour; its pointer `▸` breathes between amber and white
+  between keys (its line drawn again twelve times a second).
+- **The gauge** under the body (the line the full output drew as a
+  rule): the bytes chosen, of all the groups shown can free, in each
+  kind's colour on the groove.
+
+Motion: when the cursor's group changes, its files come in from the
+groove over four frames (30 ms apart); when the cursor crosses into
+another kind, that section's groups do; when the selection changes the
+gauge rolls to it over the same frames. A key pressed during the frames
+ends them at once and is taken.
 
 | mark | meaning |
 |---|---|
@@ -302,7 +338,8 @@ takes. The owner's direction (2026-11-13): the full output stays, as
 `--verbose`; the default is redesigned from the ground up — animated,
 long lists of one kind folded into a single live line per section, each
 section marked once it is done and checked, essential data without bloat.
-The workspace (§2a) always shows the full listing.
+The workspace (§2a) is drawn in the fold too: a line per group, the
+cursor's group unfolded to the full output's lines for its files.
 
 ### 3a. The fold — the default output **[CLAUDE, Phase 17]**
 

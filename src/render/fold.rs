@@ -42,14 +42,14 @@ pub(crate) const FRAME: Duration = Duration::from_millis(40);
 const LABEL: usize = 8;
 
 /// The groove of an empty track and the dim parts of a line.
-const GROOVE: Rgb = Rgb(0x3A, 0x3A, 0x3A);
-const DIM: Rgb = Rgb(0x8A, 0x8A, 0x8A);
-const PLATE: Rgb = Rgb(0xE8, 0xE4, 0xD8);
+pub(crate) const GROOVE: Rgb = Rgb(0x3A, 0x3A, 0x3A);
+pub(crate) const DIM: Rgb = Rgb(0x8A, 0x8A, 0x8A);
+pub(crate) const PLATE: Rgb = Rgb(0xE8, 0xE4, 0xD8);
 
 /// A section: its label and its colour, which its share of the yield's
 /// bar and its cells of the skyline carry too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Hue {
+pub enum Hue {
     Files,
     Copies,
     Similar,
@@ -553,7 +553,52 @@ impl Yield {
     }
 }
 
-const BLOCKS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+pub(crate) const BLOCKS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
+
+/// What members are, by their words without the figures, most common
+/// first (a tie in the order given): `resized 75%` and `resized 50%` are
+/// `resized 2`; `another shot, 05:06:08` is `another shot`; `similar,
+/// unconfirmed` is `unconfirmed`.
+pub(crate) fn tally(words: impl Iterator<Item = String>) -> Vec<(String, u64)> {
+    let mut v: Vec<(String, u64)> = Vec::new();
+    for w in words {
+        let k = if w.starts_with("another shot") {
+            "another shot".to_string()
+        } else if w == "similar, unconfirmed" {
+            "unconfirmed".to_string()
+        } else {
+            w.split(',')
+                .next()
+                .unwrap_or("")
+                .split_whitespace()
+                .filter(|x| !x.chars().any(|c| c.is_ascii_digit()))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        if k.is_empty() {
+            continue;
+        }
+        match v.iter_mut().find(|e| e.0 == k) {
+            Some(e) => e.1 += 1,
+            None => v.push((k, 1)),
+        }
+    }
+    v.sort_by_key(|e| std::cmp::Reverse(e.1));
+    v
+}
+
+/// A tally as segments: the word dim, a count above one lit.
+pub(crate) fn tally_segments(t: &Theme, v: Vec<(String, u64)>) -> Vec<String> {
+    v.into_iter()
+        .map(|(k, n)| {
+            if n == 1 {
+                dim(t, &k)
+            } else {
+                format!("{} {}", dim(t, &k), figure(t, &fmt_count(n)))
+            }
+        })
+        .collect()
+}
 
 fn ease_out(p: f64) -> f64 {
     1.0 - (1.0 - p.clamp(0.0, 1.0)).powi(3)
@@ -801,6 +846,31 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_tally_counts_what_members_are_without_their_figures() {
+        let words = [
+            "resized 75%",
+            "mirrored",
+            "resized 50%",
+            "rotated 90°",
+            "another shot, 05:06:08",
+            "similar, unconfirmed",
+            "mirrored, re-encoded",
+            "rotated +5°",
+        ];
+        let v = tally(words.iter().map(|w| w.to_string()));
+        assert_eq!(
+            v,
+            [
+                ("resized".to_string(), 2),
+                ("mirrored".to_string(), 2),
+                ("rotated".to_string(), 2),
+                ("another shot".to_string(), 1),
+                ("unconfirmed".to_string(), 1),
+            ]
+        );
     }
 
     #[test]

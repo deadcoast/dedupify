@@ -30,23 +30,35 @@ use crate::render::Renderer;
 use crate::theme::Role as Paint;
 use crate::util::{fmt_count, rel_display, shorten_middle};
 
-use state::{Act, Effect, GroupInfo, Key, Layout, MemberInfo, Row, State};
+use screen::{Frame, Fresh};
+use state::{Act, Effect, GroupInfo, Hue, Key, Layout, MemberInfo, Row, State};
 
 /// The workspace's view of the groups.
 pub(crate) fn layout_of(f: &Found, root: &std::path::Path) -> Layout {
+    // the views come exact, near, video: each group's kind by its place
+    let (exact, near) = (f.groups.len(), f.near.len());
     Layout {
         groups: f
             .views()
-            .map(|g| GroupInfo {
+            .enumerate()
+            .map(|(n, g)| GroupInfo {
                 members: (0..g.len())
                     .map(|i| MemberInfo {
                         path: g.path(i).to_path_buf(),
                         shown: rel_display(g.path(i), root),
                         size: g.size(i),
                         role: g.role(i),
+                        words: if i == 0 { String::new() } else { g.words(i) },
                     })
                     .collect(),
                 reclaim: g.reclaim(),
+                kind: if n < exact {
+                    Hue::Copies
+                } else if n < exact + near {
+                    Hue::Similar
+                } else {
+                    Hue::Video
+                },
             })
             .collect(),
     }
@@ -105,7 +117,8 @@ struct Listing {
 
 impl Listing {
     fn of(f: &Found, inv: &Invocation, r: &Renderer, st: &State, width_cells: usize) -> Listing {
-        let captured = r.capture(width_cells.saturating_sub(2).max(40), |c| {
+        // five cells narrower: the pointer, the mark, a space, the tree
+        let captured = r.capture(width_cells.saturating_sub(5).max(40), |c| {
             c.listing(&f.groups, &f.near, &f.video, &inv.root);
         });
         let lines: Vec<String> = captured
@@ -137,14 +150,6 @@ impl Listing {
         };
         Listing { by_row }
     }
-
-    /// The lines of the rows shown, in the order shown.
-    fn shown(&self, st: &State) -> Vec<String> {
-        st.rows
-            .iter()
-            .map(|row| self.by_row.get(row).cloned().unwrap_or_default())
-            .collect()
-    }
 }
 
 /// The paths of `sel` as action items, by-hand ones marked.
@@ -173,8 +178,23 @@ enum Input {
 
 fn read_input() -> io::Result<Input> {
     loop {
+        if let Some(i) = next_input(None)? {
+            return Ok(i);
+        }
+    }
+}
+
+/// The next key or resize, waiting at most `wait` (forever when None);
+/// None when the wait ran out or the event was neither.
+fn next_input(wait: Option<std::time::Duration>) -> io::Result<Option<Input>> {
+    if let Some(w) = wait {
+        if !event::poll(w)? {
+            return Ok(None);
+        }
+    }
+    {
         match event::read()? {
-            Event::Resize(_, _) => return Ok(Input::Resize),
+            Event::Resize(_, _) => Ok(Some(Input::Resize)),
             Event::Key(k) if k.kind == KeyEventKind::Press => {
                 let key = match k.code {
                     KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => Key::Quit,
@@ -189,11 +209,11 @@ fn read_input() -> io::Result<Input> {
                     KeyCode::Enter => Key::Enter,
                     KeyCode::Esc => Key::Esc,
                     KeyCode::Backspace => Key::Backspace,
-                    _ => continue,
+                    _ => return Ok(None),
                 };
-                return Ok(Input::Key(key));
+                Ok(Some(Input::Key(key)))
             }
-            _ => continue,
+            _ => Ok(None),
         }
     }
 }
@@ -230,6 +250,15 @@ fn draw(lines: &[String]) -> io::Result<()> {
         queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
     }
     queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+    out.flush()
+}
+
+/// One line of the screen again (the pointer breathing).
+fn draw_line(i: usize, line: &str) -> io::Result<()> {
+    let mut out = io::stdout().lock();
+    queue!(out, cursor::MoveTo(0, i as u16))?;
+    out.write_all(line.as_bytes())?;
+    queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
     out.flush()
 }
 
@@ -323,11 +352,6 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
     let mut code = EXIT_OK;
     // (journal id, the groups before that change), newest last
     let mut undo_stack: Vec<(String, Found)> = Vec::new();
-    let title = r
-        .capture(r.theme.width, |c| c.header(inv))
-        .into_iter()
-        .next()
-        .unwrap_or_default();
     let (mut cols, mut rows) = term_size(r);
     // the keepers `f` changed: (new, old), to take the rule back
     let mut preferred: Vec<(PathBuf, PathBuf)> = Vec::new();
@@ -340,11 +364,79 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
         r.next_after_find(inv);
         return code;
     }
+    let born = std::time::Instant::now();
+    // what was drawn last: the cursor's group and kind, the chosen bytes
+    let mut was: (Option<usize>, Option<Hue>, u64) = (None, None, st.stats().1);
     loop {
         let mut t = r.theme;
         t.width = cols;
-        let _ = draw(&st.screen(&t, &title, &lines.shown(&st), rows));
-        let key = match read_input() {
+        let title = r.header_text(inv, true, cols);
+        // what moved since the last draw comes in: a group's files that
+        // unfolded, a section's groups, the gauge rolling to the selection
+        let here = st.cursor_group();
+        let kind = here.map(|g| st.layout.groups[g].kind);
+        let bytes = st.stats().1;
+        let fresh = if kind != was.1 && kind.is_some() && was.0.is_some() {
+            Fresh::Section(kind.unwrap_or(Hue::Copies))
+        } else if here != was.0 && here.is_some() && was.0.is_some() {
+            Fresh::Group(here.unwrap_or(0))
+        } else {
+            Fresh::None
+        };
+        let from = was.2;
+        was = (here, kind, bytes);
+        let breath = |t0: std::time::Instant| {
+            0.5 - 0.5 * (t0.elapsed().as_secs_f64() / 1.4 * std::f64::consts::TAU).cos()
+        };
+        let mut pending = None;
+        if t.live && (fresh != Fresh::None || from != bytes) {
+            // four frames, 30 ms apart; a key ends them at once
+            for k in 1..=4 {
+                let p = k as f64 / 5.0;
+                let e = 1.0 - (1.0 - p).powi(3);
+                let frame = Frame {
+                    fade: e,
+                    fresh,
+                    gauge: Some((from as f64 + (bytes as f64 - from as f64) * e) as u64),
+                    breath: breath(born),
+                };
+                let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &frame));
+                match next_input(Some(std::time::Duration::from_millis(30))) {
+                    Ok(Some(i)) => {
+                        pending = Some(i);
+                        break;
+                    }
+                    Ok(None) => {}
+                    Err(_) => break,
+                }
+            }
+        }
+        let still = |at: std::time::Instant| Frame {
+            breath: breath(at),
+            ..Frame::STILL
+        };
+        let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &still(born)));
+        // between keys the pointer breathes: its line drawn again, 12 a
+        // second
+        let input = match pending {
+            Some(i) => Ok(i),
+            None => loop {
+                match next_input(Some(std::time::Duration::from_millis(80))) {
+                    Ok(Some(i)) => break Ok(i),
+                    Ok(None) => {
+                        if !t.live {
+                            continue;
+                        }
+                        let screen = st.screen(&t, &title, &lines.by_row, rows, &still(born));
+                        if let Some(i) = st.cursor_line() {
+                            let _ = draw_line(i, &screen[i]);
+                        }
+                    }
+                    Err(e) => break Err(e),
+                }
+            },
+        };
+        let key = match input {
             Ok(Input::Key(k)) => k,
             Ok(Input::Resize) => {
                 (cols, rows) = term_size(r);

@@ -2058,8 +2058,10 @@ fn a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection() {
     };
     let before = plain_text(&raw[..marks[2]]);
     let after = plain_text(&raw[marks[2]..marks[3]]);
+    // the gauge under the groups spans the width but its two edge cells:
+    // the chosen part `▄`, the rest its groove (`▁` without colour)
     let rules = |s: &str| -> Vec<usize> {
-        s.split(|c| c != '─')
+        s.split(|c| c != '▄' && c != '▁')
             .map(|r| r.chars().count())
             .filter(|&n| n >= 20)
             .collect()

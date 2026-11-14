@@ -443,8 +443,11 @@ default a new, animated output that is the product's flagship, essential
 data without bloat; long lists of one kind folded into one live line per
 section, marked once the section is done and checked; the same for
 `RUN_VERIFY`, one line per workflow, its update step saying plainly what
-was updated. The design is CLI.md §3a; the launcher's in VERIFICATION §
-Phase 17. Items: SHELVED.md § Phase 17.
+was updated. The design is CLI.md §3a; the workspace's §2a; the
+launcher's in VERIFICATION § Phase 17. Items: SHELVED.md § Phase 17.
+The owner's first run of the new launcher (2026-11-14) verified 13 of 13
+and showed the workspace — the screen `find` opens on a terminal —
+unchanged; OUT-05 draws it in the fold.
 
 ## Docs chain
 

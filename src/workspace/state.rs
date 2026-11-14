@@ -8,8 +8,11 @@
 //! `Layout` when the groups change. The screen composed from this state
 //! is `screen.rs` (Phase 16, SC-12).
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+pub(crate) use crate::render::fold::Hue;
 
 /// What the workspace may do with a member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +44,9 @@ pub struct MemberInfo {
     pub shown: String,
     pub size: u64,
     pub role: Role,
+    /// What it is beside the keeper, as the listing says (`resized 75%`);
+    /// empty for the keeper.
+    pub words: String,
 }
 
 /// One group as the workspace sees it, keeper first.
@@ -49,6 +55,8 @@ pub struct GroupInfo {
     pub members: Vec<MemberInfo>,
     /// What acting on the group would free, as its header says.
     pub reclaim: u64,
+    /// Its kind: the section it is listed in, the colour it is drawn in.
+    pub kind: Hue,
 }
 
 /// The order `s` cycles through (Phase 16, QOL-12).
@@ -180,6 +188,13 @@ pub struct State {
     pub changes: usize,
     /// One status note, cleared by the next key.
     pub message: Option<String>,
+    /// The first body line drawn: the fold's lines are not the rows (other
+    /// groups fold to a line, other sections too), so the screen scrolls
+    /// them itself and keeps its place here.
+    pub(super) vtop: Cell<usize>,
+    /// The screen line the cursor was last drawn on (the pointer breathes
+    /// there between keys).
+    pub(super) cursor_at: Cell<Option<usize>>,
 }
 
 fn rows_of(layout: &Layout, view: &[usize]) -> Vec<Row> {
@@ -254,6 +269,8 @@ impl State {
             mode: Mode::Browse,
             changes: 0,
             message: None,
+            vtop: Cell::new(0),
+            cursor_at: Cell::new(None),
         };
         for g in &st.layout.groups {
             for m in &g.members {
@@ -358,6 +375,11 @@ impl State {
             Row::Member(g, m) => Some(self.layout.groups[*g].members[*m].path.clone()),
             Row::Head(_) => None,
         }
+    }
+
+    /// The screen line the cursor was last drawn on.
+    pub(super) fn cursor_line(&self) -> Option<usize> {
+        self.cursor_at.get()
     }
 
     pub(super) fn cursor_group(&self) -> Option<usize> {
@@ -857,13 +879,22 @@ pub(super) mod tests {
             shown: path.to_string(),
             size,
             role,
+            words: if role == Role::Keeper {
+                String::new()
+            } else {
+                "near copy".into()
+            },
         }
     }
 
     /// A group whose header frees its members' bytes.
     pub(crate) fn gi(members: Vec<MemberInfo>) -> GroupInfo {
         let reclaim = members.iter().skip(1).map(|m| m.size).sum();
-        GroupInfo { members, reclaim }
+        GroupInfo {
+            members,
+            reclaim,
+            kind: Hue::Similar,
+        }
     }
 
     /// Three groups: an exact pair; a near group with a confirmed member,
@@ -872,10 +903,13 @@ pub(super) mod tests {
     pub(crate) fn layout() -> Layout {
         Layout {
             groups: vec![
-                gi(vec![
-                    mi("a.jpg", 100, Role::Keeper),
-                    mi("a (1).jpg", 100, Role::Act),
-                ]),
+                GroupInfo {
+                    kind: Hue::Copies,
+                    ..gi(vec![
+                        mi("a.jpg", 100, Role::Keeper),
+                        mi("a (1).jpg", 100, Role::Act),
+                    ])
+                },
                 gi(vec![
                     mi("b.png", 300, Role::Keeper),
                     mi("b_small.jpg", 50, Role::Act),
@@ -940,7 +974,15 @@ pub(super) mod tests {
             .contains("1 other shot chosen by you"));
         // the confirm names them
         st.handle(Key::Char('m'));
-        let screen = st.screen(&theme(120), "t", &[], 12).join("\n");
+        let screen = st
+            .screen(
+                &theme(120),
+                "t",
+                &HashMap::new(),
+                12,
+                &super::super::screen::Frame::STILL,
+            )
+            .join("\n");
         assert!(screen.contains("1 other shot"), "{screen}");
         st.handle(Key::Esc);
         // kept through a relayout with the same roles; space takes it back out
@@ -1229,6 +1271,7 @@ pub(super) mod tests {
             shown: p.to_string(),
             size: 10,
             role: Role::Act,
+            words: "same bytes".into(),
         };
         let mut l = Layout {
             groups: vec![

@@ -446,43 +446,6 @@ fn copies_segments(t: &Theme, groups: &[exact::Group], p: &PipelineStats) -> (Ma
     (mark, v)
 }
 
-/// What each member is, by its words without their figures, most common
-/// first: `resized 3 · mirrored 2`.
-fn tally(words: impl Iterator<Item = String>) -> Vec<(String, u64)> {
-    let mut v: Vec<(String, u64)> = Vec::new();
-    for w in words {
-        let k = if w.starts_with("another shot") {
-            "another shot".to_string()
-        } else if w == "similar, unconfirmed" {
-            "unconfirmed".to_string()
-        } else {
-            w.split(',')
-                .next()
-                .unwrap_or("")
-                .split_whitespace()
-                .filter(|x| !x.chars().any(|c| c.is_ascii_digit()))
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        if k.is_empty() {
-            continue;
-        }
-        match v.iter_mut().find(|e| e.0 == k) {
-            Some(e) => e.1 += 1,
-            None => v.push((k, 1)),
-        }
-    }
-    // most common first; a tie keeps the order the listing shows
-    v.sort_by_key(|e| std::cmp::Reverse(e.1));
-    v
-}
-
-fn tally_segments(t: &Theme, v: Vec<(String, u64)>) -> Vec<String> {
-    v.into_iter()
-        .map(|(k, n)| format!("{} {}", fold::dim(t, &k), fold::figure(t, &fmt_count(n))))
-        .collect()
-}
-
 /// The image pass: groups, similar members, what they free, what could
 /// not be read, then what the members are.
 fn similar_segments(t: &Theme, groups: &[NearGroup], n: &NearStats) -> (Mark, Vec<String>) {
@@ -553,7 +516,7 @@ fn similar_segments(t: &Theme, groups: &[NearGroup], n: &NearStats) -> (Mark, Ve
             .iter()
             .filter_map(move |m| m.relation.map(|r| r.words(k, &m.hashed)))
     });
-    v.extend(tally_segments(t, tally(words)));
+    v.extend(fold::tally_segments(t, fold::tally(words)));
     if n.deep {
         v.push(fold::dim(t, "with the deep model"));
     }
@@ -619,7 +582,7 @@ fn video_segments(t: &Theme, groups: &[VideoGroup], s: &VideoStats) -> (Mark, Ve
             .iter()
             .filter_map(move |m| m.relation.map(|r| r.words(&k.sig, &m.hashed.sig)))
     });
-    v.extend(tally_segments(t, tally(words)));
+    v.extend(fold::tally_segments(t, fold::tally(words)));
     if s.unreadable > stalled {
         v.push(fold::dim(
             t,
@@ -676,35 +639,5 @@ fn yield_of(f: &Found) -> Yield {
         ],
         files,
         groups,
-    }
-}
-
-#[cfg(test)]
-mod fold_tests {
-    use super::tally;
-
-    #[test]
-    fn the_tally_counts_what_members_are_without_their_figures() {
-        let words = [
-            "resized 75%",
-            "mirrored",
-            "resized 50%",
-            "rotated 90°",
-            "another shot, 05:06:08",
-            "similar, unconfirmed",
-            "mirrored, re-encoded",
-            "rotated +5°",
-        ];
-        let v = tally(words.iter().map(|w| w.to_string()));
-        assert_eq!(
-            v,
-            [
-                ("resized".to_string(), 2),
-                ("mirrored".to_string(), 2),
-                ("rotated".to_string(), 2),
-                ("another shot".to_string(), 1),
-                ("unconfirmed".to_string(), 1),
-            ]
-        );
     }
 }

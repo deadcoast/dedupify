@@ -898,7 +898,7 @@ if ($h -eq [IntPtr]::Zero) {
     if (-not ($ws + $fl + $vw).Trim()) {
         $missing += 'the console text could not be read'
     } else {
-        if ($ws -match 'GROUP 001' -and $ws -match 'keep') { $found += 'workspace' } else { $missing += 'no workspace on screen' }
+        if ($ws -match '(COPIES|SIMILAR|VIDEO)\s+\d+ groups?' -and $ws -match 'keep') { $found += 'workspace' } else { $missing += 'no workspace on screen' }
         if ($fl -match 'castle_q60' -and $fl -notmatch 'starry_night') { $found += 'the filter shows castle only' } else { $missing += 'the filter shows other groups' }
         if ($vw -match 'VIEW' -and $vw -notmatch 'no inline graphics') { $found += 'v drew the pair inline' }
         elseif ($vw -match 'no inline graphics') { $missing += 'v opened the system viewer: no inline graphics found' }

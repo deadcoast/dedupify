@@ -106,10 +106,24 @@ impl Renderer {
     }
 
     pub fn header(&self, inv: &Invocation) {
-        let t = &self.theme;
         // the doctor's page keeps its own frame: a rule under the header
         // and one over its verdict
         let folding = self.folding() && inv.command != Command::Doctor;
+        self.line(&self.header_text(inv, folding, self.theme.width));
+        if folding {
+            self.blank();
+        } else {
+            self.rule();
+        }
+    }
+
+    /// The header line `width` cells wide: the fold's (the name on its
+    /// plate, the parts joined by `·`) or the full output's. The workspace
+    /// draws the fold's at the top of its screen.
+    pub(crate) fn header_text(&self, inv: &Invocation, folding: bool, width: usize) -> String {
+        let mut theme = self.theme;
+        theme.width = width;
+        let t = &theme;
         // everything but the root first, so the root gets what is left;
         // the fold's header carries the name on the brand's amber plate
         let lead = if folding && t.color {
@@ -200,14 +214,11 @@ impl Renderer {
                 line.push_str("   ");
                 line.push_str(&tail.join(&dot));
             }
-            self.line(&line);
-            self.blank();
-            return;
+            return line;
         }
         let mut parts = vec![lead, t.paint(Role::Info, &root)];
         parts.extend(tail);
-        self.line(&format!(" {}", parts.join("  ")));
-        self.rule();
+        format!(" {}", parts.join("  "))
     }
 
     /// A footer note. Longer than the width, it breaks at spaces and goes
