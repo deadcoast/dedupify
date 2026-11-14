@@ -77,9 +77,6 @@ pub const PANELS_MIN: usize = 100;
 /// A picture's fade from the panel's ground, once it arrives.
 pub const FADE: Duration = Duration::from_millis(220);
 
-/// Eighths of a cell, for the groups' bars.
-const EIGHTHS: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
-
 /// `▸ m milk 12 → _milked  p purge …` fitted to `width`: parts whose text
 /// would overflow keep their first two words, then their first, then the
 /// trailing parts are dropped. Returns the painted line.
@@ -165,7 +162,7 @@ fn framed(t: &Theme, title: &str, edge: Rgb, inner: &[String], w: usize, h: usiz
         let l = inner.get(i).map(String::as_str).unwrap_or("");
         let vw = visible_width(l);
         let l = if vw > w {
-            crate::util::fit(&strip_sgr(l), w)
+            crate::util::cut_sgr(l, w)
         } else {
             l.to_string()
         };
@@ -176,41 +173,85 @@ fn framed(t: &Theme, title: &str, edge: Rgb, inner: &[String], w: usize, h: usiz
     out
 }
 
-/// A picture `cw` cells by `ch` rows in half blocks — two pixels a cell,
-/// one above the other, in 24-bit colour — centred; while it is coming,
-/// a sheen crosses its place; as it arrives it rises out of the ground.
+/// The quadrant blocks by which of a cell's four pixels they cover:
+/// top left 8, top right 4, bottom left 2, bottom right 1.
+const QUADS: [&str; 16] = [
+    " ", "▗", "▖", "▄", "▝", "▐", "▞", "▟", "▘", "▚", "▌", "▙", "▀", "▜", "▛", "█",
+];
+
+/// A cell of four pixels as one quadrant block in two colours: of the
+/// ways to split the four into two sets, the one whose sets sit closest
+/// to their own means; the block covers one set in its colour, the ground
+/// is the other's.
+fn quad(p: [Rgb; 4]) -> (usize, Rgb, Rgb) {
+    let mean = |m: usize, on: bool| -> Rgb {
+        let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
+        for (i, c) in p.iter().enumerate() {
+            if ((m >> (3 - i)) & 1 == 1) == on {
+                r += c.0 as u32;
+                g += c.1 as u32;
+                b += c.2 as u32;
+                n += 1;
+            }
+        }
+        if n == 0 {
+            return Rgb(0, 0, 0);
+        }
+        Rgb((r / n) as u8, (g / n) as u8, (b / n) as u8)
+    };
+    let err = |m: usize| -> u32 {
+        let (f, g) = (mean(m, true), mean(m, false));
+        p.iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let k = if (m >> (3 - i)) & 1 == 1 { f } else { g };
+                let d = |a: u8, b: u8| (a as i32 - b as i32).pow(2) as u32;
+                d(c.0, k.0) + d(c.1, k.1) + d(c.2, k.2)
+            })
+            .sum()
+    };
+    // every split up to swapping its two sides, and no split at all
+    let mut best = (15usize, err(15));
+    for m in 1..8 {
+        let e = err(m);
+        if e < best.1 {
+            best = (m, e);
+        }
+    }
+    (best.0, mean(best.0, true), mean(best.0, false))
+}
+
+/// A picture `cw` cells by `ch` rows in quadrant blocks — four pixels a
+/// cell in two of their colours, 24-bit — centred; while it is coming, a
+/// sheen crosses its place; as it arrives it rises out of the ground.
 fn picture(t: &Theme, thumb: &Thumb, cw: usize, ch: usize, aspect: f64, clock: f64) -> Vec<String> {
     let mut out = Vec::with_capacity(ch);
     match thumb {
-        Thumb::Ready(img, at) => {
+        Thumb::Ready(img, at, _) => {
             let a = (at.elapsed().as_secs_f64() / FADE.as_secs_f64()).min(1.0);
             let a = 1.0 - (1.0 - a).powi(2);
-            let (iw, ih) = (img.width() as i64, img.height() as i64);
-            let x0 = (cw as i64 - iw) / 2;
-            let y0 = (2 * ch as i64 - ih) / 2;
-            let px = |x: i64, y: i64| -> Option<Rgb> {
-                let (x, y) = (x - x0, y - y0);
-                if x < 0 || y < 0 || x >= iw || y >= ih {
-                    return None;
-                }
-                let p = img.get_pixel(x as u32, y as u32);
-                Some(GROUND.lerp(Rgb(p[0], p[1], p[2]), a))
+            let (uw, uh) = ((img.width() / 2) as usize, (img.height() / 2) as usize);
+            let x0 = cw.saturating_sub(uw) / 2;
+            let y0 = ch.saturating_sub(uh) / 2;
+            let px = |x: u32, y: u32| -> Rgb {
+                let p = img.get_pixel(x.min(img.width() - 1), y.min(img.height() - 1));
+                GROUND.lerp(Rgb(p[0], p[1], p[2]), a)
             };
-            for r in 0..ch as i64 {
-                let mut line = String::new();
-                for c in 0..cw as i64 {
-                    match (px(c, 2 * r), px(c, 2 * r + 1)) {
-                        (None, None) => line.push(' '),
-                        (Some(Rgb(r1, g1, b1)), None) => {
-                            line.push_str(&format!("\x1b[38;2;{r1};{g1};{b1}m▀\x1b[0m"))
-                        }
-                        (None, Some(Rgb(r2, g2, b2))) => {
-                            line.push_str(&format!("\x1b[38;2;{r2};{g2};{b2}m▄\x1b[0m"))
-                        }
-                        (Some(Rgb(r1, g1, b1)), Some(Rgb(r2, g2, b2))) => line.push_str(&format!(
-                            "\x1b[38;2;{r1};{g1};{b1};48;2;{r2};{g2};{b2}m▀\x1b[0m"
-                        )),
-                    }
+            for r in 0..ch {
+                if r < y0 || r >= y0 + uh {
+                    out.push(String::new());
+                    continue;
+                }
+                let mut line = " ".repeat(x0);
+                let y = 2 * (r - y0) as u32;
+                for c in 0..uw.min(cw) {
+                    let x = 2 * c as u32;
+                    let (m, f, g) = quad([px(x, y), px(x + 1, y), px(x, y + 1), px(x + 1, y + 1)]);
+                    let (Rgb(r1, g1, b1), Rgb(r2, g2, b2)) = (f, g);
+                    line.push_str(&format!(
+                        "\x1b[38;2;{r1};{g1};{b1};48;2;{r2};{g2};{b2}m{}\x1b[0m",
+                        QUADS[m]
+                    ));
                 }
                 out.push(line);
             }
@@ -219,9 +260,14 @@ fn picture(t: &Theme, thumb: &Thumb, cw: usize, ch: usize, aspect: f64, clock: f
             // the picture's place at its proportions, a sheen running
             // across it corner to corner
             let w = ((2.0 * ch as f64 * aspect).round() as usize).clamp(4, cw);
-            let x0 = (cw - w) / 2;
-            let pos = (clock * 18.0) % (w as f64 + ch as f64 + 12.0) - 6.0;
+            let h = ((w as f64 / (2.0 * aspect)).round() as usize).clamp(1, ch);
+            let (x0, y0) = ((cw - w) / 2, (ch - h) / 2);
+            let pos = (clock * 18.0) % (w as f64 + h as f64 + 12.0) - 6.0;
             for r in 0..ch {
+                if r < y0 || r >= y0 + h {
+                    out.push(String::new());
+                    continue;
+                }
                 let mut line = " ".repeat(x0);
                 for c in 0..w {
                     let d = (c as f64 + r as f64 * 1.6 - pos).abs();
@@ -250,19 +296,25 @@ fn picture(t: &Theme, thumb: &Thumb, cw: usize, ch: usize, aspect: f64, clock: f
     out
 }
 
-/// A meter: the evidence's bar against its limit (a tick at the limit),
-/// green within it and red past it, then its value and the limit.
+/// A meter: how close the file is on one piece of evidence, as a gauge
+/// that is full when the two are the same — a distance empties toward
+/// half again its limit, a score fills to its value — with a mark where
+/// the limit falls; green within it, red past it; then the value against
+/// the limit and a tick or a cross.
 fn meter(t: &Theme, m: &crate::actions::Meter, bar: usize) -> String {
     let green = Rgb(0x7C, 0xD9, 0x92);
     let red = Rgb(0xFF, 0x4D, 0x4D);
-    // a distance's scale runs to half again its limit; a score's to 1
-    let (scale, at) = if m.distance {
-        (m.limit * 1.5, m.limit / (m.limit * 1.5))
+    let (close, at) = if m.distance {
+        let scale = m.limit * 1.5;
+        (
+            1.0 - (m.value / scale).clamp(0.0, 1.0),
+            1.0 - m.limit / scale,
+        )
     } else {
-        (1.0, m.limit)
+        (m.value.clamp(0.0, 1.0), m.limit)
     };
-    let fill = ((m.value / scale).clamp(0.0, 1.0) * bar as f64).round() as usize;
-    let tick = ((at * bar as f64).round() as usize).min(bar.saturating_sub(1));
+    let fill = (close * bar as f64).round() as usize;
+    let mark = ((at * bar as f64).round() as usize).min(bar.saturating_sub(1));
     let colour = if !m.counts {
         DIM
     } else if m.within() {
@@ -270,16 +322,21 @@ fn meter(t: &Theme, m: &crate::actions::Meter, bar: usize) -> String {
     } else {
         red
     };
+    let (on, mk) = if t.unicode {
+        ("━", "┃")
+    } else {
+        ("=", "|")
+    };
     let mut cells = String::new();
     for i in 0..bar {
-        let (ch, c) = if i < fill {
-            (if t.unicode { "━" } else { "=" }, colour)
-        } else if i == tick {
-            (if t.unicode { "┊" } else { "|" }, PLATE.lerp(GROOVE, 0.4))
+        let c = if i == mark {
+            PLATE
+        } else if i < fill {
+            colour
         } else {
-            (if t.unicode { "─" } else { "-" }, GROOVE)
+            Rgb(0x2A, 0x2A, 0x2A)
         };
-        cells.push_str(&t.paint_rgb(c, ch));
+        cells.push_str(&t.paint_rgb(c, if i == mark { mk } else { on }));
     }
     let value = if m.distance {
         format!("{}", m.value as u64)
@@ -287,22 +344,22 @@ fn meter(t: &Theme, m: &crate::actions::Meter, bar: usize) -> String {
         format!("{:.2}", m.value)
     };
     let limit = if m.distance {
-        format!("at most {}", m.limit as u64)
+        format!("≤ {}", m.limit as u64)
     } else {
-        format!("at least {:.2}", m.limit)
+        format!("≥ {:.2}", m.limit)
     };
     let verdict = if !m.counts {
-        t.paint_rgb(DIM, "not weighed: a flat picture")
+        t.paint_rgb(DIM, "flat picture: not weighed")
     } else if m.within() {
-        t.paint_rgb(green, "within")
+        t.paint_rgb_bold(green, if t.unicode { "✔" } else { "ok" })
     } else {
-        t.paint_rgb(red, "past it")
+        t.paint_rgb_bold(red, if t.unicode { "✖" } else { "x" })
     };
     format!(
         "{}  {cells}  {}  {}  {verdict}",
         t.paint_rgb(DIM, &format!("{:<6}", m.name)),
         t.paint_rgb_bold(PLATE, &format!("{value:>4}")),
-        t.paint_rgb(DIM, &limit)
+        t.paint_rgb(DIM, &format!("{limit:<6}"))
     )
 }
 
@@ -512,15 +569,27 @@ impl State {
             } else {
                 0
             };
-            let cells = if t.unicode {
-                format!("{}{}", "█".repeat(eighths / 8), EIGHTHS[eighths % 8])
+            // a slim rule in its track, to the half cell
+            let halves = (eighths as f64 / 4.0).round() as usize;
+            let (on, half, track) = if t.unicode {
+                ("━", "╸", "━")
             } else {
-                "#".repeat(eighths.div_ceil(8))
+                ("=", "-", " ")
             };
-            let w = width(&cells);
+            let full = (halves / 2).min(bar);
+            let mut cells = t.paint_rgb(hue, &on.repeat(full));
+            let mut w = full;
+            if halves % 2 == 1 && w < bar {
+                cells.push_str(&t.paint_rgb(hue, half));
+                w += 1;
+            }
+            if w == 0 && gi.reclaim > 0 {
+                cells = t.paint_rgb(hue, half);
+                w = 1;
+            }
+            cells.push_str(&t.paint_rgb(Rgb(0x26, 0x26, 0x26), &track.repeat(bar - w)));
             out.push_str("  ");
-            out.push_str(&t.paint_rgb(hue, &cells));
-            out.push_str(&" ".repeat(bar - w.min(bar)));
+            out.push_str(&cells);
             used += 2 + bar;
         }
         // what its files are; for copies, every one the same bytes, where
@@ -614,12 +683,14 @@ impl State {
         };
         let (ka, kb) = (&gi.members[0], &gi.members[b]);
         let hue = gi.kind.rgb();
-        let col = w.saturating_sub(3) / 2;
+        // a margin, the keeper's column, two cells, the sign, two cells,
+        // the file's column, a margin
+        let col = w.saturating_sub(7) / 2;
         let meters = &kb.meters;
-        // text under the pictures: a blank, five caption lines, a blank,
-        // the words, a blank, the meters
+        // under the pictures: a blank, the head and five caption lines, a
+        // blank, the words, then a blank and the meters
         let text_rows = 1
-            + 5
+            + 6
             + 1
             + 1
             + if meters.is_empty() {
@@ -631,26 +702,21 @@ impl State {
             .iter()
             .flatten()
             .map(|&(x, y)| x as f64 / y.max(1) as f64)
-            .fold(
-                4.0 / 3.0_f64,
-                |a: f64, b| if a == 4.0 / 3.0 { b } else { a.max(b) },
-            );
+            .fold(None, |a: Option<f64>, b| Some(a.map_or(b, |a| a.max(b))))
+            .unwrap_or(4.0 / 3.0);
+        // the pictures as tall as their width lets them be, as the panel
+        // lets them be
         let want = ((col as f64 / (2.0 * aspect)).ceil() as usize).max(1);
-        let ch = want.min(h.saturating_sub(text_rows + 1));
+        let ch = want.min(h.saturating_sub(text_rows + 2));
         out.push(String::new());
         if ch >= 3 && t.color {
             let pic = |m: &MemberInfo| -> Vec<String> {
-                match (thumbs, &m.visual) {
-                    (Some(th), Some(v)) => picture(
-                        t,
-                        &th.get(v, col as u32, (2 * ch) as u32),
-                        col,
-                        ch,
-                        aspect,
-                        clock,
-                    ),
-                    _ => picture(t, &Thumb::Unreadable, col, ch, aspect, clock),
-                }
+                let thumb = match (thumbs, &m.visual) {
+                    (Some(th), Some(v)) => th.get(v, col as u32, ch as u32),
+                    _ => Thumb::Unreadable,
+                };
+                let own = m.dims.map_or(aspect, |(x, y)| x as f64 / y.max(1) as f64);
+                picture(t, &thumb, col, ch, own, clock)
             };
             let (pa, pb) = (pic(ka), pic(kb));
             let sign = if gi.kind == Hue::Copies { "=" } else { "≈" };
@@ -663,66 +729,106 @@ impl State {
                 };
                 let pad = col.saturating_sub(visible_width(&a));
                 out.push(format!(
-                    "{a}{} {mid} {}",
+                    " {a}{}  {mid}  {}",
                     " ".repeat(pad),
                     pb.get(r).cloned().unwrap_or_default()
                 ));
             }
             out.push(String::new());
         }
-        // the captions, side by side
-        let cap = |m: &MemberInfo, i: usize| -> Vec<String> {
-            let verb = if i == 0 {
-                t.paint_bold(Paint::Keep, "keep")
-            } else {
-                t.paint_rgb_bold(
-                    hue,
-                    if gi.kind == Hue::Copies {
-                        "dupe"
-                    } else {
-                        "near"
-                    },
-                )
-            };
-            let (folder, name) = match m.shown.rfind(['/', '\\']) {
-                Some(k) => (&m.shown[..k], &m.shown[k + 1..]),
-                None => ("the top folder", m.shown.as_str()),
-            };
-            let dims = m
-                .dims
-                .map(|(x, y)| format!("{x}{}{y}  ", t.glyphs.times))
-                .unwrap_or_default();
-            vec![
-                verb,
-                t.paint_bold(Paint::Plate, &shorten_middle(name, col, t.glyphs.ellipsis)),
-                t.paint_rgb(DIM, &shorten_middle(folder, col, t.glyphs.ellipsis)),
-                format!(
-                    "{}{}",
-                    t.paint(Paint::Plate, &dims),
-                    t.paint(Paint::Plate, &fmt_bytes(m.size))
-                ),
-                t.paint_rgb(DIM, &m.date),
-            ]
+        // the captions under their pictures; what differs between the two
+        // is lit on the file's side, what is the same dim on both
+        let folder_of = |m: &MemberInfo| -> String {
+            match m.shown.rfind(['/', '\\']) {
+                Some(k) => m.shown[..k].to_string(),
+                None => m
+                    .path
+                    .parent()
+                    .and_then(|p| p.file_name())
+                    .map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned()),
+            }
         };
-        let (ca, cb) = (cap(ka, 0), cap(kb, b));
-        for (a, bb) in ca.iter().zip(&cb) {
-            let pad = col.saturating_sub(visible_width(a));
-            out.push(format!("{a}{}   {bb}", " ".repeat(pad)));
+        let name_of = |m: &MemberInfo| -> String {
+            m.shown
+                .rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(&m.shown)
+                .to_string()
+        };
+        // pixels as the scan read them, or as the picture decoded (a
+        // byte-for-byte copy is never decoded by the scan)
+        let dims_of = |m: &MemberInfo| -> String {
+            let decoded = match (thumbs, &m.visual) {
+                (Some(th), Some(v)) => match th.get(v, col as u32, ch.max(1) as u32) {
+                    Thumb::Ready(_, _, d) => Some(d),
+                    _ => None,
+                },
+                _ => None,
+            };
+            m.dims
+                .or(decoded)
+                .map(|(x, y)| format!("{x}{}{y}", t.glyphs.times))
+                .unwrap_or_default()
+        };
+        let verb_b = match (gi.kind, kb.role) {
+            (_, Role::Locked(Lock::Kin)) => "kin",
+            (_, Role::Locked(Lock::Raw)) => "raw",
+            (Hue::Copies, _) => "dupe",
+            _ => "near",
+        };
+        let rows: Vec<(String, String, bool)> = vec![
+            (name_of(ka), name_of(kb), true),
+            (folder_of(ka), folder_of(kb), false),
+            (dims_of(ka), dims_of(kb), false),
+            (fmt_bytes(ka.size), fmt_bytes(kb.size), false),
+            (ka.date.clone(), kb.date.clone(), false),
+        ];
+        out.push(format!(
+            " {}{}     {}",
+            t.paint_rgb_bold(AMBER, "keep"),
+            " ".repeat(col.saturating_sub(4)),
+            t.paint_rgb_bold(hue, verb_b)
+        ));
+        for (va, vb, name) in rows {
+            let differs = va != vb;
+            let a = shorten_middle(&va, col, t.glyphs.ellipsis);
+            let bb = shorten_middle(&vb, col, t.glyphs.ellipsis);
+            let pa = if name {
+                t.paint_rgb_bold(PLATE, &a)
+            } else {
+                t.paint_rgb(if differs { PLATE } else { DIM }, &a)
+            };
+            let pb = if name {
+                t.paint_rgb_bold(PLATE, &bb)
+            } else if differs {
+                t.paint_rgb_bold(hue, &bb)
+            } else {
+                t.paint_rgb(DIM, &bb)
+            };
+            out.push(format!(
+                " {pa}{}     {pb}",
+                " ".repeat(col.saturating_sub(width(&a)))
+            ));
         }
         out.push(String::new());
-        let words = if kb.words.is_empty() {
+        let words = if gi.kind == Hue::Copies {
+            "every byte the same".to_string()
+        } else if kb.words.is_empty() {
             "the same file".to_string()
         } else {
             kb.words.clone()
         };
-        out.push(t.paint_rgb_bold(hue, &crate::util::fit(&words, w)));
+        out.push(format!(
+            " {}",
+            t.paint_rgb_bold(hue, &crate::util::fit(&words, w.saturating_sub(2)))
+        ));
         if !meters.is_empty() {
             out.push(String::new());
             let bar = w
-                .saturating_sub(6 + 2 + 2 + 4 + 2 + 12 + 2 + 7)
-                .clamp(8, 32);
+                .saturating_sub(1 + 6 + 2 + 2 + 4 + 2 + 6 + 2 + 2 + 1)
+                .clamp(8, 48);
             for m in meters {
-                out.push(meter(t, m, bar));
+                out.push(format!(" {}", meter(t, m, bar)));
             }
         }
         out
@@ -789,7 +895,7 @@ impl State {
         // the comparison; the groups' lines then fit the left frame
         let panels = t.width >= PANELS_MIN && body_rows >= 12;
         let left_w = if panels {
-            (t.width * 46 / 100).clamp(48, 76)
+            (t.width * 42 / 100).clamp(48, 72)
         } else {
             max
         };
@@ -937,7 +1043,10 @@ impl State {
                 ),
                 None => String::new(),
             };
-            let cmp = self.comparison(t, right_w, body, thumbs, frame.clock);
+            let mut cmp = self.comparison(t, right_w, body, thumbs, frame.clock);
+            // the comparison sits in the middle of its frame
+            let lift = body.saturating_sub(cmp.len()) / 2;
+            cmp.splice(0..0, std::iter::repeat_n(String::new(), lift));
             let right = framed(t, &rt, edge.lerp(hue, 0.45), &cmp, right_w, body);
             // the cursor's line counts the frame's top edge
             if let Some(c) = self.cursor_at.get() {

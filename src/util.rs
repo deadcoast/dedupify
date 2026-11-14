@@ -130,6 +130,34 @@ pub fn visible_width(s: &str) -> usize {
 
 /// "1 file" / "3 files".
 /// `s` without its colour codes (`ESC [ … m`).
+/// `s` cut to `max` display cells, its colours kept: every escape before
+/// the cut stays, the cells after it go, and the colour is reset.
+pub fn cut_sgr(s: &str, max: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut used = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            out.push(c);
+            for d in chars.by_ref() {
+                out.push(d);
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if used + w > max {
+            break;
+        }
+        used += w;
+        out.push(c);
+    }
+    out.push_str("\x1b[0m");
+    out
+}
+
 pub fn strip_sgr(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();

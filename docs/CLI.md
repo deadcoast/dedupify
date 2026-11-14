@@ -167,7 +167,7 @@ frames' rounded corners and edges in the groove; nothing — the cursor's
 ground included — runs past a frame. Narrower, the groups alone fill the
 width (the same lines, a file's line the full output's own).
 
-**The groups**, left (46% of the width, 48–76 columns), titled with the
+**The groups**, left (42% of the width, 48–72 columns), titled with the
 order:
 
 - **Sections**, one per kind, in the order `find` lists them: `COPIES`,
@@ -179,7 +179,8 @@ order:
   sections give way to one, `GROUPS`, naming the order.
 - **Groups**, one line each: the keeper's name, how many files beside
   it, what the group frees, a bar of that against the largest group
-  shown (eighths of a cell, in the kind's colour), then what its files
+  shown (a slim rule to the half cell in the kind's colour, in its
+  track), then what its files
   are — the members' words without their figures, most common first
   (§3a's tally); for copies, where they are: `in exports`, `beside it`.
 - **The cursor's group** unfolds under its line on a tree (`├`, `└` in
@@ -195,27 +196,34 @@ colour, its frame tinted with it:
 - **The two pictures**, the keeper and the file under the cursor (the
   group's first other file when the cursor is on the group or its
   keeper), side by side, `=` between copies and `≈` between similar
-  files. Each is drawn in half blocks — two pixels a cell, one above the
-  other, in 24-bit colour — at the panel's size, so any terminal with
-  colour shows them; `v` still shows them full size where the terminal
-  draws pictures. They are decoded by two workers off the key loop, the
-  newest asked first and each kept for the sitting; while one is coming
-  a sheen runs across its place at its proportions, and when it arrives
-  it rises out of the panel's ground over 0.22 s. A video shows its
-  frame a third of the way in; a file that does not decode says `no
-  picture`.
-- **Under each picture**: its role, its name, its folder, its pixels and
-  size, its date.
-- **What the file is**, in its words (`resized 75%`), in the kind's
-  colour.
-- **Its evidence**, a meter each: dHash, pHash and PDQ distances against
-  their limits (10, 14, 31), the fit and the descriptor when measured
-  (at least 0.92, 0.70); for a video the frames' median distances and
-  TMK's two levels (0.5, 0.8). The bar fills to the value — a distance's
-  scale runs to half again its limit, a score's to 1 — with a tick at
-  the limit, green within it, red past it; PDQ on a flat picture is
-  drawn dim, `not weighed`. A byte-for-byte copy has no meters: its
+  files. Each is drawn in quadrant blocks — four pixels a cell, two
+  across and two down, each cell in the two of its colours that fit its
+  four best (of the seven ways to split four pixels in two, the one
+  closest to its own means), 24-bit — at its own proportions on cells
+  twice as tall as wide, so any terminal with colour shows them; `v`
+  still shows them at full size where the terminal draws pictures. They
+  are decoded by two workers off the key loop, the newest asked first
+  (eight waiting at most) and each kept for the sitting; while one is
+  coming a sheen runs across its place, and when it arrives it rises out
+  of the panel's ground over 0.22 s. A video shows its frame a third of
+  the way in; a file that does not decode says `no picture`.
+- **Under each picture**, in columns under it: its role; its name; its
+  folder (the top folder by its own name); its pixels (as the scan read
+  them, or as the picture decoded — the byte-for-byte pass reads none);
+  its size; its date. What differs between the two is lit on the file's
+  side in the kind's colour; what is the same is dim on both.
+- **What the file is**, in its words (`resized 75%`; `every byte the
+  same` for a copy), in the kind's colour.
+- **Its evidence**, a gauge each: dHash, pHash and PDQ distances against
+  their limits (≤ 10, ≤ 14, ≤ 31), the fit and the descriptor when
+  measured (≥ 0.92, ≥ 0.70); for a video the frames' median distances
+  and TMK's two levels (≥ 0.5, ≥ 0.8). A gauge is full when the two are
+  the same — a distance empties toward half again its limit, a score
+  fills to its value — with a mark where the limit falls; green within
+  it with `✔`, red past it with `✖`; PDQ on a flat picture is drawn dim,
+  `flat picture: not weighed`. A byte-for-byte copy has none: its
   evidence is every byte.
+- The comparison sits in the middle of its frame.
 
 **The gauge** under the panels (the line the full output drew as a
 rule): the bytes chosen, of all the groups shown can free, in each

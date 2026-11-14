@@ -12,20 +12,20 @@ use std::time::{Duration, Instant};
 
 use image::RgbImage;
 
-use crate::preview::{self, Visual};
+use crate::preview::Visual;
 
 /// One picture's state.
 #[derive(Debug, Clone)]
 pub enum Thumb {
     /// Asked for at this moment; a worker has it or will.
     Coming(Instant),
-    /// Decoded and scaled, and when it arrived.
-    Ready(Arc<RgbImage>, Instant),
+    /// Decoded and scaled, when it arrived, and the picture's own pixels.
+    Ready(Arc<RgbImage>, Instant, (u32, u32)),
     /// The file did not decode (or a video without ffmpeg).
     Unreadable,
 }
 
-/// A picture at a size: the panel asks again when it is resized.
+/// A picture for a box of cells: the panel asks again when it is resized.
 type Key = (PathBuf, u32, u32);
 
 /// Requests kept waiting: older ones are dropped (their slots cleared, so
@@ -62,8 +62,9 @@ impl Thumbs {
         Thumbs { shared }
     }
 
-    /// The picture of `v` fitted to `w` × `h` pixels: as it is, or asked
-    /// for now.
+    /// The picture of `v` for a box `w` cells by `h` rows, at two pixels a
+    /// cell each way (quadrant blocks), its proportions kept on cells twice
+    /// as tall as wide: as it is, or asked for now.
     pub fn get(&self, v: &Visual, w: u32, h: u32) -> Thumb {
         let key = (v.path().to_path_buf(), w, h);
         let now = Instant::now();
@@ -95,7 +96,7 @@ impl Thumbs {
     pub fn moving(&self, fade: Duration) -> bool {
         lock(&self.shared.slots).values().any(|t| match t {
             Thumb::Coming(_) => true,
-            Thumb::Ready(_, at) => at.elapsed() < fade,
+            Thumb::Ready(_, at, _) => at.elapsed() < fade,
             Thumb::Unreadable => false,
         })
     }
@@ -105,6 +106,23 @@ impl Default for Thumbs {
     fn default() -> Self {
         Thumbs::new()
     }
+}
+
+/// The picture for a box of `cw` × `ch` cells: the cells it fills at its
+/// proportions (a cell twice as tall as wide), two pixels a cell each way;
+/// shrunk fast first, then resampled sharp.
+fn quadrant_pixels(img: &image::DynamicImage, cw: u32, ch: u32) -> RgbImage {
+    let (w, h) = (img.width().max(1) as f64, img.height().max(1) as f64);
+    let a = w / h;
+    let (uw, uh) = if a > cw as f64 / (2.0 * ch as f64) {
+        (cw as f64, (cw as f64 / (2.0 * a)).round().max(1.0))
+    } else {
+        ((2.0 * ch as f64 * a).round().max(1.0), ch as f64)
+    };
+    let (pw, ph) = (2 * uw as u32, 2 * uh as u32);
+    img.thumbnail(pw * 4, ph * 4)
+        .resize_exact(pw, ph, image::imageops::FilterType::CatmullRom)
+        .to_rgb8()
 }
 
 fn work(s: &Shared) {
@@ -124,8 +142,9 @@ fn work(s: &Shared) {
         }
         let thumb = match visual.load() {
             Some(img) => Thumb::Ready(
-                Arc::new(preview::fit_pixels(&img, key.1, key.2)),
+                Arc::new(quadrant_pixels(&img, key.1, key.2)),
                 Instant::now(),
+                (img.width(), img.height()),
             ),
             None => Thumb::Unreadable,
         };
