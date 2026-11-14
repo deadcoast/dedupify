@@ -1,11 +1,14 @@
-# A version: pushing a tag `vX.Y.Z` that matches Cargo.toml builds the
-# release binaries on Windows (MSVC, as on the owner's machine) and Linux
-# and publishes them as that version's GitHub release, each with its
-# SHA-256. `dedupe --version` in them names the tag's commit.
+# The release binaries, Windows x64 (MSVC, as on the owner's machine) and
+# Linux x64, each with its SHA-256. A push to main whose commit message
+# carries `[release]` builds them as the run's artifacts (kept 30 days);
+# a tag `vX.Y.Z` matching Cargo.toml builds them and publishes them as
+# that version's GitHub release. `dedupe --version` in them names the
+# commit built.
 name: release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
 
 permissions:
@@ -16,6 +19,7 @@ env:
 
 jobs:
   build:
+    if: startsWith(github.ref, 'refs/tags/') || contains(github.event.head_commit.message, '[release]')
     name: build (${{ matrix.target }})
     strategy:
       fail-fast: true
@@ -38,6 +42,7 @@ jobs:
           rustc --version
 
       - name: the tag is the version in Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
@@ -49,7 +54,8 @@ jobs:
       - name: package
         shell: bash
         run: |
-          name="dedupe-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          name="dedupe-v$v-${{ matrix.target }}"
           mkdir -p dist
           if [ "${{ runner.os }}" = "Windows" ]; then
             ./target/release/dedupe.exe --version
@@ -66,8 +72,10 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: dist/*
+          retention-days: 30
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: build
     runs-on: ubuntu-latest
     steps:
