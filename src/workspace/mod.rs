@@ -14,6 +14,7 @@
 
 mod screen;
 pub mod state;
+mod thumbs;
 
 use std::collections::HashSet;
 use std::io::{self, Write};
@@ -49,6 +50,10 @@ pub(crate) fn layout_of(f: &Found, root: &std::path::Path) -> Layout {
                         size: g.size(i),
                         role: g.role(i),
                         words: if i == 0 { String::new() } else { g.words(i) },
+                        dims: g.dims(i),
+                        date: crate::util::fmt_date(g.mtime(i)),
+                        meters: g.meters(i),
+                        visual: g.visual(i),
                     })
                     .collect(),
                 reclaim: g.reclaim(),
@@ -365,6 +370,8 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
         return code;
     }
     let born = std::time::Instant::now();
+    // the comparison's pictures, decoded off this loop
+    let pictures = thumbs::Thumbs::new();
     // what was drawn last: the cursor's group and kind, the chosen bytes
     let mut was: (Option<usize>, Option<Hue>, u64) = (None, None, st.stats().1);
     loop {
@@ -399,8 +406,9 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                     fresh,
                     gauge: Some((from as f64 + (bytes as f64 - from as f64) * e) as u64),
                     breath: breath(born),
+                    clock: born.elapsed().as_secs_f64(),
                 };
-                let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &frame));
+                let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &frame, Some(&pictures)));
                 match next_input(Some(std::time::Duration::from_millis(30))) {
                     Ok(Some(i)) => {
                         pending = Some(i);
@@ -413,22 +421,42 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
         }
         let still = |at: std::time::Instant| Frame {
             breath: breath(at),
+            clock: at.elapsed().as_secs_f64(),
             ..Frame::STILL
         };
-        let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &still(born)));
-        // between keys the pointer breathes: its line drawn again, 12 a
-        // second
+        let _ = draw(&st.screen(
+            &t,
+            &title,
+            &lines.by_row,
+            rows,
+            &still(born),
+            Some(&pictures),
+        ));
+        // between keys the pointer breathes (its line drawn again, 12 a
+        // second); while a picture is coming or fading in, the whole
+        // screen, 25 a second
         let input = match pending {
             Some(i) => Ok(i),
             None => loop {
-                match next_input(Some(std::time::Duration::from_millis(80))) {
+                let moving = pictures.moving(screen::FADE);
+                let wait = if moving { 40 } else { 80 };
+                match next_input(Some(std::time::Duration::from_millis(wait))) {
                     Ok(Some(i)) => break Ok(i),
                     Ok(None) => {
                         if !t.live {
                             continue;
                         }
-                        let screen = st.screen(&t, &title, &lines.by_row, rows, &still(born));
-                        if let Some(i) = st.cursor_line() {
+                        let screen = st.screen(
+                            &t,
+                            &title,
+                            &lines.by_row,
+                            rows,
+                            &still(born),
+                            Some(&pictures),
+                        );
+                        if moving || pictures.moving(screen::FADE) {
+                            let _ = draw(&screen);
+                        } else if let Some(i) = st.cursor_line() {
                             let _ = draw_line(i, &screen[i]);
                         }
                     }

@@ -3873,6 +3873,27 @@ columns, 78 at 80) where it measured the rule. CI run **43581618137** at
 `8b63d96`, green on Ubuntu and Windows (the resize, the filter and the
 preferred folder through the pseudo console among them).
 
+## 9. The workspace in two panels (OUT-06)
+
+`workspace::screen`: from 100 columns and 18 rows the body is two
+frames, the groups (46% of the width) and the comparison;
+`workspace::thumbs` decodes the pictures on two workers, newest request
+first, eight waiting at most, each kept at its size for the sitting.
+`GroupView` gives every file its pixels, its date and its evidence
+(`Meter`: dHash, pHash, PDQ, fit, SSCD for images; the frames' medians
+and TMK's levels for videos).
+
+Watched live in tmux (truecolour) on the sample's photos at 150 × 40,
+frames rendered and looked at: starry_night.jpg and its copy side by
+side with `=` between them, `same bytes, 301 KB` and no meters; on
+shot_a.jpg's group the plant photograph twice, `≈`, `resized 75%`, and
+dHash 0, pHash 0, PDQ 2, each `within` its limit; space on the keeper
+saying the keeper stays. Every drawn line 149 cells at 150 columns, the
+frames closed on every row.
+
+Unit tests: the screen test now runs both layouts (panels from 100
+columns at 20 rows; the list alone under them or at 12 rows).
+
 ## Not verified here
 
 - The workspace in the fold in Windows Terminal: drawn here in tmux; on

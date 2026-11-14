@@ -16,6 +16,50 @@ use crate::workspace::state::{Lock, Role};
 
 use super::Found;
 
+/// One piece of a member's evidence against its keeper: a distance that
+/// must stay at or under its limit, or a score that must reach it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Meter {
+    pub name: &'static str,
+    pub value: f64,
+    pub limit: f64,
+    /// A distance (lower is closer) rather than a score.
+    pub distance: bool,
+    /// Whether the program weighed it (PDQ on a flat picture does not).
+    pub counts: bool,
+}
+
+impl Meter {
+    fn distance(name: &'static str, value: u32, limit: u32) -> Meter {
+        Meter {
+            name,
+            value: value as f64,
+            limit: limit as f64,
+            distance: true,
+            counts: true,
+        }
+    }
+
+    fn score(name: &'static str, value: f32, limit: f32) -> Meter {
+        Meter {
+            name,
+            value: value as f64,
+            limit: limit as f64,
+            distance: false,
+            counts: true,
+        }
+    }
+
+    /// Within its limit.
+    pub fn within(&self) -> bool {
+        if self.distance {
+            self.value <= self.limit
+        } else {
+            self.value >= self.limit
+        }
+    }
+}
+
 pub(crate) trait GroupView {
     /// Files in the group, the keeper first.
     fn len(&self) -> usize;
@@ -30,6 +74,17 @@ pub(crate) trait GroupView {
     fn words(&self, i: usize) -> String;
     /// File `i` as something to look at.
     fn visual(&self, i: usize) -> Option<Visual>;
+    /// Its pixels, when its kind reads them.
+    fn dims(&self, _i: usize) -> Option<(u32, u32)> {
+        None
+    }
+    /// When it was last written.
+    fn mtime(&self, i: usize) -> std::time::SystemTime;
+    /// Its evidence against the keeper (none for the keeper, none for a
+    /// byte-for-byte copy: its evidence is every byte).
+    fn meters(&self, _i: usize) -> Vec<Meter> {
+        Vec::new()
+    }
     /// Make file `i` the keeper (`0 < i < len`); the others are related to
     /// it afresh.
     fn set_keeper(&mut self, i: usize);
@@ -40,6 +95,10 @@ pub(crate) trait GroupView {
 impl GroupView for Group {
     fn reclaim(&self) -> u64 {
         self.reclaimable()
+    }
+
+    fn mtime(&self, i: usize) -> std::time::SystemTime {
+        self.members[i].mtime
     }
 
     fn len(&self) -> usize {
@@ -82,6 +141,39 @@ impl GroupView for NearGroup {
         self.reclaimable()
     }
 
+    fn dims(&self, i: usize) -> Option<(u32, u32)> {
+        let s = &self.members.get(i)?.hashed.sig;
+        Some((s.width, s.height))
+    }
+
+    fn mtime(&self, i: usize) -> std::time::SystemTime {
+        self.members[i].hashed.rep.cand.mtime
+    }
+
+    /// dHash, pHash and PDQ distances, then the fit and the descriptor
+    /// when they were measured.
+    fn meters(&self, i: usize) -> Vec<Meter> {
+        use crate::perceptual::{DHASH_MAX, PHASH_MAX};
+        let Some(r) = self.members.get(i).and_then(|m| m.relation) else {
+            return Vec::new();
+        };
+        let mut v = vec![
+            Meter::distance("dHash", r.d, DHASH_MAX),
+            Meter::distance("pHash", r.p, PHASH_MAX),
+            Meter {
+                counts: r.q_quality >= crate::pdq::PDQ_QUALITY_MIN,
+                ..Meter::distance("PDQ", r.q, crate::pdq::PDQ_MAX)
+            },
+        ];
+        if let Some(f) = r.fit {
+            v.push(Meter::score("fit", f.ncc, crate::geometry::FIT_MIN));
+        }
+        if let Some(d) = r.deep {
+            v.push(Meter::score("SSCD", d, crate::deep::DEEP_MIN));
+        }
+        v
+    }
+
     fn len(&self) -> usize {
         self.members.len()
     }
@@ -121,6 +213,33 @@ impl GroupView for NearGroup {
 impl GroupView for VideoGroup {
     fn reclaim(&self) -> u64 {
         self.reclaimable()
+    }
+
+    fn dims(&self, i: usize) -> Option<(u32, u32)> {
+        let m = &self.members.get(i)?.hashed.sig.meta;
+        Some((m.width, m.height))
+    }
+
+    fn mtime(&self, i: usize) -> std::time::SystemTime {
+        self.members[i].hashed.rep.cand.mtime
+    }
+
+    /// The frames' median distances where the timelines line up, then
+    /// TMK's two levels.
+    fn meters(&self, i: usize) -> Vec<Meter> {
+        use crate::perceptual::{DHASH_MAX, PHASH_MAX};
+        let Some(r) = self.members.get(i).and_then(|m| m.relation) else {
+            return Vec::new();
+        };
+        let mut v = Vec::new();
+        if let Some((d, p, q)) = r.pos {
+            v.push(Meter::distance("dHash", d, DHASH_MAX));
+            v.push(Meter::distance("pHash", p, PHASH_MAX));
+            v.push(Meter::distance("PDQ", q, crate::pdq::PDQ_MAX));
+        }
+        v.push(Meter::score("TMK 1", r.level1, crate::video::LEVEL1_MIN));
+        v.push(Meter::score("TMK 2", r.level2, crate::video::LEVEL2_MIN));
+        v
     }
 
     fn len(&self) -> usize {

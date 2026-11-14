@@ -47,6 +47,12 @@ pub struct MemberInfo {
     /// What it is beside the keeper, as the listing says (`resized 75%`);
     /// empty for the keeper.
     pub words: String,
+    /// Its pixels, when read; when it was written; its evidence against
+    /// the keeper; the picture to show of it (Phase 17, the comparison).
+    pub dims: Option<(u32, u32)>,
+    pub date: String,
+    pub meters: Vec<crate::actions::Meter>,
+    pub visual: Option<crate::preview::Visual>,
 }
 
 /// One group as the workspace sees it, keeper first.
@@ -884,6 +890,10 @@ pub(super) mod tests {
             } else {
                 "near copy".into()
             },
+            dims: None,
+            date: String::new(),
+            meters: Vec::new(),
+            visual: None,
         }
     }
 
@@ -981,6 +991,7 @@ pub(super) mod tests {
                 &HashMap::new(),
                 12,
                 &super::super::screen::Frame::STILL,
+                None,
             )
             .join("\n");
         assert!(screen.contains("1 other shot"), "{screen}");
@@ -1272,6 +1283,10 @@ pub(super) mod tests {
             size: 10,
             role: Role::Act,
             words: "same bytes".into(),
+            dims: None,
+            date: String::new(),
+            meters: Vec::new(),
+            visual: None,
         };
         let mut l = Layout {
             groups: vec![

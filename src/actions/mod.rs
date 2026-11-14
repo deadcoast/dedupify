@@ -23,6 +23,7 @@ pub(crate) use act::{act_milk, act_purge, Acted};
 pub(crate) use plan::{default_items, items, shot_items, verify_items, Item};
 pub(crate) use scan::{report, scan_and_group, Found};
 pub(crate) use undo::{act_undo_which, undo};
+pub use view::Meter;
 
 pub const EXIT_OK: i32 = 0;
 

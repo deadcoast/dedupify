@@ -447,7 +447,10 @@ was updated. The design is CLI.md §3a; the workspace's §2a; the
 launcher's in VERIFICATION § Phase 17. Items: SHELVED.md § Phase 17.
 The owner's first run of the new launcher (2026-11-14) verified 13 of 13
 and showed the workspace — the screen `find` opens on a terminal —
-unchanged; OUT-05 draws it in the fold.
+unchanged; OUT-05 draws it in the fold. Judged still the same in
+skeleton (a list of text lines), the workspace was rebuilt as two
+framed panels, the groups and the comparison — the two files as
+pictures, their evidence as meters (OUT-06).
 
 ## Docs chain
 

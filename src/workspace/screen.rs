@@ -14,8 +14,10 @@
 //! kind's colour — the line the full output drew as a rule.
 
 use std::collections::HashMap;
+use std::time::Duration;
 
 use super::state::*;
+use super::thumbs::{Thumb, Thumbs};
 use crate::render::fold::{self, BLOCKS, DIM, GROOVE, PLATE};
 use crate::theme::{Rgb, Role as Paint, Theme};
 use crate::util::{fmt_bytes, fmt_count, shorten_middle, strip_sgr, visible_width, width};
@@ -31,6 +33,8 @@ pub struct Frame {
     pub gauge: Option<u64>,
     /// The pointer's breath, 0 to 1.
     pub breath: f64,
+    /// Seconds since the workspace opened (a coming picture's sheen).
+    pub clock: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +51,7 @@ impl Frame {
         fresh: Fresh::None,
         gauge: None,
         breath: 0.0,
+        clock: 0.0,
     };
 }
 
@@ -64,6 +69,13 @@ pub enum Line {
 /// The pointer's colour, and the cursor line's ground in a kind's colour.
 const AMBER: Rgb = Rgb(0xFF, 0xB0, 0x00);
 const GROUND: Rgb = Rgb(0x14, 0x14, 0x14);
+
+/// Panels from this width: the groups on the left, the comparison on the
+/// right; narrower, the groups alone.
+pub const PANELS_MIN: usize = 100;
+
+/// A picture's fade from the panel's ground, once it arrives.
+pub const FADE: Duration = Duration::from_millis(220);
 
 /// Eighths of a cell, for the groups' bars.
 const EIGHTHS: [&str; 8] = ["", "▏", "▎", "▍", "▌", "▋", "▊", "▉"];
@@ -124,6 +136,173 @@ fn lit(t: &Theme, text: &str, hue: Rgb, max: usize) -> String {
         "{set}{}{}\x1b[0m",
         text.replace("\x1b[0m", &format!("\x1b[0m{set}")),
         " ".repeat(pad)
+    )
+}
+
+/// A panel's frame around `inner` lines `w` cells wide (the frame adds
+/// two), its title in the top edge; every line padded to the frame, so
+/// nothing — a cursor's ground included — runs past it.
+fn framed(t: &Theme, title: &str, edge: Rgb, inner: &[String], w: usize, h: usize) -> Vec<String> {
+    let (tl, tr, bl, br, hz, vt) = if t.unicode {
+        ("╭", "╮", "╰", "╯", "─", "│")
+    } else {
+        ("+", "+", "+", "+", "-", "|")
+    };
+    let mut out = Vec::with_capacity(h + 2);
+    let title_w = visible_width(title);
+    let rest = w.saturating_sub(title_w + 3);
+    if title_w > 0 && w > title_w + 3 {
+        out.push(format!(
+            "{}{title}{}",
+            t.paint_rgb(edge, &format!("{tl}{hz} ")),
+            t.paint_rgb(edge, &format!(" {}{tr}", hz.repeat(rest)))
+        ));
+    } else {
+        out.push(t.paint_rgb(edge, &format!("{tl}{}{tr}", hz.repeat(w))));
+    }
+    let side = t.paint_rgb(edge, vt);
+    for i in 0..h {
+        let l = inner.get(i).map(String::as_str).unwrap_or("");
+        let vw = visible_width(l);
+        let l = if vw > w {
+            crate::util::fit(&strip_sgr(l), w)
+        } else {
+            l.to_string()
+        };
+        let pad = w.saturating_sub(visible_width(&l));
+        out.push(format!("{side}{l}{}{side}", " ".repeat(pad)));
+    }
+    out.push(t.paint_rgb(edge, &format!("{bl}{}{br}", hz.repeat(w))));
+    out
+}
+
+/// A picture `cw` cells by `ch` rows in half blocks — two pixels a cell,
+/// one above the other, in 24-bit colour — centred; while it is coming,
+/// a sheen crosses its place; as it arrives it rises out of the ground.
+fn picture(t: &Theme, thumb: &Thumb, cw: usize, ch: usize, aspect: f64, clock: f64) -> Vec<String> {
+    let mut out = Vec::with_capacity(ch);
+    match thumb {
+        Thumb::Ready(img, at) => {
+            let a = (at.elapsed().as_secs_f64() / FADE.as_secs_f64()).min(1.0);
+            let a = 1.0 - (1.0 - a).powi(2);
+            let (iw, ih) = (img.width() as i64, img.height() as i64);
+            let x0 = (cw as i64 - iw) / 2;
+            let y0 = (2 * ch as i64 - ih) / 2;
+            let px = |x: i64, y: i64| -> Option<Rgb> {
+                let (x, y) = (x - x0, y - y0);
+                if x < 0 || y < 0 || x >= iw || y >= ih {
+                    return None;
+                }
+                let p = img.get_pixel(x as u32, y as u32);
+                Some(GROUND.lerp(Rgb(p[0], p[1], p[2]), a))
+            };
+            for r in 0..ch as i64 {
+                let mut line = String::new();
+                for c in 0..cw as i64 {
+                    match (px(c, 2 * r), px(c, 2 * r + 1)) {
+                        (None, None) => line.push(' '),
+                        (Some(Rgb(r1, g1, b1)), None) => {
+                            line.push_str(&format!("\x1b[38;2;{r1};{g1};{b1}m▀\x1b[0m"))
+                        }
+                        (None, Some(Rgb(r2, g2, b2))) => {
+                            line.push_str(&format!("\x1b[38;2;{r2};{g2};{b2}m▄\x1b[0m"))
+                        }
+                        (Some(Rgb(r1, g1, b1)), Some(Rgb(r2, g2, b2))) => line.push_str(&format!(
+                            "\x1b[38;2;{r1};{g1};{b1};48;2;{r2};{g2};{b2}m▀\x1b[0m"
+                        )),
+                    }
+                }
+                out.push(line);
+            }
+        }
+        Thumb::Coming(_) => {
+            // the picture's place at its proportions, a sheen running
+            // across it corner to corner
+            let w = ((2.0 * ch as f64 * aspect).round() as usize).clamp(4, cw);
+            let x0 = (cw - w) / 2;
+            let pos = (clock * 18.0) % (w as f64 + ch as f64 + 12.0) - 6.0;
+            for r in 0..ch {
+                let mut line = " ".repeat(x0);
+                for c in 0..w {
+                    let d = (c as f64 + r as f64 * 1.6 - pos).abs();
+                    let k = (1.0 - d / 5.0).max(0.0);
+                    let col = Rgb(0x1C, 0x1C, 0x1C).lerp(Rgb(0x34, 0x34, 0x34), k);
+                    line.push_str(&t.paint_rgb(col, "█"));
+                }
+                out.push(line);
+            }
+        }
+        Thumb::Unreadable => {
+            for r in 0..ch {
+                out.push(if r == ch / 2 {
+                    let s = "no picture";
+                    format!(
+                        "{}{}",
+                        " ".repeat(cw.saturating_sub(s.len()) / 2),
+                        t.paint_rgb(DIM, s)
+                    )
+                } else {
+                    String::new()
+                });
+            }
+        }
+    }
+    out
+}
+
+/// A meter: the evidence's bar against its limit (a tick at the limit),
+/// green within it and red past it, then its value and the limit.
+fn meter(t: &Theme, m: &crate::actions::Meter, bar: usize) -> String {
+    let green = Rgb(0x7C, 0xD9, 0x92);
+    let red = Rgb(0xFF, 0x4D, 0x4D);
+    // a distance's scale runs to half again its limit; a score's to 1
+    let (scale, at) = if m.distance {
+        (m.limit * 1.5, m.limit / (m.limit * 1.5))
+    } else {
+        (1.0, m.limit)
+    };
+    let fill = ((m.value / scale).clamp(0.0, 1.0) * bar as f64).round() as usize;
+    let tick = ((at * bar as f64).round() as usize).min(bar.saturating_sub(1));
+    let colour = if !m.counts {
+        DIM
+    } else if m.within() {
+        green
+    } else {
+        red
+    };
+    let mut cells = String::new();
+    for i in 0..bar {
+        let (ch, c) = if i < fill {
+            (if t.unicode { "━" } else { "=" }, colour)
+        } else if i == tick {
+            (if t.unicode { "┊" } else { "|" }, PLATE.lerp(GROOVE, 0.4))
+        } else {
+            (if t.unicode { "─" } else { "-" }, GROOVE)
+        };
+        cells.push_str(&t.paint_rgb(c, ch));
+    }
+    let value = if m.distance {
+        format!("{}", m.value as u64)
+    } else {
+        format!("{:.2}", m.value)
+    };
+    let limit = if m.distance {
+        format!("at most {}", m.limit as u64)
+    } else {
+        format!("at least {:.2}", m.limit)
+    };
+    let verdict = if !m.counts {
+        t.paint_rgb(DIM, "not weighed: a flat picture")
+    } else if m.within() {
+        t.paint_rgb(green, "within")
+    } else {
+        t.paint_rgb(red, "past it")
+    };
+    format!(
+        "{}  {cells}  {}  {}  {verdict}",
+        t.paint_rgb(DIM, &format!("{:<6}", m.name)),
+        t.paint_rgb_bold(PLATE, &format!("{value:>4}")),
+        t.paint_rgb(DIM, &limit)
     )
 }
 
@@ -315,8 +494,8 @@ impl State {
         let keeper = &gi.members[0].shown;
         let name = keeper.rsplit(['/', '\\']).next().unwrap_or(keeper);
         let n_col = (room * 28 / 100).clamp(12, 40);
-        let bar = if room >= 70 {
-            (room / 10).clamp(6, 16)
+        let bar = if room >= 56 {
+            ((room - 40) / 3).clamp(5, 16)
         } else {
             0
         };
@@ -384,6 +563,171 @@ impl State {
         out
     }
 
+    /// A file's line in the groups panel: its role in a word, its path,
+    /// its size (the rest is the comparison's).
+    fn member_short(&self, t: &Theme, g: usize, m: usize, room: usize) -> String {
+        let gi = &self.layout.groups[g];
+        let mi = &gi.members[m];
+        let (verb, paint) = match (m, gi.kind, mi.role) {
+            (0, _, _) => ("keep", Paint::Keep),
+            (_, _, Role::Locked(Lock::Kin)) => ("kin", Paint::Info),
+            (_, _, Role::Locked(Lock::Raw)) => ("raw", Paint::Info),
+            (_, Hue::Copies, _) => ("dupe", Paint::Dupe),
+            _ => ("near", Paint::Dupe),
+        };
+        let size = fmt_bytes(mi.size);
+        let path_w = room.saturating_sub(4 + 2 + 2 + size.len());
+        let path = shorten_middle(&mi.shown, path_w, t.glyphs.ellipsis);
+        format!(
+            "{}  {}{}  {}",
+            t.paint_bold(paint, &format!("{verb:<4}")),
+            t.paint(if m == 0 { Paint::Plate } else { Paint::Dupe }, &path),
+            " ".repeat(path_w.saturating_sub(width(&path))),
+            t.paint_rgb(DIM, &size)
+        )
+    }
+
+    /// The comparison: the keeper and the file under the cursor (the
+    /// group's first other file when the cursor is on the group or its
+    /// keeper) side by side as pictures, each with its name, folder,
+    /// pixels, size and date; under them what the file is, then each
+    /// piece of its evidence as a meter against its limit.
+    fn comparison(
+        &self,
+        t: &Theme,
+        w: usize,
+        h: usize,
+        thumbs: Option<&Thumbs>,
+        clock: f64,
+    ) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let Some(g) = self.cursor_group() else {
+            return out;
+        };
+        let gi = &self.layout.groups[g];
+        if gi.members.len() < 2 {
+            return out;
+        }
+        let b = match self.rows.get(self.cursor) {
+            Some(Row::Member(_, m)) if *m > 0 => *m,
+            _ => 1,
+        };
+        let (ka, kb) = (&gi.members[0], &gi.members[b]);
+        let hue = gi.kind.rgb();
+        let col = w.saturating_sub(3) / 2;
+        let meters = &kb.meters;
+        // text under the pictures: a blank, five caption lines, a blank,
+        // the words, a blank, the meters
+        let text_rows = 1
+            + 5
+            + 1
+            + 1
+            + if meters.is_empty() {
+                0
+            } else {
+                1 + meters.len()
+            };
+        let aspect = [ka.dims, kb.dims]
+            .iter()
+            .flatten()
+            .map(|&(x, y)| x as f64 / y.max(1) as f64)
+            .fold(
+                4.0 / 3.0_f64,
+                |a: f64, b| if a == 4.0 / 3.0 { b } else { a.max(b) },
+            );
+        let want = ((col as f64 / (2.0 * aspect)).ceil() as usize).max(1);
+        let ch = want.min(h.saturating_sub(text_rows + 1));
+        out.push(String::new());
+        if ch >= 3 && t.color {
+            let pic = |m: &MemberInfo| -> Vec<String> {
+                match (thumbs, &m.visual) {
+                    (Some(th), Some(v)) => picture(
+                        t,
+                        &th.get(v, col as u32, (2 * ch) as u32),
+                        col,
+                        ch,
+                        aspect,
+                        clock,
+                    ),
+                    _ => picture(t, &Thumb::Unreadable, col, ch, aspect, clock),
+                }
+            };
+            let (pa, pb) = (pic(ka), pic(kb));
+            let sign = if gi.kind == Hue::Copies { "=" } else { "≈" };
+            for r in 0..ch {
+                let a = pa.get(r).cloned().unwrap_or_default();
+                let mid = if r == ch / 2 {
+                    t.paint_rgb_bold(hue, sign)
+                } else {
+                    " ".to_string()
+                };
+                let pad = col.saturating_sub(visible_width(&a));
+                out.push(format!(
+                    "{a}{} {mid} {}",
+                    " ".repeat(pad),
+                    pb.get(r).cloned().unwrap_or_default()
+                ));
+            }
+            out.push(String::new());
+        }
+        // the captions, side by side
+        let cap = |m: &MemberInfo, i: usize| -> Vec<String> {
+            let verb = if i == 0 {
+                t.paint_bold(Paint::Keep, "keep")
+            } else {
+                t.paint_rgb_bold(
+                    hue,
+                    if gi.kind == Hue::Copies {
+                        "dupe"
+                    } else {
+                        "near"
+                    },
+                )
+            };
+            let (folder, name) = match m.shown.rfind(['/', '\\']) {
+                Some(k) => (&m.shown[..k], &m.shown[k + 1..]),
+                None => ("the top folder", m.shown.as_str()),
+            };
+            let dims = m
+                .dims
+                .map(|(x, y)| format!("{x}{}{y}  ", t.glyphs.times))
+                .unwrap_or_default();
+            vec![
+                verb,
+                t.paint_bold(Paint::Plate, &shorten_middle(name, col, t.glyphs.ellipsis)),
+                t.paint_rgb(DIM, &shorten_middle(folder, col, t.glyphs.ellipsis)),
+                format!(
+                    "{}{}",
+                    t.paint(Paint::Plate, &dims),
+                    t.paint(Paint::Plate, &fmt_bytes(m.size))
+                ),
+                t.paint_rgb(DIM, &m.date),
+            ]
+        };
+        let (ca, cb) = (cap(ka, 0), cap(kb, b));
+        for (a, bb) in ca.iter().zip(&cb) {
+            let pad = col.saturating_sub(visible_width(a));
+            out.push(format!("{a}{}   {bb}", " ".repeat(pad)));
+        }
+        out.push(String::new());
+        let words = if kb.words.is_empty() {
+            "the same file".to_string()
+        } else {
+            kb.words.clone()
+        };
+        out.push(t.paint_rgb_bold(hue, &crate::util::fit(&words, w)));
+        if !meters.is_empty() {
+            out.push(String::new());
+            let bar = w
+                .saturating_sub(6 + 2 + 2 + 4 + 2 + 12 + 2 + 7)
+                .clamp(8, 32);
+            for m in meters {
+                out.push(meter(t, m, bar));
+            }
+        }
+        out
+    }
+
     /// The gauge: what is chosen, of all the groups shown can free, in
     /// each kind's colour; `shown` rolls it.
     fn gauge_line(&self, t: &Theme, shown: Option<u64>) -> String {
@@ -433,13 +777,25 @@ impl State {
         lines: &HashMap<Row, String>,
         total_height: usize,
         frame: &Frame,
+        thumbs: Option<&Thumbs>,
     ) -> Vec<String> {
         let g = t.glyphs;
         let max = t.width.saturating_sub(1);
         let mut out: Vec<String> = Vec::with_capacity(total_height);
         out.push(title.to_string());
         out.push(String::new());
-        let body = total_height.saturating_sub(6);
+        let body_rows = total_height.saturating_sub(6);
+        // two panels when there is room for them: the groups, framed, and
+        // the comparison; the groups' lines then fit the left frame
+        let panels = t.width >= PANELS_MIN && body_rows >= 12;
+        let left_w = if panels {
+            (t.width * 46 / 100).clamp(48, 76)
+        } else {
+            max
+        };
+        let body = if panels { body_rows - 2 } else { body_rows };
+        let max = if panels { left_w - 2 } else { max };
+        let mut list: Vec<String> = Vec::with_capacity(body);
         let (drawn, cur) = self.lines();
         let top = self.window(&drawn, cur, body);
         let largest = self
@@ -471,6 +827,9 @@ impl State {
                 };
                 format!("{pointer}{} ", t.paint_bold(role, mark))
             };
+            let mut tt = *t;
+            tt.width = max + 1;
+            let t = &tt;
             let text = match line {
                 Line::Section(_) => {
                     let open = drawn
@@ -484,6 +843,27 @@ impl State {
                     gutter(Row::Head(gi)),
                     self.group_line(t, gi, max.saturating_sub(3), largest)
                 ),
+                Line::Member(gi, m) if panels => {
+                    let n = self.layout.groups[gi].members.len();
+                    let tree = if t.unicode {
+                        if m + 1 == n {
+                            "└"
+                        } else {
+                            "├"
+                        }
+                    } else if m + 1 == n {
+                        "`"
+                    } else {
+                        "|"
+                    };
+                    let hue = self.layout.groups[gi].kind.rgb();
+                    format!(
+                        "{}{} {}",
+                        gutter(Row::Member(gi, m)),
+                        t.paint_rgb(hue.lerp(GROOVE, 0.35), tree),
+                        self.member_short(t, gi, m, max.saturating_sub(5))
+                    )
+                }
                 Line::Member(gi, m) => {
                     let n = self.layout.groups[gi].members.len();
                     let tree = match (t.unicode, m + 1 == n) {
@@ -517,14 +897,14 @@ impl State {
                 text
             };
             if is_cur {
-                self.cursor_at.set(Some(out.len()));
-                out.push(lit(t, &text, kind.map_or(PLATE, Hue::rgb), max));
+                self.cursor_at.set(Some(list.len()));
+                list.push(lit(t, &text, kind.map_or(PLATE, Hue::rgb), max));
             } else {
-                out.push(text);
+                list.push(text);
             }
         }
         if self.rows.is_empty() && !self.filter.is_empty() {
-            out.push(format!(
+            list.push(format!(
                 "   {}",
                 t.paint(
                     Paint::Dupe,
@@ -535,8 +915,45 @@ impl State {
                 )
             ));
         }
-        while out.len() < 2 + body {
-            out.push(String::new());
+        if panels {
+            let edge = PLATE.lerp(GROOVE, 0.75);
+            let here = self.cursor_group().map(|g| &self.layout.groups[g]);
+            let hue = here.map_or(PLATE, |g| g.kind.rgb());
+            let lt = format!(
+                "{}{}",
+                t.paint_rgb_bold(PLATE, "GROUPS"),
+                t.paint_rgb(DIM, &format!("  {}", self.order.words()))
+            );
+            let left = framed(t, &lt, edge, &list, left_w - 2, body);
+            let right_w = t.width.saturating_sub(left_w + 2).saturating_sub(2);
+            let rt = match here {
+                Some(g) => t.paint_rgb_bold(
+                    hue,
+                    &shorten_middle(
+                        g.members[0].shown.rsplit(['/', '\\']).next().unwrap_or(""),
+                        right_w.saturating_sub(8).max(8),
+                        t.glyphs.ellipsis,
+                    ),
+                ),
+                None => String::new(),
+            };
+            let cmp = self.comparison(t, right_w, body, thumbs, frame.clock);
+            let right = framed(t, &rt, edge.lerp(hue, 0.45), &cmp, right_w, body);
+            // the cursor's line counts the frame's top edge
+            if let Some(c) = self.cursor_at.get() {
+                self.cursor_at.set(Some(c + 3));
+            }
+            for (l, r) in left.iter().zip(&right) {
+                out.push(format!("{l} {r}"));
+            }
+        } else {
+            if let Some(c) = self.cursor_at.get() {
+                self.cursor_at.set(Some(c + 2));
+            }
+            out.extend(list);
+            while out.len() < 2 + body {
+                out.push(String::new());
+            }
         }
         out.push(self.gauge_line(t, frame.gauge));
 
@@ -749,24 +1166,38 @@ mod tests {
             let st = State::new(layout(), h - 6);
             for w in [40usize, 60, 80, 120, 200] {
                 let t = theme(w);
-                let screen = st.screen(&t, " dedupe find  root", &listed(&st), h, &Frame::STILL);
+                let screen = st.screen(
+                    &t,
+                    " dedupe find  root",
+                    &listed(&st),
+                    h,
+                    &Frame::STILL,
+                    None,
+                );
                 assert_eq!(screen.len(), h, "{screen:#?}");
                 for l in &screen {
                     assert!(width(l) <= w, "{w}: {l:?}");
                 }
+                // from 100 columns (and room for them) the groups and the
+                // comparison stand framed side by side
+                let panels = w >= PANELS_MIN && h - 6 >= 12;
+                assert_eq!(screen[2].starts_with("╭─ GROUPS"), panels, "{screen:#?}");
                 // the cursor starts on a (1).jpg: its section open, its
                 // group unfolded on a tree, the pointer on the file
-                assert!(screen[2].starts_with(" COPIES"), "{screen:#?}");
+                assert!(screen.iter().any(|l| l.contains(" COPIES")), "{screen:#?}");
+                let cursor = if panels {
+                    "│▸■ └ dupe  a (1).jpg"
+                } else {
+                    "▸■ └ line 0 a (1).jpg"
+                };
                 assert!(
-                    screen
-                        .iter()
-                        .any(|l| l.starts_with("▸■ └ line 0 a (1).jpg")),
-                    "{screen:#?}"
+                    screen.iter().any(|l| l.starts_with(cursor)),
+                    "{cursor}\n{screen:#?}"
                 );
                 // room for every group: the other kind open too; else
                 // folded to its one line
                 assert!(
-                    screen.iter().any(|l| l.starts_with(" SIMILAR ")),
+                    screen.iter().any(|l| l.contains(" SIMILAR ")),
                     "{screen:#?}"
                 );
                 assert_eq!(
@@ -810,8 +1241,8 @@ mod tests {
         );
         assert_eq!(cur, Some(3));
         let t = theme(100);
-        let screen = st.screen(&t, "", &listed(&st), 30, &Frame::STILL);
-        let row = screen.iter().find(|l| l.starts_with("▸")).unwrap();
+        let screen = st.screen(&t, "", &listed(&st), 30, &Frame::STILL, None);
+        let row = screen.iter().find(|l| l.starts_with("│▸")).unwrap();
         // the group's line: its keeper, three beside it, what it frees,
         // what its files are
         assert!(

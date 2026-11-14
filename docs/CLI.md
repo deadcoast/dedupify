@@ -135,52 +135,91 @@ it in the fold **[CLAUDE; the owner's direction of 2026-11-13: the whole
 output redesigned, long lists of one kind folded to a line]**:
 
 ```
- [dedupe] find  C:\Photos   recursive · all kinds
+ [dedupe] find  C:\Photos   recursive · images
 
- COPIES    2 groups · 339 KB · 2 chosen  ──────────────────────────────────────
- ■ starry_night.jpg      +1    301 KB  ████          in exports
- ■ home.jpg              +1   37.1 KB  ▌             in exports
- SIMILAR   10 groups · 2.69 MB · 11 chosen  ───────────────────────────────────
- ■ graf1.png             +1    961 KB  ████████████  mirrored
- ◧ shot_a.jpg            +4    935 KB  ███████████▊  same picture 2 · resized · another shot
-   ├ keep  shot_a.jpg                    1282×1110   536 KB   2026-11-09
- ■ ├ near  exports\shot_a_export.jpg     961×832     229 KB   resized 75%       d 0 p 0 q 2
-▸□ ├ near  aloeL.jpg                     1282×1110   313 KB   same picture      d 0 p 0 q 0
- · ├ kin   shot_b.jpg                    1282×1110   647 KB   another shot, 05:06:08
- ■ └ near  exports\shot_a_stripped.jpg   1282×1110   392 KB   same picture      d 0 p 0 q 0
- ■ rubberwhale1.png      +1    358 KB  ████▌         re-encoded
- □ right01.jpg           +2       0 B                unconfirmed 2
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- 12 selected  2.72 MB of 3.03 MB                                     group 4/12
-   ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  …
- ▸  m milk 12 → _milked  p purge 12 → Recycle Bin  n preview  q quit
+╭─ GROUPS  as listed ───────────────────────────╮ ╭─ shot_a.jpg ──────────────────────────────────────╮
+│ COPIES    2 groups · 339 KB · 2 chosen  ──────│ │                                                   │
+│ ■ starry_night.jpg  +1    301 KB ████   in ex…│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │
+│ SIMILAR   10 groups · 2.69 MB · 11 chosen  ───│ │ (the keeper, in half      ≈ (the file under the    │
+│ ■ graf1.png         +1    961 KB ███████ mirr…│ │  blocks, 24-bit colour)     cursor, the same)      │
+│ ■ shot_a.jpg        +4    935 KB ███████ same…│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │
+│▸ ├ keep  shot_a.jpg                     536 KB│ │                                                   │
+│■ ├ near  exports/shot_a_export.jpg      229 KB│ │ keep                      near                    │
+│■ ├ near  aloeL.jpg                      313 KB│ │ shot_a.jpg                shot_a_export.jpg       │
+│· ├ kin   shot_b.jpg                     647 KB│ │ the top folder            exports                 │
+│■ └ near  exports/shot_a_stripped.jpg    392 KB│ │ 1282×1110  536 KB         961×832  229 KB         │
+│■ rubberwhale1.png   +1    358 KB ███    re-e…│ │ 2026-11-09                2026-11-09              │
+│□ right01.jpg        +2       0 B        unco…│ │                                                   │
+│                                               │ │ resized 75%                                       │
+│                                               │ │                                                   │
+│                                               │ │ dHash   ──────────────┊─────────   0  at most 10  within │
+│                                               │ │ pHash   ──────────────┊─────────   0  at most 14  within │
+│                                               │ │ PDQ     ━─────────────┊─────────   2  at most 31  within │
+╰───────────────────────────────────────────────╯ ╰───────────────────────────────────────────────────╯
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ 13 selected  3.03 MB of 3.03 MB                                                       group 4/12
+   ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  g go to  / filter …
+ ▸  m milk 13 → _milked  p purge 13 → Recycle Bin  n preview  q quit
 ```
 
-The body, top to bottom:
+From 100 columns (and 18 rows) the body is two framed panels, the
+frames' rounded corners and edges in the groove; nothing — the cursor's
+ground included — runs past a frame. Narrower, the groups alone fill the
+width (the same lines, a file's line the full output's own).
+
+**The groups**, left (46% of the width, 48–76 columns), titled with the
+order:
 
 - **Sections**, one per kind, in the order `find` lists them: `COPIES`,
   `SIMILAR`, `VIDEO`, each in its kind's colour (§3a's hues) with its
   groups, what they free and how many files are chosen. When every
-  group fits the body every section is open, a hairline after its
-  figures; when they do not, the sections the cursor is not in fold to
-  their one line, the hairline replaced by a skyline of their groups.
-  Sorted by `s`, the sections give way to one, `GROUPS`, naming the order.
+  group fits every section is open, a hairline after its figures; when
+  they do not, the sections the cursor is not in fold to their one line,
+  the hairline replaced by a skyline of their groups. Sorted by `s`, the
+  sections give way to one, `GROUPS`, naming the order.
 - **Groups**, one line each: the keeper's name, how many files beside
   it, what the group frees, a bar of that against the largest group
-  shown (eighths of a cell, in the kind's colour; from 70 columns), then
-  what its files are — the members' words without their figures, most
-  common first (§3a's tally); for copies, where they are: `in exports`,
-  `beside it`.
-- **The cursor's group** unfolds under its line: its files on a tree
-  (`├`, `└` in the kind's colour), each the full output's own line —
-  role, path, size and date, the words, the evidence dim. Moving off
-  the group folds it and unfolds the next.
-- **The cursor's line** is lit across the width on a ground of its
+  shown (eighths of a cell, in the kind's colour), then what its files
+  are — the members' words without their figures, most common first
+  (§3a's tally); for copies, where they are: `in exports`, `beside it`.
+- **The cursor's group** unfolds under its line on a tree (`├`, `└` in
+  the kind's colour): each file's role in a word, its path, its size.
+  Moving off the group folds it and unfolds the next.
+- **The cursor's line** is lit across the panel on a ground of its
   kind's colour; its pointer `▸` breathes between amber and white
   between keys (its line drawn again twelve times a second).
-- **The gauge** under the body (the line the full output drew as a
-  rule): the bytes chosen, of all the groups shown can free, in each
-  kind's colour on the groove.
+
+**The comparison**, right, titled with the keeper's name in the kind's
+colour, its frame tinted with it:
+
+- **The two pictures**, the keeper and the file under the cursor (the
+  group's first other file when the cursor is on the group or its
+  keeper), side by side, `=` between copies and `≈` between similar
+  files. Each is drawn in half blocks — two pixels a cell, one above the
+  other, in 24-bit colour — at the panel's size, so any terminal with
+  colour shows them; `v` still shows them full size where the terminal
+  draws pictures. They are decoded by two workers off the key loop, the
+  newest asked first and each kept for the sitting; while one is coming
+  a sheen runs across its place at its proportions, and when it arrives
+  it rises out of the panel's ground over 0.22 s. A video shows its
+  frame a third of the way in; a file that does not decode says `no
+  picture`.
+- **Under each picture**: its role, its name, its folder, its pixels and
+  size, its date.
+- **What the file is**, in its words (`resized 75%`), in the kind's
+  colour.
+- **Its evidence**, a meter each: dHash, pHash and PDQ distances against
+  their limits (10, 14, 31), the fit and the descriptor when measured
+  (at least 0.92, 0.70); for a video the frames' median distances and
+  TMK's two levels (0.5, 0.8). The bar fills to the value — a distance's
+  scale runs to half again its limit, a score's to 1 — with a tick at
+  the limit, green within it, red past it; PDQ on a flat picture is
+  drawn dim, `not weighed`. A byte-for-byte copy has no meters: its
+  evidence is every byte.
+
+**The gauge** under the panels (the line the full output drew as a
+rule): the bytes chosen, of all the groups shown can free, in each
+kind's colour on the groove.
 
 Motion: when the cursor's group changes, its files come in from the
 groove over four frames (30 ms apart); when the cursor crosses into

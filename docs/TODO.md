@@ -14,6 +14,7 @@ delivered 2026-11-13 (`SHELVED.md` § Phase 16 `[done]`).
 - [x] **OUT-01** the fold, the default output; `-v` / `--verbose` the full one
 - [x] **OUT-02** `RUN_VERIFY`, one live line per workflow
 - [x] **OUT-05** the workspace in the fold
+- [x] **OUT-06** the workspace in two panels: the groups and the comparison
 
 Done when: every box ticked, the suite green on Linux and in the CI
 matrix on Windows, `VERIFICATION` § Phase 17 written, and `PLAN.md` marks

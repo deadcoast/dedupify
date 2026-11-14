@@ -109,7 +109,7 @@ pub fn detect_from(var: &dyn Fn(&str) -> String) -> Protocol {
 
 /// What to show for one file: a still decoded from the file, or a frame a
 /// third of the way into a video.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Visual {
     Image(PathBuf),
     Video(PathBuf, f64),

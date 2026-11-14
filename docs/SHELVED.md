@@ -56,6 +56,11 @@ The owner's direction of 2026-11-13, not an IDENTIFIED item; IDs here:
    group with its bar, the cursor's group unfolded on a tree, the
    cursor's line lit, the gauge under the body; files fading in, the
    gauge rolling, the pointer breathing
+6. **OUT-06** the workspace in two panels: the groups framed on the
+   left; on the right the keeper and the file under the cursor as
+   pictures (half blocks, 24-bit colour, decoded off the key loop, a
+   sheen while coming, risen from the ground on arrival), their
+   captions, the file's words, its evidence as meters against the limits
 
 ## Not yet placed
 
