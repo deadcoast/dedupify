@@ -1991,6 +1991,37 @@ fn purge_then_undo_through_the_bin() {
     assert_eq!(a, b);
 }
 
+/// `--version` names the version and the commit built from, alone on its
+/// line, whatever else is on the command line; the help page carries the
+/// same build on its first line.
+#[test]
+fn version_names_the_build() {
+    let run = |args: &[&str]| {
+        let out = Command::new(bin())
+            .args(args)
+            .env("NO_COLOR", "1")
+            .env("COLUMNS", "100")
+            .output()
+            .expect("spawn dedupe");
+        assert!(out.status.success(), "{args:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let v = run(&["--version"]);
+    assert_eq!(v, run(&["-V"]));
+    assert_eq!(v, run(&["find", ".", "-V"]));
+    let id = v.trim().strip_prefix("dedupe ").expect("dedupe <id>");
+    assert!(id.starts_with(env!("CARGO_PKG_VERSION")), "{v}");
+    assert_eq!(v.lines().count(), 1);
+    let help = run(&["--help"]);
+    let first = help.lines().next().unwrap();
+    assert!(first.trim_end().ends_with(id), "{first}");
+    assert_eq!(
+        first.trim_end().chars().count(),
+        99,
+        "ends where the rule does"
+    );
+}
+
 /// The result is the workspace: `find` on a terminal opens its groups in a
 /// screen of their own; `n` previews on the main screen and enter comes
 /// back; `m` + enter moves what is selected without a second scan; `u` on

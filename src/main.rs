@@ -15,6 +15,11 @@ fn main() -> ExitCode {
     let r = Renderer::new(theme);
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // which build this is, alone on its line for scripts and logs
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("dedupe {}", dedupe::build_id());
+        return ExitCode::SUCCESS;
+    }
 
     // Ctrl-C ends a scan at once (with a clean newline after the in-place
     // progress line) and, once a change has started, stops it after the
