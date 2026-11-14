@@ -3963,7 +3963,8 @@ all targets and the Windows target.
 CI on 67a09d3 (run 43625009612) was cancelled, not failed: the next
 push (this file, no `[ci]`) started a run of the same group, which
 cancels the one in progress, and skipped its jobs. The commit carrying
-this section is the next CI run.
+this section, fa81ad4, ran it: run 43626771488, green on ubuntu-latest
+and windows-latest (fmt, clippy, the suite, the Windows bin tests).
 
 ## Not verified here
 
