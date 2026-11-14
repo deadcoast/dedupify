@@ -3895,6 +3895,36 @@ Unit tests: the screen test now runs both layouts (panels from 100
 columns at 20 rows; the list alone under them or at 12 rows).
 CI run **43610431673** at `3f471da`, green on Ubuntu and Windows.
 
+## 10. Reviewed as a terminal draws it
+
+The screenshots of § 8–9 were rendered as HTML text, whose line spacing
+cut every picture into stripes, and were sent as reviewed. The review
+now renders the captured screen cell by cell (each cell its background,
+block and box characters drawn as shapes that meet their neighbours,
+text in DejaVu Sans Mono). That showed:
+
+- a picture row one cell wider than its frame when the right-hand
+  picture filled its column; the frame's overflow guard then stripped
+  the row's colours, so the second group's pictures drew as grey bars.
+  The row is sized to the frame, and the guard cuts a line keeping its
+  colours (`util::cut_sgr`);
+- pictures of 37 × 32 effective pixels in half blocks; now quadrant
+  blocks, four pixels a cell in two fitted colours;
+- size bars of full blocks that merged into slabs down the list; now a
+  slim rule in a track;
+- meters drawn as thin rules, nearly empty when the files matched; now
+  gauges full when the two are the same, the limit marked;
+- captions that did not say what differed, a bare `-` for a copy's
+  pixels, `the top folder` for the root; now what differs is lit, the
+  pixels come from the decoded picture, the root is named;
+- the comparison hanging at the top of its frame; now in its middle.
+
+Rendered and looked at 150 × 40, 100 × 30 and 99 × 30 (the groups
+alone): every panel line inside the width; both pictures drawn on the
+copies (starry_night) and on the similar pair (shot_a); the gauges full
+and green for dHash 0, pHash 0, PDQ 2. Suite here: 142 unit tests, 39
+end to end; clippy clean on all targets and the Windows target.
+
 ## Not verified here
 
 - The workspace in the fold in Windows Terminal: drawn here in tmux; on
