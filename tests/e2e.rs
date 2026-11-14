@@ -954,11 +954,11 @@ fn the_fold_is_the_default_and_every_pass_is_one_line() {
             .to_string()
     };
     assert!(
-        line(&out, " + files").contains("10 files   5.52 MB   1 empty"),
+        line(&out, " + files").contains("files    10   5.52 MB   1 empty"),
         "{out}"
     );
     assert!(
-        line(&out, " + copies").contains("3 groups   4 copies   2.59 MB"),
+        line(&out, " + copies").contains("4 in 3 groups   2.59 MB"),
         "{out}"
     );
     assert!(line(&out, " + similar").contains("2 not decoded"), "{out}");
@@ -966,7 +966,8 @@ fn the_fold_is_the_default_and_every_pass_is_one_line() {
         line(&out, " 2.59 MB reclaimable").contains("4 files   3 groups"),
         "{out}"
     );
-    assert!(out.contains("largest  a.mp4 2.00 MB"), "{out}");
+    // the largest group named under its share of the bar
+    assert!(out.contains("^ a.mp4 2.00 MB"), "{out}");
     assert!(!out.contains("GROUP 001"), "{out}");
     assert!(fold(&["find", ".", "-v"]).contains("GROUP 001"));
     // the action: one line for its four files, then the way back

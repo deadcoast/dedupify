@@ -8,10 +8,10 @@ use std::time::SystemTime;
 use crate::cli::{Command, Invocation};
 use crate::interrupt;
 use crate::journal::{Entry, Op, Writer};
-use crate::render::fold::Hue;
+use crate::render::fold::{self, Hue};
 use crate::render::Renderer;
 use crate::theme::Role;
-use crate::util::{fmt_count, rel_display, under_root, unix_secs};
+use crate::util::{fmt_count, rel_display, under_root, unix_secs, visible_width};
 use crate::MILKED_DIR;
 
 use super::{Found, Item, EXIT_FAILED, EXIT_INTERRUPTED, EXIT_OK};
@@ -221,26 +221,24 @@ pub(crate) fn act_milk(
         );
     }
     let kept_pairs = kept.iter().filter(|k| k.2).count() as u64;
-    let kept_unconfirmed = kept.len() as u64 - kept_pairs;
-    if kept_unconfirmed > 0 {
-        r.note(
-            Role::Warn,
-            &format!(
-                "{} {}: similar on two hashes, confirmed by nothing else; shown, left in place",
-                fmt_count(kept_unconfirmed),
-                kept_word(r)
-            ),
-        );
-    }
+    unconfirmed_note(r, kept.iter().filter(|k| !k.2).map(|k| k.0.clone()));
     pair_note(r, kept_pairs);
     by_hand_note(r, by_hand);
     if copied_n > 0 {
-        r.note(
+        let n = fmt_count(copied_n);
+        aside(
+            r,
             Role::Dupe,
             &format!(
-                "{} copied across volumes: each copy read back and compared before its original was deleted",
-                fmt_count(copied_n)
+                "{n} copied across volumes: each copy read back and compared before its original was deleted"
             ),
+            vec![
+                fold::figure(&r.theme, &format!("{n} copied across volumes")),
+                fold::dim(
+                    &r.theme,
+                    "each read back and compared before its original was deleted",
+                ),
+            ],
         );
     }
     if failed > 0 && !r.folding() {
@@ -431,7 +429,8 @@ pub(crate) fn act_purge(
             "(images: dHash, pHash and PDQ or the geometric fit agree; videos: TMK or sampled frames)",
         );
     }
-    if kept_mismatch > 0 {
+    // the fold's verify line says how many differed
+    if kept_mismatch > 0 && !r.folding() {
         r.note(
             Role::Warn,
             &format!(
@@ -441,13 +440,12 @@ pub(crate) fn act_purge(
         );
     }
     if kept_unconfirmed > 0 {
-        r.note(
-            Role::Warn,
-            &format!(
-                "{} {}: similar on two hashes, confirmed by nothing else; shown, left in place",
-                fmt_count(kept_unconfirmed),
-                kept_word(r)
-            ),
+        unconfirmed_note(
+            r,
+            list.iter()
+                .enumerate()
+                .filter(|(i, it)| !verified[*i] && it.near.is_some() && !it.pair)
+                .map(|(_, it)| rel_display(it.path, &inv.root)),
         );
     }
     pair_note(r, kept_pairs);
@@ -484,24 +482,60 @@ pub(crate) fn act_purge(
 /// RAW + JPEG pairs left together, for the footer.
 fn pair_note(r: &Renderer, n: u64) {
     if n > 0 {
-        r.note(
+        let c = fmt_count(n);
+        aside(
+            r,
             Role::Warn,
             &format!(
-                "{} {}: the camera's JPEG beside its RAW stays with it; choose it by hand in the workspace",
-                fmt_count(n),
-                kept_word(r)
+                "{c} kept~: the camera's JPEG beside its RAW stays with it; choose it by hand in the workspace"
             ),
+            vec![
+                fold::warn(&r.theme, &format!("{c} beside its RAW")),
+                fold::dim(&r.theme, "the camera's JPEG stays with it"),
+                fold::dim(&r.theme, "choose by hand in dedupe find"),
+            ],
         );
     }
 }
 
-/// What the notes call a file left where it is: the `kept~` rows of the
-/// full listing, or the fold's `left in place`.
-fn kept_word(r: &Renderer) -> &'static str {
+/// Near duplicates nothing confirmed, shown and not taken: how many and,
+/// in the fold, which, by name as far as the line goes (their reasons are
+/// on their rows under `--verbose`).
+fn unconfirmed_note(r: &Renderer, names: impl Iterator<Item = String>) {
+    let names: Vec<String> = names.collect();
+    if names.is_empty() {
+        return;
+    }
+    let c = fmt_count(names.len() as u64);
+    let t = &r.theme;
+    // the names as far as they go with the way to them still on the line
+    let room = fold::aside_room(t);
+    let mut segs = vec![fold::warn(t, &format!("{c} not confirmed"))];
+    segs.extend(names.iter().map(|n| t.paint(Role::Plate, n)));
+    let how = fold::dim(t, "choose by hand in dedupe find");
+    while segs.len() > 1
+        && segs.iter().map(|s| visible_width(s) + 3).sum::<usize>() + visible_width(&how) > room
+    {
+        segs.pop();
+    }
+    segs.push(how);
+    aside(
+        r,
+        Role::Warn,
+        &format!(
+            "{c} kept~: similar on two hashes, confirmed by nothing else; shown, left in place"
+        ),
+        segs,
+    );
+}
+
+/// A note on the action: in the fold an aside hooked under its line;
+/// otherwise a line of its own.
+fn aside(r: &Renderer, role: Role, full: &str, fold_segments: Vec<String>) {
     if r.folding() {
-        "left in place"
+        r.line(&fold::aside_line(&r.theme, &fold_segments));
     } else {
-        "kept~"
+        r.note(role, full);
     }
 }
 
@@ -521,12 +555,17 @@ fn tilde_legend(by_hand: u64) -> &'static str {
 /// evidence did not confirm them.
 fn by_hand_note(r: &Renderer, n: u64) {
     if n > 0 {
-        r.note(
+        let c = fmt_count(n);
+        aside(
+            r,
             Role::Warn,
             &format!(
-                "{} by hand: chosen in the workspace, confirmed by your look, not by a second family",
-                fmt_count(n)
+                "{c} by hand: chosen in the workspace, confirmed by your look, not by a second family"
             ),
+            vec![
+                fold::warn(&r.theme, &format!("{c} chosen by hand")),
+                fold::dim(&r.theme, "confirmed by your look, not by a second check"),
+            ],
         );
     }
 }

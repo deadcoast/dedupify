@@ -3925,6 +3925,46 @@ copies (starry_night) and on the similar pair (shot_a); the gauges full
 and green for dHash 0, pHash 0, PDQ 2. Suite here: 142 unit tests, 39
 end to end; clippy clean on all targets and the Windows target.
 
+## 11. The fold, reviewed as drawn
+
+The default output was captured in tmux at 120, 80 and 60 columns
+(`milk work . -n`, `purge work . -n` on the 33-file sample, `milk` on a
+folder of two unrelated pictures) and rendered cell by cell as in § 10,
+braille drawn as dots (the orbit was a missing-glyph box in the earlier
+render). What it showed, and what changed:
+
+- every section said its noun twice: `files 33 files`, `copies 2 groups
+  · 2 copies`, `similar … 11 similar`. The label is the noun now:
+  `files 33 · 8.29 MB`, `copies 2 in 2 groups · 339 KB`, `similar 11 in
+  10 groups · 2.69 MB · …`;
+- the time column read `0.0 s` on three of four sections. Under a second
+  it is milliseconds: `<1 ms`, `1 ms`, `557 ms`;
+- the skyline was twelve cells of block heights beside `largest`, too
+  small to read and unexplained. It is gone; every group has its share
+  on the gauge itself (two tones per kind alternating, so the 12 groups
+  show as 12 runs), and the largest are named under their own shares.
+  At 120 columns `graf1.png 961 KB` and `shot_a.jpg 935 KB` (the two
+  largest; the third had no place and is not shown, so the names are
+  never a skip of the order); at 80 and 60, `graf1.png 961 KB`;
+- the action's note repeated `left in place` and said nothing a person
+  could act on (`similar on two hashes, confirmed by nothing else;
+  shown, left in place`). Under the action line, hooked to it: `2 not
+  confirmed · photos/right09.jpg · photos/right06.jpg · choose by hand
+  in dedupe find`; at 80 columns the names drop and the way to them
+  stays.
+
+Tests added: the names under the bar are a prefix of the groups by size,
+each hook on its own share, none touching, inside the width, at every
+width 40–200 with and without Unicode; the clock. Suite here: 144 unit,
+39 end to end (the fold test now reads `files    10   5.52 MB   1
+empty`, `4 in 3 groups   2.59 MB`, `^ a.mp4 2.00 MB`); clippy clean on
+all targets and the Windows target.
+
+CI on 67a09d3 (run 43625009612) was cancelled, not failed: the next
+push (this file, no `[ci]`) started a run of the same group, which
+cancels the one in progress, and skipped its jobs. The commit carrying
+this section is the next CI run.
+
 ## Not verified here
 
 - The workspace in the fold in Windows Terminal: drawn here in tmux; on

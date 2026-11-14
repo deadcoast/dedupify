@@ -8,9 +8,9 @@
 //! that roll toward their value, the time on the right. When the section
 //! is done the line folds: its mark, its label, what it found, how long it
 //! took; the next section opens under it. After the sections, the yield:
-//! what can be reclaimed as one figure, a bar of everything scanned with
-//! each kind's share in that kind's colour, and the skyline — every group
-//! one cell, tallest first — with the three largest named. `--verbose`
+//! what can be reclaimed as one figure, then a bar of everything scanned
+//! on which every group has its share in its kind's colour, and under the
+//! bar the largest groups named beneath their own shares. `--verbose`
 //! prints the stage lines and every group and file instead.
 //!
 //! The live line is drawn by a ticker thread at 25 frames a second, so it
@@ -46,8 +46,8 @@ pub(crate) const GROOVE: Rgb = Rgb(0x3A, 0x3A, 0x3A);
 pub(crate) const DIM: Rgb = Rgb(0x8A, 0x8A, 0x8A);
 pub(crate) const PLATE: Rgb = Rgb(0xE8, 0xE4, 0xD8);
 
-/// A section: its label and its colour, which its share of the yield's
-/// bar and its cells of the skyline carry too.
+/// A section: its label and its colour, which its groups carry on the
+/// yield's bar too.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hue {
     Files,
@@ -413,7 +413,7 @@ fn live_line(l: &Live, now: Instant) -> String {
     }
 
     // the count, then its detail; the time on the right
-    let clock = fmt_duration(now.duration_since(l.opened));
+    let clock = clock(now.duration_since(l.opened));
     let used = 1 + 1 + 1 + LABEL + 1 + if cells > 0 { cells + 2 } else { 0 };
     let room = t.width.saturating_sub(used + 2 + width(&clock) + 1);
     let mut words: Vec<(Rgb, bool, String)> = Vec::new();
@@ -444,6 +444,19 @@ fn live_line(l: &Live, now: Instant) -> String {
     b.done()
 }
 
+/// A section's time: milliseconds under a second, where tenths would
+/// read `0.0 s` for most of the sections of a small folder.
+fn clock(d: Duration) -> String {
+    let ms = d.as_secs_f64() * 1000.0;
+    if ms < 1.0 {
+        "<1 ms".into()
+    } else if ms < 1000.0 {
+        format!("{} ms", ms.floor())
+    } else {
+        fmt_duration(d)
+    }
+}
+
 /// A folded section: mark, label, the segments that fit, the time.
 pub(crate) fn settled_line(
     t: &Theme,
@@ -461,7 +474,7 @@ pub(crate) fn settled_line(
         (Mark::Warn, false) => ("!", Rgb(0xFF, 0xB0, 0x00)),
         (Mark::Failed, false) => ("x", Rgb(0xFF, 0x4D, 0x4D)),
     };
-    let clock = elapsed.map(fmt_duration).unwrap_or_default();
+    let clock = elapsed.map(clock).unwrap_or_default();
     let lead = 1 + 1 + 1 + LABEL + 1;
     let tail = if clock.is_empty() {
         1
@@ -512,6 +525,35 @@ pub(crate) fn count(t: &Theme, n: u64, one: &str, many: &str) -> String {
         "{} {}",
         t.paint_rgb_bold(PLATE, &fmt_count(n)),
         t.paint_rgb(DIM, if n == 1 { one } else { many })
+    )
+}
+
+/// A count and the groups it is in: `11 in 10 groups`.
+pub(crate) fn within(t: &Theme, n: u64, groups: u64) -> String {
+    format!(
+        "{} {} {}",
+        t.paint_rgb_bold(PLATE, &fmt_count(n)),
+        t.paint_rgb(DIM, "in"),
+        count(t, groups, "group", "groups")
+    )
+}
+
+/// The cells an aside's words have.
+pub(crate) fn aside_room(t: &Theme) -> usize {
+    t.width.saturating_sub(1 + 1 + 1 + LABEL + 1 + 1)
+}
+
+/// A line under the section above it, in its text column, hooked to it:
+/// why something in it is as it is.
+pub(crate) fn aside_line(t: &Theme, segments: &[String]) -> String {
+    let lead = 1 + 1 + 1 + LABEL + 1;
+    let hook = if t.unicode { "└ " } else { "` " };
+    let room = aside_room(t);
+    format!(
+        "{}{}{}",
+        " ".repeat(lead - 2),
+        t.paint_rgb(GROOVE.lerp(DIM, 0.5), hook),
+        fit_segments(t, segments, room)
     )
 }
 
@@ -652,10 +694,11 @@ pub(crate) fn yield_lines(t: &Theme, y: &Yield, p: f64) -> Vec<String> {
     let room = max.saturating_sub(visible_width(&lead) + 3);
     let mut lines = vec![format!("{lead}   {}", fit_segments(t, &head, room))];
 
-    // the bar: everything scanned, each kind's share in its colour
+    // the bar: everything scanned; on it every group's share, in its
+    // kind's colour, neighbours in two tones so each group shows
     let cells = max.saturating_sub(1);
-    // a gauge in the skyline's block language: lower half blocks, each
-    // kind's share in its colour on the groove
+    let spans = spans(y, cells);
+    let poured = (spans.last().map_or(0, |s| s.end) as f64 * e).round() as usize;
     let (on, off) = match (t.unicode, t.color) {
         (true, true) => ("▄", "▄"),
         // without colour the groove must look like one: a baseline
@@ -665,81 +708,185 @@ pub(crate) fn yield_lines(t: &Theme, y: &Yield, p: f64) -> Vec<String> {
     let mut b = Brush::new(t);
     b.raw(" ");
     let mut drawn = 0usize;
-    let mut acc = 0u64;
-    for &(hue, bytes) in &y.parts {
-        if bytes == 0 {
-            continue;
+    for s in &spans {
+        let upto = s.end.min(poured);
+        if upto > drawn {
+            b.put(s.tone, false, &on.repeat(upto - drawn));
+            drawn = upto;
         }
-        acc += bytes;
-        let upto = if y.scanned > 0 {
-            ((acc as f64 / y.scanned as f64) * cells as f64).round() as usize
-        } else {
-            cells
-        };
-        // every kind with bytes gets a cell, however small its share
-        let upto = upto.max(drawn + 1).min(cells);
-        let visible = ((upto as f64) * e).round() as usize;
-        let n = visible.saturating_sub(drawn);
-        b.put(hue.rgb(), false, &on.repeat(n));
-        drawn += n;
     }
     b.put(GROOVE, false, &off.repeat(cells.saturating_sub(drawn)));
     lines.push(b.done());
 
-    // the skyline, tallest first, and the three largest by name
-    let mut groups: Vec<&(Hue, u64, String)> = y.groups.iter().collect();
-    groups.sort_by_key(|g| std::cmp::Reverse(g.1));
-    let names: Vec<String> = groups
-        .iter()
-        .filter(|g| g.1 > 0)
-        .take(3)
-        .map(|g| {
-            format!(
-                "{} {}",
-                t.paint_rgb(g.0.rgb(), &shorten_middle(&g.2, 28, t.glyphs.ellipsis)),
-                dim(t, &fmt_bytes(g.1))
-            )
-        })
-        .collect();
-    let mut line = String::from(" ");
-    let mut used = 1;
-    if t.unicode {
-        let room = (max / 3).clamp(8, 48).min(groups.len());
-        let per = groups.len().div_ceil(room.max(1));
-        let cells: Vec<(Hue, u64)> = groups
-            .chunks(per.max(1))
-            .map(|c| (c[0].0, c.iter().map(|g| g.1).sum()))
-            .collect();
-        let top = cells.iter().map(|c| c.1).max().unwrap_or(1).max(1);
+    // under the bar, the largest groups named beneath their own share,
+    // each as its share is poured
+    let named = name_spans(t, &spans, cells);
+    if !named.is_empty() {
         let mut b = Brush::new(t);
-        let n = cells.len();
-        for (i, &(hue, v)) in cells.iter().enumerate() {
-            let rise = (p * (n as f64 + 3.0) - i as f64).clamp(0.0, 1.0);
-            if v == 0 {
-                b.put(GROOVE, false, BLOCKS[0]);
+        b.raw(" ");
+        let mut col = 0;
+        let (right, left) = if t.unicode {
+            ("╰ ", " ╯")
+        } else {
+            ("^ ", " ^")
+        };
+        for n in named {
+            let s = &spans[n.span];
+            if s.end > poured {
                 continue;
             }
-            let level = 1.0 + 7.0 * v as f64 / top as f64;
-            let at = ((level * rise).round() as usize).clamp(1, 8);
-            b.put(hue.rgb(), false, BLOCKS[at - 1]);
+            b.raw(&" ".repeat(n.from - col));
+            if n.hook == n.from {
+                b.put(s.tone, false, right);
+                b.put(s.hue.rgb(), false, &n.name);
+                b.put(DIM, false, &format!(" {}", n.size));
+            } else {
+                b.put(s.hue.rgb(), false, &n.name);
+                b.put(DIM, false, &format!(" {}", n.size));
+                b.put(s.tone, false, left);
+            }
+            col = n.to;
         }
-        line.push_str(&b.done());
-        used += n;
-        line.push_str("  ");
-        used += 2;
+        lines.push(b.done());
     }
-    if !names.is_empty() {
-        let lead = dim(t, "largest  ");
-        line.push_str(&lead);
-        used += 9;
-        line.push_str(&fit_segments(t, &names, max.saturating_sub(used)));
-    }
-    lines.push(line);
     lines
 }
 
+/// One group's cells on the yield's bar: `start..end`, its tone, its
+/// keeper's name, what it frees.
+struct Span<'a> {
+    start: usize,
+    end: usize,
+    hue: Hue,
+    tone: Rgb,
+    name: &'a str,
+    bytes: u64,
+}
+
+/// The groups along a bar `cells` wide, kind by kind in the sections'
+/// order, the largest first within a kind. A group's cells are its share
+/// of everything scanned; a kind with bytes has a cell however small its
+/// share. Neighbours in a kind alternate between its colour and a deeper
+/// tone of it, so a group as narrow as one cell is told from the next.
+fn spans(y: &Yield, cells: usize) -> Vec<Span<'_>> {
+    let mut out = Vec::new();
+    let mut acc = 0u64;
+    let mut end = 0usize;
+    for &(hue, _) in &y.parts {
+        let mut gs: Vec<&(Hue, u64, String)> =
+            y.groups.iter().filter(|g| g.0 == hue && g.1 > 0).collect();
+        gs.sort_by_key(|g| std::cmp::Reverse(g.1));
+        let kind_start = end;
+        let n = gs.len();
+        let mut k = 0;
+        for (j, g) in gs.into_iter().enumerate() {
+            acc += g.1;
+            let mut upto = if y.scanned > 0 {
+                ((acc as f64 / y.scanned as f64) * cells as f64).round() as usize
+            } else {
+                cells
+            };
+            if j + 1 == n {
+                upto = upto.max(kind_start + 1);
+            }
+            let upto = upto.min(cells).max(end);
+            if upto > end {
+                let base = hue.rgb();
+                let tone = if k % 2 == 0 {
+                    base
+                } else {
+                    base.lerp(GROOVE, 0.45)
+                };
+                out.push(Span {
+                    start: end,
+                    end: upto,
+                    hue,
+                    tone,
+                    name: &g.2,
+                    bytes: g.1,
+                });
+                k += 1;
+                end = upto;
+            }
+        }
+    }
+    out
+}
+
+/// Where the largest groups' names go under the bar, the largest first:
+/// each hooked under the first cells of its own share (or, where the
+/// room is to its left, ending on them), two cells clear of the others.
+/// The first name with no such place ends the list, so the names shown
+/// are always the largest. In the bar's order: (column, span, name, size,
+/// hooked on the right).
+fn name_spans(t: &Theme, spans: &[Span], cells: usize) -> Vec<Named> {
+    let mut by_size: Vec<usize> = (0..spans.len()).collect();
+    by_size.sort_by_key(|&i| std::cmp::Reverse(spans[i].bytes));
+    let mut taken: Vec<Named> = Vec::new();
+    let free = |taken: &[Named], a: usize, b: usize| {
+        taken.iter().all(|o| b + 2 <= o.from || o.to + 2 <= a)
+    };
+    for i in by_size.into_iter().take(3) {
+        let s = &spans[i];
+        let size = fmt_bytes(s.bytes);
+        let full = width(s.name);
+        let mut placed = None;
+        // the name as it is, then shortened to eight cells
+        'fit: for w in [full.min(28), full.min(8)] {
+            let name = shorten_middle(s.name, w, t.glyphs.ellipsis);
+            let len = 2 + width(&name) + 1 + width(&size);
+            // hook first: `╰ name size` from a cell of the share
+            for at in s.start..s.end {
+                if at + len <= cells && free(&taken, at, at + len) {
+                    placed = Some(Named {
+                        from: at,
+                        to: at + len,
+                        hook: at,
+                        span: i,
+                        name,
+                        size: size.clone(),
+                    });
+                    break 'fit;
+                }
+            }
+            // hook last: `name size ╯` ending on a cell of the share
+            for at in (s.start..s.end).rev() {
+                if at + 1 >= len && free(&taken, at + 1 - len, at + 1) {
+                    placed = Some(Named {
+                        from: at + 1 - len,
+                        to: at + 1,
+                        hook: at,
+                        span: i,
+                        name,
+                        size: size.clone(),
+                    });
+                    break 'fit;
+                }
+            }
+        }
+        match placed {
+            Some(n) => taken.push(n),
+            None => break,
+        }
+    }
+    taken.sort_by_key(|o| o.from);
+    taken
+}
+
+/// A group named under the bar: the cells its words take, the cell of
+/// the hook (the first or the last of them), its share, its words.
+struct Named {
+    from: usize,
+    to: usize,
+    hook: usize,
+    span: usize,
+    name: String,
+    size: String,
+}
+
 /// Print the yield; on a terminal it is revealed over a third of a
-/// second — the figure rolls up, the bar pours, the skyline rises.
+/// second — the figure rolls up, the bar pours, each name comes as its
+/// share is poured.
 pub(crate) fn reveal(t: &Theme, y: &Yield) {
     let frames = if t.live && y.total() > 0 { 9 } else { 0 };
     let _o = lock(&OUT);
@@ -886,5 +1033,57 @@ mod tests {
         let bar = &yield_lines(&t, &y, 1.0)[1];
         assert_eq!(bar.matches('#').count(), 51);
         assert_eq!(bar.matches('.').count(), 49);
+    }
+
+    #[test]
+    fn the_names_under_the_bar_are_the_largest_each_under_its_share() {
+        let y = yield_of(&[
+            (Hue::Copies, 301_000),
+            (Hue::Copies, 37_100),
+            (Hue::Similar, 961_000),
+            (Hue::Similar, 935_000),
+            (Hue::Similar, 358_000),
+            (Hue::Similar, 12_000),
+            (Hue::Video, 700_000),
+        ]);
+        for unicode in [true, false] {
+            for w in 40..=200 {
+                let t = Theme::custom(true, unicode, w, true);
+                let cells = w - 2;
+                let spans = spans(&y, cells);
+                let named = name_spans(&t, &spans, cells);
+                // largest first, none skipped: the names are a prefix of
+                // the groups by size
+                let mut sizes: Vec<u64> = named.iter().map(|n| spans[n.span].bytes).collect();
+                sizes.sort_by_key(|b| std::cmp::Reverse(*b));
+                let mut all: Vec<u64> = spans.iter().map(|s| s.bytes).collect();
+                all.sort_by_key(|b| std::cmp::Reverse(*b));
+                assert_eq!(sizes, all[..sizes.len()], "{w}");
+                assert!(!named.is_empty(), "{w}: the largest has a place");
+                for (k, n) in named.iter().enumerate() {
+                    let s = &spans[n.span];
+                    assert!(
+                        (s.start..s.end).contains(&n.hook),
+                        "{w}: hook off its share"
+                    );
+                    assert!(n.hook == n.from || n.hook + 1 == n.to);
+                    assert!(n.to <= cells, "{w}: past the bar");
+                    if k > 0 {
+                        assert!(named[k - 1].to + 2 <= n.from, "{w}: names touch");
+                    }
+                }
+                let lines = yield_lines(&t, &y, 1.0);
+                assert_eq!(lines.len(), 3);
+                assert!(visible_width(&lines[2]) < w);
+            }
+        }
+    }
+
+    #[test]
+    fn the_clock_reads_milliseconds_under_a_second() {
+        assert_eq!(clock(Duration::from_micros(300)), "<1 ms");
+        assert_eq!(clock(Duration::from_micros(1_900)), "1 ms");
+        assert_eq!(clock(Duration::from_millis(551)), "551 ms");
+        assert_eq!(clock(Duration::from_millis(1_250)), "1.2 s");
     }
 }

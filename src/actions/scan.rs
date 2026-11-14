@@ -385,8 +385,9 @@ pub(crate) fn stalled_note(paths: &[PathBuf], root: &Path) -> String {
 
 /// What the walk found and what it left out.
 fn files_segments(t: &Theme, s: &ScanStats) -> Vec<String> {
+    // the label is the noun: `files  33 · 8.29 MB`
     let mut v = vec![
-        fold::count(t, s.files, "file", "files"),
+        fold::figure(t, &fmt_count(s.files)),
         fold::figure(t, &fmt_bytes(s.bytes)),
     ];
     if s.errors > 0 {
@@ -419,8 +420,7 @@ fn copies_segments(t: &Theme, groups: &[exact::Group], p: &PipelineStats) -> (Ma
         v.push(fold::dim(t, "no exact copies"));
     } else {
         let copies: u64 = groups.iter().map(|g| g.members.len() as u64 - 1).sum();
-        v.push(fold::count(t, groups.len() as u64, "group", "groups"));
-        v.push(fold::count(t, copies, "copy", "copies"));
+        v.push(fold::within(t, copies, groups.len() as u64));
         v.push(fold::figure(
             t,
             &fmt_bytes(groups.iter().map(exact::Group::reclaimable).sum()),
@@ -498,8 +498,7 @@ fn similar_segments(t: &Theme, groups: &[NearGroup], n: &NearStats) -> (Mark, Ve
         .flat_map(|g| g.members[1..].iter())
         .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
         .count() as u64;
-    v.push(fold::count(t, groups.len() as u64, "group", "groups"));
-    v.push(fold::count(t, similar, "similar", "similar"));
+    v.push(fold::within(t, similar, groups.len() as u64));
     v.push(fold::figure(
         t,
         &fmt_bytes(groups.iter().map(NearGroup::reclaimable).sum()),
@@ -564,8 +563,7 @@ fn video_segments(t: &Theme, groups: &[VideoGroup], s: &VideoStats) -> (Mark, Ve
         .flat_map(|g| g.members[1..].iter())
         .filter(|m| m.relation.is_some_and(|r| r.confirmed()))
         .count() as u64;
-    v.push(fold::count(t, groups.len() as u64, "group", "groups"));
-    v.push(fold::count(t, similar, "similar", "similar"));
+    v.push(fold::within(t, similar, groups.len() as u64));
     v.push(fold::figure(
         t,
         &fmt_bytes(groups.iter().map(VideoGroup::reclaimable).sum()),

@@ -434,7 +434,9 @@ second, so it moves while a stage is silent (a large file hashing):
   toward its value (most of the way in a tenth of a second, so a burst
   reads as a roll and a stall as still), the total, then the time left
   (DECODE and FRAMES after 5 s, §3) or the file in hand (an action);
-- the time since the section opened, right-aligned.
+- the time since the section opened, right-aligned: milliseconds under a
+  second (`<1 ms`, `551 ms`), where tenths would read `0.0 s`, then
+  `1.2 s`, `14 s`, `11 m 3 s`.
 
 *Folded*, when the section is done: the line is rewritten in place to
 
@@ -443,16 +445,17 @@ second, so it moves while a stage is silent (a large file hashing):
   unreadable files, a file an action could not take); `✖` failed;
 - the label in the section's hue (dim when it found nothing);
 - what it found, most important first, joined by a dim `·`, figures lit
-  and words dim; what does not fit the width drops from the right;
+  and words dim; the label is the noun (`files  33 · 8.29 MB`, `copies
+  2 in 2 groups`); what does not fit the width drops from the right;
 - its time, right-aligned. The next section opens on the line under it.
 
 What each section says when it folds:
 
 | section | segments, in order |
 |---|---|
-| files | files · bytes · not listed (warn) · skipped · under the size floor · online only · bin and system folders · empty |
-| copies | groups · copies beyond the keepers · bytes they free · the quick tier (warn) · unreadable (warn) · hard links collapsed; or `no exact copies` |
-| similar | groups · the members milk and purge take (confirmed) · bytes they free · timed out, need ffmpeg, ffmpeg could not decode (warn) · the tally · `with the deep model` · not decoded; or `none among N images` / `nothing to compare in N images` |
+| files | count · bytes · not listed (warn) · skipped · under the size floor · online only · bin and system folders · empty |
+| copies | copies beyond the keepers `in` groups · bytes they free · the quick tier (warn) · unreadable (warn) · hard links collapsed; or `no exact copies` |
+| similar | the members milk and purge take (confirmed) `in` groups · bytes they free · timed out, need ffmpeg, ffmpeg could not decode (warn) · the tally · `with the deep model` · not decoded; or `none among N images` / `nothing to compare in N images` |
 | video | as similar, for videos; `skipped: ffmpeg and ffprobe not found · dedupe doctor` (warn) without them |
 | verify | N of M copies · `identical to their keepers, byte for byte`; those that differ (warn) |
 | milk / purge / undo | N moved / binned / restored (`would move` in a dry run) · bytes and where to · could not be (danger) · left in place |
@@ -467,22 +470,36 @@ sections add up to the yield; the tally names the rest.
 An action that could not take some files adds one line under its own:
 `not taken`, then each file and its reason, as many as fit.
 
+What an action left alone is said under its line, hooked to it (`└`) in
+its text column: `N not confirmed` (near duplicates nothing confirmed)
+with their names as far as the line goes and `choose by hand in dedupe
+find` kept at its end; `N beside its RAW` (the camera's JPEG stays with
+it); `N chosen by hand` (confirmed by a look, not by a second check);
+`N copied across volumes` (each read back and compared before its
+original was deleted). A copy whose bytes differed at verify is said on
+the verify line, not again.
+
 **The yield** (after the passes of `find`, `milk` and `purge`):
 
 - the figure, bold white: what the actions would free, then the files it
   is, the groups, and its share of everything scanned;
 - the gauge: lower half blocks `▄` across the width — everything
-  scanned — each kind's share in its hue over the groove, in section
-  order; a kind with any bytes gets a cell however small its share;
-- the skyline: one cell per group, tallest first, its height `▁`–`█` by
-  what the group frees against the largest, in its kind's hue (a group
-  that frees nothing a dim `▁`); more groups than cells (a third of the
-  width, at most 48) and each cell is a bucket of neighbours, summed;
-  then `largest` and the three largest groups by keeper name and bytes.
+  scanned — on which every group has its share: kind by kind in section
+  order, the largest first within a kind, each in its kind's hue,
+  neighbours alternating between the hue and a deeper tone of it (the
+  hue 45% of the way to the groove) so a group one cell wide is told
+  from the next; a kind with any bytes gets a cell however small its
+  share;
+- under the gauge, the largest groups by keeper name and bytes, each
+  hooked under its own share — `╰ name size` from one of its cells, or
+  `name size ╯` ending on one where the room is to its left — two cells
+  clear of each other, the name shortened in the middle (to 28 cells,
+  then 8) to find a place. Three at most, largest first; the first that
+  has no place ends them, so the names shown are always the largest.
 
 On a terminal the yield is revealed over nine frames (0.36 s): the figure
-rolls up from 0 B, the gauge pours from the left, the skyline rises cell
-by cell. Nothing to free: one line, `no duplicates · N files · bytes
+rolls up from 0 B, the gauge pours from the left, each name comes when
+its share is poured. Nothing to free: one line, `no duplicates · N files · bytes
 checked`, or `nothing reclaimable · N groups listed to look at; none
 confirmed`.
 
@@ -505,8 +522,8 @@ with a third: the same `find` with `-v`, every group and file.
 | undo | blue `#5FB3FF` |
 
 **Not a terminal** (a pipe, a file): no animation, the folded lines
-only. **ASCII glyphs** (§3 below): marks `+ ! x`, gauge `#` on `.`, no
-skyline, segments joined by three spaces. **No colour** on a terminal:
+only. **ASCII glyphs** (§3 below): marks `+ ! x`, gauge `#` on `.`,
+hooks `^`, asides under `` ` ``, segments joined by three spaces. **No colour** on a terminal:
 the shapes animate, the groove of the gauge is `▁`.
 
 **Sharing the screen.** Anything else printed while a line is live (a
