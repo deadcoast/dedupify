@@ -3869,7 +3869,9 @@ Unit tests: `the_screen_is_exactly_the_terminal_and_fits_its_width`
 fit, the other kind folded to its line when not, no files but the
 cursor's group's), `moving_into_the_next_kind_folds_the_last_and_unfolds_the_group`.
 End to end: the resize test measures the gauge (158 cells at 160
-columns, 78 at 80) where it measured the rule.
+columns, 78 at 80) where it measured the rule. CI run **43581618137** at
+`8b63d96`, green on Ubuntu and Windows (the resize, the filter and the
+preferred folder through the pseudo console among them).
 
 ## Not verified here
 
