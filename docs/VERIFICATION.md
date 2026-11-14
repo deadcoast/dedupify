@@ -3893,6 +3893,7 @@ frames closed on every row.
 
 Unit tests: the screen test now runs both layouts (panels from 100
 columns at 20 rows; the list alone under them or at 12 rows).
+CI run **43610431673** at `3f471da`, green on Ubuntu and Windows.
 
 ## Not verified here
 
