@@ -1,7 +1,7 @@
 # dedupify — docs
 
 | file | what it holds |
-|---|---|
+| --- | --- |
 | `PLAN.md` | the one plan: every phase, delivered and planned, and the standing rules |
 | `CLI.md` | the resolved grammar, every screen, the workspace, the menu, the safety model |
 | `RESEARCH.md` | the mathematics and the papers behind each choice, and what was measured for it |
@@ -14,7 +14,7 @@
 
 The working chain:
 
-```
+```txt
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
