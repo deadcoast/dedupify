@@ -4281,6 +4281,14 @@ Suite here: 162 unit, 42 end to end; `cargo fmt --check` and clippy
 `-D warnings` clean, clippy for the Windows target
 (`--no-default-features --features blake3/pure`) clean.
 
+CI on 3bd09f8 (the fix), run 43690337444: green on ubuntu-latest and
+windows-latest. Its release build, run 43690337477, green;
+`dedupe-v0.3.0-x86_64-pc-windows-msvc.zip` matched its `.sha256`;
+`dedupe.exe` 30,231,552 bytes, SHA-256 `435c238e…895664`, carrying
+`3bd09f8` and `0.3.0`, written to
+`C:\github\dedupify\target\release\dedupe.exe` and read back with the
+same hash.
+
 ## Phase 19 Not verified here
 
 - Sharp pictures on a real terminal: Windows Terminal (sixel), kitty and
