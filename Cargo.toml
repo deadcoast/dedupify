@@ -1,10 +1,11 @@
 [package]
 name = "dedupe"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Dedupelifier — duplicate finder with a designed terminal experience"
 license = "MIT"
 default-run = "dedupe"
+build = "build.rs"
 
 [[bin]]
 name = "dedupe"

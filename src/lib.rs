@@ -94,3 +94,13 @@ pub mod workspace;
 
 /// Name of the directory `milk` moves duplicates into, created under the root.
 pub const MILKED_DIR: &str = "_milked";
+
+/// What this binary is: `0.2.0 · 9720ec7`, the commit it was built from
+/// after the version (`+` when its sources differed from that commit), or
+/// the version alone when it was built outside a clone.
+pub fn build_id() -> String {
+    match option_env!("DEDUPE_COMMIT") {
+        Some(c) => format!("{} · {c}", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_string(),
+    }
+}

@@ -14,6 +14,7 @@ dedupe <command> [PATH] [.] [img|vid]    native command
 dedupe --undo | -u  [PATH]               reverse a change under PATH (several pending: choose)
 dedupe doctor | --doctor | -dr [PATH]    troubleshooting suite
 dedupe --help | -h                       help page
+dedupe --version | -V                    the version and the commit built from
 ```
 
 Commands **[SPEC]**: `find`, `milk`, `purge`.
@@ -37,8 +38,14 @@ is needed — omitting PATH already means the current directory.
 Flags:
 
 | long | short | effect |
+<<<<<<< HEAD
 | --- | --- | --- |
 | `--help` | `-h` | **[SPEC]** proprietary help page |
+=======
+|---|---|---|
+| `--help` | `-h` | **[SPEC]** proprietary help page; its first line carries the build on the right, `0.2.0 · 9720ec7` **[CLAUDE]** |
+| `--version` | `-V` | **[CLAUDE, 0.2.0]** `dedupe 0.2.0 · 9720ec7`: the version and the commit the binary was built from (`build.rs`, `git rev-parse --short=7 HEAD`), `+` after it when `src`, `Cargo.toml`, `Cargo.lock` or `build.rs` differed from that commit; the version alone when built outside a clone. Anything else on the line is ignored. Capital `V`: `-v` is `--verbose` |
+>>>>>>> 1b660c0f3e86c88345b3abfb12eb7c11384a07c1
 | `--doctor` | `-dr` | **[SPEC]** troubleshooting suite. `-dr` is two characters; POSIX would read it as `-d -r`. `dedupe` has no `-d` or `-r`, and the token is rewritten to `doctor` before parsing, so the spec's alias works literally **[CLAUDE]** |
 | `--dry-run` | `-n` | **[SPEC]** flag; short form **[CLAUDE]**, the convention of `make -n`, `rsync -n`, `git clean -n` |
 | `--quick-search` | `-q` | **[SPEC]** flag; short form **[CLAUDE]**. `-q` is free because `dedupe` has no quiet mode: output is designed, not silenced; piping to a non-terminal switches to plain text automatically |

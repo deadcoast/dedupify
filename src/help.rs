@@ -3,7 +3,7 @@
 
 use crate::render::Renderer;
 use crate::theme::Role;
-use crate::util::fit;
+use crate::util::{fit, visible_width};
 
 pub fn page(r: &Renderer) {
     let t = &r.theme;
@@ -21,11 +21,23 @@ pub fn page(r: &Renderer) {
     };
 
     let lines = vec![
-        format!(
-            " {}  {}",
-            t.paint_bold(Role::Plate, "dedupe"),
-            d("the deduplifier")
-        ),
+        {
+            // the build on the right of the page's first line, where the
+            // rule under it ends
+            let left = " dedupe  the deduplifier";
+            let id = crate::build_id();
+            let gap = t
+                .width
+                .saturating_sub(1 + visible_width(left) + visible_width(&id))
+                .max(2);
+            format!(
+                " {}  {}{}{}",
+                t.paint_bold(Role::Plate, "dedupe"),
+                d("the deduplifier"),
+                " ".repeat(gap),
+                t.paint(Role::Rule, &id)
+            )
+        },
         t.rule(),
         format!(
             " {} {} {} {} {} {}",
@@ -101,6 +113,11 @@ pub fn page(r: &Renderer) {
         ),
         fl("-dr", "--doctor", "same as the doctor command"),
         fl("-h", "--help", "this page"),
+        fl(
+            "-V",
+            "--version",
+            "the version and the commit it was built from",
+        ),
         String::new(),
         row(
             p(&fit("dedupe", 8)),
