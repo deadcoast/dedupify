@@ -24,7 +24,12 @@ pub fn picture_bars(img: &image::DynamicImage) -> Option<[f32; 4]> {
         return None;
     }
     let g = if img.width() > w {
-        img.thumbnail(w, u32::MAX).to_luma8()
+        match img.as_rgb8() {
+            // a decoded JPEG: the thumbnail and its grey levels in one
+            // pass, as `thumbnail(..).to_luma8()` gives them (Phase 19)
+            Some(rgb) => thumb_luma(rgb, w),
+            None => img.thumbnail(w, u32::MAX).to_luma8(),
+        }
     } else {
         img.to_luma8()
     };
@@ -46,6 +51,62 @@ pub fn picture_bars(img: &image::DynamicImage) -> Option<[f32; 4]> {
         (a as f32 / gh as f32, 1.0 - b as f32 / gh as f32)
     });
     Some([l, t, r, b])
+}
+
+/// `DynamicImage::thumbnail(w, u32::MAX).to_luma8()` of an RGB8 picture
+/// wider than `w`, bit for bit, without the generic pixel path: the
+/// crate's size rule and its integer block average with rounding per
+/// channel, done on the raw bytes; then the crate's own grey conversion on
+/// the small picture. Downscaling only: every output pixel's block holds a
+/// whole input pixel.
+pub fn thumb_luma(rgb: &image::RgbImage, w: u32) -> image::GrayImage {
+    let (sw, sh) = rgb.dimensions();
+    // image's resize_dimensions, fill = false
+    let ratio = f64::min(w as f64 / sw as f64, u32::MAX as f64 / sh as f64);
+    let nw = ((sw as f64 * ratio).round() as u32).max(1);
+    let nh = ((sh as f64 * ratio).round() as u32).max(1);
+    // the grey levels by the crate's own conversion, on the small picture
+    image::DynamicImage::ImageRgb8(block_thumb(rgb, nw, nh)).to_luma8()
+}
+
+/// `imageops::thumbnail(rgb, nw, nh)` for a reduction (`nw` ≤ the width,
+/// `nh` ≤ the height), bit for bit: the crate's integer block average,
+/// rounded per channel, on the raw bytes.
+pub fn block_thumb(rgb: &image::RgbImage, nw: u32, nh: u32) -> image::RgbImage {
+    let (sw, sh) = rgb.dimensions();
+    let (nw, nh) = (nw.clamp(1, sw.max(1)), nh.clamp(1, sh.max(1)));
+    let xr = sw as f32 / nw as f32;
+    let yr = sh as f32 / nh as f32;
+    let raw = rgb.as_raw();
+    let mut out = Vec::with_capacity((nw * nh * 3) as usize);
+    for oy in 0..nh {
+        let bf = oy as f32 * yr;
+        let tf = bf + yr;
+        let bottom = (bf.ceil() as u32).clamp(0, sh - 1);
+        let top = (tf.ceil() as u32).clamp(bottom, sh);
+        for ox in 0..nw {
+            let lf = ox as f32 * xr;
+            let rf = lf + xr;
+            let left = (lf.ceil() as u32).clamp(0, sw - 1);
+            let right = (rf.ceil() as u32).clamp(left, sw);
+            let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+            for y in bottom..top {
+                let row = (y * sw) as usize * 3;
+                for x in left..right {
+                    let i = row + x as usize * 3;
+                    r += raw[i] as u32;
+                    g += raw[i + 1] as u32;
+                    b += raw[i + 2] as u32;
+                }
+            }
+            let n = ((right - left) * (top - bottom)).max(1);
+            let round = n / 2;
+            out.push(((r + round) / n).min(255) as u8);
+            out.push(((g + round) / n).min(255) as u8);
+            out.push(((b + round) / n).min(255) as u8);
+        }
+    }
+    image::RgbImage::from_raw(nw, nh, out).expect("invariant: nw × nh pixels")
 }
 
 /// Grey levels a bar's pixel may stray from the bar's colour (a JPEG's
@@ -219,6 +280,31 @@ mod bars_tests {
         ] {
             r.boxed = b;
             assert_eq!(r.words_for(k, m, None, None), w);
+        }
+    }
+
+    #[test]
+    fn the_thumbnails_grey_levels_are_the_image_crates_bit_for_bit() {
+        for &(w, h) in &[
+            (1600u32, 1200u32),
+            (1280, 960),
+            (257, 300),
+            (4032, 3024),
+            (1000, 3),
+        ] {
+            let mut s = (w * 7 + h) as u64;
+            let img = image::RgbImage::from_fn(w, h, |x, y| {
+                s ^= s << 13;
+                s ^= s >> 7;
+                s ^= s << 17;
+                image::Rgb([(x % 256) as u8, (y % 256) as u8, (s % 256) as u8])
+            });
+            let theirs = image::DynamicImage::ImageRgb8(img.clone())
+                .thumbnail(crate::video::FLAT_WIDTH, u32::MAX)
+                .to_luma8();
+            let ours = super::thumb_luma(&img, crate::video::FLAT_WIDTH);
+            assert_eq!(ours.dimensions(), theirs.dimensions(), "{w}x{h}");
+            assert_eq!(ours.as_raw(), theirs.as_raw(), "{w}x{h}");
         }
     }
 }

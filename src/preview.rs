@@ -25,7 +25,7 @@ use image::{imageops::FilterType, DynamicImage, RgbImage};
 
 pub const ENV_GRAPHICS: &str = "DEDUPE_GRAPHICS";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Protocol {
     Sixel,
     Kitty,
@@ -143,6 +143,25 @@ pub fn fit_pixels(img: &DynamicImage, max_w: u32, max_h: u32) -> RgbImage {
     img.resize_exact(nw, nh, FilterType::Triangle).to_rgb8()
 }
 
+/// Scale `img` to fill `max_w` × `max_h` pixels at its proportions,
+/// enlarged too: the workspace's sharp pictures fill their boxes as the
+/// block pictures do. A fast box reduction to twice the size first, then
+/// Catmull-Rom to it, so edges stay crisp. [CLAUDE, Phase 19]
+pub fn fit_pixels_sharp(img: &DynamicImage, max_w: u32, max_h: u32) -> RgbImage {
+    let (w, h) = (img.width().max(1), img.height().max(1));
+    let s = (max_w as f64 / w as f64).min(max_h as f64 / h as f64);
+    let nw = ((w as f64 * s).round() as u32).max(1);
+    let nh = ((h as f64 * s).round() as u32).max(1);
+    let staged = if w > 2 * nw && h > 2 * nh {
+        img.thumbnail(2 * nw, 2 * nh)
+    } else {
+        img.clone()
+    };
+    staged
+        .resize_exact(nw, nh, FilterType::CatmullRom)
+        .to_rgb8()
+}
+
 /// The pixel size of one terminal cell, in the pixels a sixel image is
 /// measured in: from the terminal when it reports it (Unix); on Windows
 /// 10 × 20, the cell Windows Terminal and the console host lay every sixel
@@ -170,48 +189,54 @@ pub fn cell_pixels() -> (u32, u32) {
 // ---------------------------------------------------------------------------
 
 /// Sixel (DEC, VT340): six-pixel-high bands, one pass per colour per band,
-/// run-length coded. Colours are the 6 × 6 × 6 cube with ordered (Bayer
-/// 4 × 4) dithering — 216 registers, inside every sixel terminal's
-/// palette, and smooth enough for a side-by-side check.
+/// run-length coded. The palette is the picture's own, 255 colours, the
+/// pixels mapped to it with Floyd–Steinberg error diffusion (`quant`), so
+/// gradients and skin read as the photograph and not as the 6 × 6 × 6
+/// cube's posterised steps (Phase 19; the cube with ordered dithering
+/// before it).
 pub fn sixel(img: &RgbImage) -> String {
-    const BAYER: [[f32; 4]; 4] = [
-        [0.0, 8.0, 2.0, 10.0],
-        [12.0, 4.0, 14.0, 6.0],
-        [3.0, 11.0, 1.0, 9.0],
-        [15.0, 7.0, 13.0, 5.0],
-    ];
     let (w, h) = (img.width() as usize, img.height() as usize);
-    // palette index per pixel
-    let mut idx = vec![0u8; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            let p = img.get_pixel(x as u32, y as u32).0;
-            let d = (BAYER[y % 4][x % 4] + 0.5) / 16.0 - 0.5; // [-0.5, 0.5)
-            let q = |c: u8| -> usize {
-                let v = c as f32 / 51.0 + d;
-                v.round().clamp(0.0, 5.0) as usize
-            };
-            idx[y * w + x] = (q(p[0]) * 36 + q(p[1]) * 6 + q(p[2])) as u8;
+    if w == 0 || h == 0 {
+        return String::new();
+    }
+    let pal = crate::quant::palette(img, 255);
+    let mut idx = crate::quant::dither(img, &pal);
+    let map: Vec<u8> = pal
+        .iter()
+        .flat_map(|c| c.map(|v| v.round().clamp(0.0, 255.0) as u8))
+        .collect();
+    let colours = pal.len();
+    // only the colours the pixels use are defined, numbered as they first
+    // appear (a flat picture leaves most of the 255 unused or doubled)
+    let mut number = vec![u8::MAX; colours];
+    let mut order: Vec<usize> = Vec::new();
+    for k in idx.iter_mut() {
+        let c = *k as usize;
+        if number[c] == u8::MAX {
+            number[c] = order.len() as u8;
+            order.push(c);
         }
+        *k = number[c];
     }
-    let mut used = [false; 216];
-    for &i in &idx {
-        used[i as usize] = true;
-    }
+    let colours = order.len();
     let mut out = String::with_capacity(w * h / 2);
     out.push_str("\x1bPq");
     out.push_str(&format!("\"1;1;{w};{h}"));
-    for (i, u) in used.iter().enumerate() {
-        if *u {
-            let (r, g, b) = (i / 36, (i / 6) % 6, i % 6);
-            out.push_str(&format!("#{i};2;{};{};{}", r * 20, g * 20, b * 20));
-        }
+    for (i, &c) in order.iter().enumerate() {
+        // sixel colours are percentages
+        let pc = |v: u8| (v as u32 * 100 + 127) / 255;
+        out.push_str(&format!(
+            "#{i};2;{};{};{}",
+            pc(map[3 * c]),
+            pc(map[3 * c + 1]),
+            pc(map[3 * c + 2])
+        ));
     }
     let mut band_y = 0;
+    let mut present = vec![false; colours.max(1)];
     while band_y < h {
         let rows = (h - band_y).min(6);
-        // colours present in this band
-        let mut present = [false; 216];
+        present.iter_mut().for_each(|p| *p = false);
         for dy in 0..rows {
             for x in 0..w {
                 present[idx[(band_y + dy) * w + x] as usize] = true;
@@ -491,16 +516,16 @@ mod tests {
         assert!(s.starts_with("\x1bPq\"1;1;8;7"), "{s:?}");
         assert!(s.ends_with("-\x1b\\"), "{s:?}");
         assert_eq!(s.matches('-').count(), 2, "one '-' per band: {s:?}");
-        // black (#0) and white (#215) registers defined, nothing else
+        // black (#0, first seen) and white (#1) defined, nothing else
         assert!(
-            s.contains("#0;2;0;0;0") && s.contains("#215;2;100;100;100"),
+            s.contains("#0;2;0;0;0") && s.contains("#1;2;100;100;100"),
             "{s:?}"
         );
         assert_eq!(s.matches(";2;").count(), 2, "{s:?}");
         // first band: black on the left four columns (all six bits: '~'),
         // empty on the right ('?'), run-length coded
         assert!(s.contains("#0!4~!4?"), "{s:?}");
-        assert!(s.contains("#215!4?!4~"), "{s:?}");
+        assert!(s.contains("#1!4?!4~"), "{s:?}");
         // second band: one row, bit 0 only ('@')
         assert!(s.contains("#0!4@!4?"), "{s:?}");
     }
@@ -513,5 +538,91 @@ mod tests {
         let small = DynamicImage::ImageRgb8(RgbImage::new(50, 40));
         let t = fit_pixels(&small, 200, 200);
         assert_eq!((t.width(), t.height()), (50, 40));
+    }
+
+    fn unbase64(s: &str) -> Vec<u8> {
+        const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = Vec::new();
+        let (mut acc, mut bits) = (0u32, 0);
+        for c in s.bytes().filter(|&c| c != b'=') {
+            acc = (acc << 6) | T.iter().position(|&t| t == c).unwrap() as u32;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((acc >> bits) as u8);
+                acc &= (1 << bits) - 1;
+            }
+        }
+        out
+    }
+
+    fn noise(w: u32, h: u32) -> RgbImage {
+        let mut s = 0x9E3779B9u32;
+        RgbImage::from_fn(w, h, |_, _| {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            image::Rgb([s as u8, (s >> 8) as u8, (s >> 16) as u8])
+        })
+    }
+
+    #[test]
+    fn kitty_sends_the_png_in_chunks_and_leaves_the_cursor() {
+        // noise does not compress: several 4096-byte chunks
+        let img = noise(60, 40);
+        let s = kitty(&img);
+        let cmds: Vec<&str> = s.split("\x1b\\").filter(|c| !c.is_empty()).collect();
+        assert!(cmds.len() > 1, "{} commands", cmds.len());
+        let mut payload = String::new();
+        for (i, c) in cmds.iter().enumerate() {
+            let (keys, data) = c.strip_prefix("\x1b_G").unwrap().split_once(';').unwrap();
+            let last = i + 1 == cmds.len();
+            if i == 0 {
+                // transmit and show, PNG, cursor stays, no replies
+                for k in ["f=100", "a=T", "C=1", "q=2"] {
+                    assert!(keys.split(',').any(|x| x == k), "{keys}");
+                }
+            }
+            assert!(keys.ends_with(if last { "m=0" } else { "m=1" }), "{keys}");
+            assert!(data.len() <= 4096);
+            payload.push_str(data);
+        }
+        let png = image::load_from_memory(&unbase64(&payload))
+            .unwrap()
+            .to_rgb8();
+        assert_eq!(png, img);
+    }
+
+    #[test]
+    fn iterm_sends_the_png_at_its_pixel_size() {
+        let img = noise(30, 20);
+        let s = iterm(&img);
+        let body = s
+            .strip_prefix("\x1b]1337;File=")
+            .and_then(|b| b.strip_suffix('\x07'))
+            .unwrap();
+        let (args, data) = body.split_once(':').unwrap();
+        let png = unbase64(data);
+        assert_eq!(
+            args,
+            format!(
+                "inline=1;size={};width=30px;height=20px;preserveAspectRatio=1",
+                png.len()
+            )
+        );
+        assert_eq!(image::load_from_memory(&png).unwrap().to_rgb8(), img);
+    }
+
+    #[test]
+    fn sharp_pictures_fill_their_box_at_their_proportions() {
+        let fit = |w, h, bw, bh| {
+            let img = DynamicImage::ImageRgb8(RgbImage::new(w, h));
+            fit_pixels_sharp(&img, bw, bh).dimensions()
+        };
+        // a large picture down, a small one up: the comparison's cells
+        // are filled either way
+        assert_eq!(fit(800, 400, 300, 300), (300, 150));
+        assert_eq!(fit(100, 50, 300, 300), (300, 150));
+        assert_eq!(fit(400, 800, 342, 266), (133, 266));
     }
 }

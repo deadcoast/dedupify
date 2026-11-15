@@ -305,6 +305,73 @@ half or quarter copies were up to 22–24 PDQ bits apart (95th percentile
 sizes different working sizes — closed in Phase 15 by the 576 working
 size (§ 2.2b).
 
+**PDQ admits alone — Phase 19 [CLAUDE].** Five of the 120 resized copies
+in the generated library (`received_*.jpg`, 1280×960 from 1600×1200
+originals) were not found. Against their originals they sit at dHash
+11–13, pHash 0, PDQ 0–2 and fit 1.00 (`examples/pair_diag.rs`): the
+gradient hash compares neighbouring cells of a 9×8 grid, and where a
+picture has broad regions of nearly equal cells a resize tips enough of
+those comparisons to cost 11–13 bits, while the two DCT hashes do not
+move. The rule now admits a pair the 64-bit hashes refuse when PDQ is
+within 31 and both sides' PDQ quality is 50 or more (PDQ's own
+reliability cut; this is the one place quality is enforced), and such a
+pair acts only when the geometric fit confirms it — two families still
+agree before a file moves. Over every pair of 386 Copydays pictures
+(74,305 pairs) and of 275 real photographs (37,675 pairs) PDQ admitted
+none alone; over the library's 2,371 pictures (2,809,635 pairs) it
+admitted 15, every one confirmed by the fit (0.96–1.00): the five
+resized copies (eight pairs with the originals' byte copies) and seven
+pairs of the library's shifted frames (`_B`: the same picture moved
+12 × 6 pixels; the 64-bit rule already admitted 33 of those 40, each a
+`near copy`). `find` on the library: 115 → 120 of the resized copies,
+nothing it found before lost (VERIFICATION § Phase 19).
+
+Searching for such pairs needs PDQ's own index, since the dHash tables
+(§ 2.3) cannot return a pair whose dHash is over 10: 16 tables of the
+256-bit code's 16-bit substrings, each searched at radius 1. By the
+pigeonhole argument of § 2.3, two codes within 31 bits have at least one
+substring within ⌊31/16⌋ = 1, so every pair within 31 is found; a query
+is 16 × 17 bucket probes plus the verification. The linear engine checks
+PDQ on every pair it compares; both engines return the same pairs
+(`hamming::tests::pdq_alone_admits_alike_in_both_engines`). What it
+costs (`hamming::tests::mih_at_scale`, random codes, 2 cores): 10,000
+signatures 0.28 → 0.40 s, 50,000 2.76 → 6.81 s. All eight orientations
+of each picture are indexed, so a 16-bit bucket holds about eight codes
+per 65,536 pictures and a query verifies some 1,600 candidates at 50,000,
+each a read of 32 bytes from anywhere in the codes; the tables are
+counting-sorted arrays (a probe is two reads), which took the first
+version's hash maps from 1.03 and 10.10 s to these. Against decoding and
+hashing alone — 26 ms a picture on one core on the library's photos — the
+4 s more are under 1 % of a run at 50,000.
+
+**The signature's cost — Phase 19 (TECH-16) [CLAUDE].** The `image`
+crate resizes every pixel as four channels through a generic pixel
+interface; the 288-cell grid and PDQ's 576 working plane were 10 ms and
+5 ms of every file. `resample.rs` does the same arithmetic on one plane
+of `f32` — the same kernel, the same weights in the same order, the
+vertical pass first, the same clamp and rounding — so every hash comes
+out bit for bit as before (`resample::tests::*_is_the_image_crates_bit_for_bit`),
+and the bars' thumbnail is an exact integer block average with the
+crate's own grey conversion (also tested bit for bit). On 150 of the
+library's 1600×1200 photos, one core: the signature 24–26 → 15.5 ms a
+file, the bars 7.3–7.8 → 3.2 ms; `find` on the library 38.2 → 25.5–26.5
+s on 2 cores.
+
+**Crops — Phase 19, measured, not built.** A crop is a different frame,
+so no whole-frame hash of it matches its original's. Hashing windows of
+the original would: the PDQ of a centred crop against the PDQ of the
+same window of its original, both from the 288 grid, is at most 16–48
+bits for crops of 90 % to 45 % (the worst of 20 real photographs at each
+crop, `examples/crop_probe.rs`); but a window 5 % off the crop's scale is
+already 66–144 bits away (and 2–3 % off, a 67 % crop against the 70 %
+and 65 % windows, 60–68), so a picture would need windows a percent or
+two apart in scale and position, every one indexed, and even the exact
+window is over PDQ's 31 for five of those ten crops (75 %, 70 %, 55 %,
+50 %, 45 %). The learned descriptor (§ 2.6) found all 15 centred
+two-thirds crops of the library's `Edits` (0 without it), 30 pictures in
+6.2 s on 2 cores. So crops stay the deep tier's, and `batch` says so
+under its similar line when the model is not installed.
+
 ### 2.6 The deep tier — Phase 4, optional **[CLAUDE]**
 
 Learned descriptors are the frontier for crops, rotations and heavy edits.
@@ -540,8 +607,8 @@ originals (3,062 unrelated photographs) 13 reach 0.92 instead of 3
 (maximum 0.969 against 0.947), and on the real set, where every pair of
 distinct files was scored, the only unrelated pair added above 0.92 is
 two text images (0.933, mirror). That is acceptable only because the fit
-never decides alone: it is asked about a pair the hashes grouped or the
-descriptor admitted, and among those the closest a photograph of one
+never decides alone: it is asked about a pair the hashes grouped, PDQ
+admitted (Phase 19) or the descriptor admitted, and among those the closest a photograph of one
 subject from another position comes under the new search is 0.823 (two
 poses of one chessboard, `right11` and `right14`). Cost: 33 ms a pair
 against 20 ms (thumbnails in hand). `FIT_MIN` stays 0.92.

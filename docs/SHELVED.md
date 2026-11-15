@@ -79,6 +79,25 @@ The owner's direction of 2026-11-14, not an IDENTIFIED item; IDs here:
 7. **OUT-08** the yield's gauge: a group of one cell in its kind's hue,
    not a stripe
 
+## Phase 19 — what large folders show   `[done]`
+
+The owner's direction of 2026-11-14, not an IDENTIFIED item; IDs here:
+
+1. **TECH-16** the signature's resampling on one plane, bit for bit the
+   `image` crate's; the bars' thumbnail an exact block average
+2. **CORE-18** PDQ admits a pair alone (quality ≥ 50 both sides, ≤ 31),
+   acting only with the fit; its own multi-index over 16 substrings
+3. **NOTE-01** crops measured (window hashing unworkable, the deep tier
+   15 of 15); `batch` says so without the model
+4. **OUT-12** the track's ribs: backward, quickening
+5. **OUT-11** the darkroom: the pictures decoded go by on a film strip
+   under the similar line, with the rate's trace
+6. **OUT-09** sixel's own palette: median cut at least error, k-means,
+   error diffusion; only the colours used defined
+7. **OUT-10** the workspace's pictures sharp by default where the
+   terminal draws pictures, blocks on `b`; the screen written around the
+   pictures that stay
+
 ## Not yet placed
 
 Items IDENTIFIED raised that no planned milestone holds; they wait for a

@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use super::state::*;
-use super::thumbs::{Thumb, Thumbs};
+use super::thumbs::{Mode as Drawn, Thumb, Thumbs};
 use crate::render::fold::{self, BLOCKS, DIM, GROOVE, PLATE};
 use crate::theme::{Rgb, Role as Paint, Theme};
 use crate::util::{fmt_bytes, fmt_count, shorten_middle, strip_sgr, visible_width, width};
@@ -69,6 +69,17 @@ pub enum Line {
 /// The pointer's colour, and the cursor line's ground in a kind's colour.
 const AMBER: Rgb = Rgb(0xFF, 0xB0, 0x00);
 const GROUND: Rgb = Rgb(0x14, 0x14, 0x14);
+
+/// A sharp picture the screen leaves room for: the cells it covers
+/// (absolute, the title's row 0) and the escape that draws it there.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Placement {
+    pub row: usize,
+    pub col: usize,
+    pub cw: usize,
+    pub ch: usize,
+    pub payload: std::sync::Arc<String>,
+}
 
 /// Panels from this width: the groups on the left, the comparison on the
 /// right; narrower, the groups alone.
@@ -310,7 +321,7 @@ fn framed(
 
 /// The quadrant blocks by which of a cell's four pixels they cover:
 /// top left 8, top right 4, bottom left 2, bottom right 1.
-const QUADS: [&str; 16] = [
+pub(crate) const QUADS: [&str; 16] = [
     " ", "▗", "▖", "▄", "▝", "▐", "▞", "▟", "▘", "▚", "▌", "▙", "▀", "▜", "▛", "█",
 ];
 
@@ -318,7 +329,7 @@ const QUADS: [&str; 16] = [
 /// ways to split the four into two sets, the one whose sets sit closest
 /// to their own means; the block covers one set in its colour, the ground
 /// is the other's.
-fn quad(p: [Rgb; 4]) -> (usize, Rgb, Rgb) {
+pub(crate) fn quad(p: [Rgb; 4]) -> (usize, Rgb, Rgb) {
     let mean = |m: usize, on: bool| -> Rgb {
         let (mut r, mut g, mut b, mut n) = (0u32, 0u32, 0u32, 0u32);
         for (i, c) in p.iter().enumerate() {
@@ -362,6 +373,8 @@ fn quad(p: [Rgb; 4]) -> (usize, Rgb, Rgb) {
 fn picture(t: &Theme, thumb: &Thumb, cw: usize, ch: usize, aspect: f64, clock: f64) -> Vec<String> {
     let mut out = Vec::with_capacity(ch);
     match thumb {
+        // the terminal draws it over cells left empty (`Placement`)
+        Thumb::Sharp(..) => out.resize(ch, String::new()),
         Thumb::Ready(img, at, _) => {
             let a = (at.elapsed().as_secs_f64() / FADE.as_secs_f64()).min(1.0);
             let a = 1.0 - (1.0 - a).powi(2);
@@ -845,15 +858,35 @@ impl State {
         let ch = want.min(h.saturating_sub(text_rows + 2));
         out.push(String::new());
         if ch >= 3 && t.color {
-            let pic = |m: &MemberInfo| -> Vec<String> {
+            // sharp where the terminal draws pictures and `b` has not
+            // asked for blocks; each sharp picture leaves its cells empty
+            // and says where it goes (relative to these lines)
+            let mode = match self.sharp {
+                Some((p, cell)) if !self.blocks => Drawn::Sharp(p, cell),
+                _ => Drawn::Blocks,
+            };
+            let first_row = out.len();
+            let pic = |m: &MemberInfo, x0: usize| -> Vec<String> {
                 let thumb = match (thumbs, &m.visual) {
-                    (Some(th), Some(v)) => th.get(v, col as u32, ch as u32),
+                    (Some(th), Some(v)) => th.get_as(v, col as u32, ch as u32, mode),
                     _ => Thumb::Unreadable,
                 };
+                if let Thumb::Sharp(payload, (ucw, uch), _, _) = &thumb {
+                    let (ucw, uch) = (*ucw as usize, *uch as usize);
+                    self.placements.borrow_mut().push(Placement {
+                        row: first_row + ch.saturating_sub(uch) / 2,
+                        col: x0 + col.saturating_sub(ucw) / 2,
+                        cw: ucw,
+                        ch: uch,
+                        payload: payload.clone(),
+                    });
+                }
                 let own = m.dims.map_or(aspect, |(x, y)| x as f64 / y.max(1) as f64);
                 picture(t, &thumb, col, ch, own, clock)
             };
-            let (pa, pb) = (pic(ka), pic(kb));
+            // the keeper's column after a margin; the file's after the
+            // keeper's, two cells, the sign, two cells
+            let (pa, pb) = (pic(ka, 1), pic(kb, 1 + col + 5));
             let sign = if gi.kind == Hue::Copies { "=" } else { "≈" };
             for r in 0..ch {
                 let a = pa.get(r).cloned().unwrap_or_default();
@@ -893,9 +926,13 @@ impl State {
         // pixels as the scan read them, or as the picture decoded (a
         // byte-for-byte copy is never decoded by the scan)
         let dims_of = |m: &MemberInfo| -> String {
+            let mode = match self.sharp {
+                Some((p, cell)) if !self.blocks => Drawn::Sharp(p, cell),
+                _ => Drawn::Blocks,
+            };
             let decoded = match (thumbs, &m.visual) {
-                (Some(th), Some(v)) => match th.get(v, col as u32, ch.max(1) as u32) {
-                    Thumb::Ready(_, _, d) => Some(d),
+                (Some(th), Some(v)) => match th.get_as(v, col as u32, ch.max(1) as u32, mode) {
+                    Thumb::Ready(_, _, d) | Thumb::Sharp(_, _, _, d) => Some(d),
                     _ => None,
                 },
                 _ => None,
@@ -1205,7 +1242,7 @@ impl State {
         let ud = format!("{} {}", g.up, g.down);
         // (key, words, words where the card is narrow)
         type Entry<'a> = (&'a str, &'a str, &'a str);
-        let sections: [(&str, Vec<Entry>); 4] = [
+        let mut sections: [(&str, Vec<Entry>); 4] = [
             (
                 "MOVE",
                 vec![
@@ -1232,6 +1269,7 @@ impl State {
                     ("o", "show it in its folder", "show in folder"),
                     ("/", "filter the groups by path", "filter by path"),
                     ("s", "sort the groups", "sort"),
+                    ("b", "pictures in blocks, or sharp", "blocks / sharp"),
                 ],
             ),
             (
@@ -1245,6 +1283,10 @@ impl State {
                 ],
             ),
         ];
+        // blocks or sharp only where the terminal draws pictures
+        if self.sharp.is_none() {
+            sections[2].1.retain(|e| e.0 != "b");
+        }
         let kw = sections
             .iter()
             .flat_map(|s| s.1.iter())
@@ -1385,6 +1427,8 @@ impl State {
     ) -> Vec<String> {
         let g = t.glyphs;
         let max = t.width.saturating_sub(1);
+        // this screen's sharp pictures, put down by the comparison
+        self.placements.borrow_mut().clear();
         let mut out: Vec<String> = Vec::with_capacity(total_height);
         out.push(title.to_string());
         out.push(String::new());
@@ -1579,6 +1623,13 @@ impl State {
             // the comparison sits in the middle of its frame
             let lift = body.saturating_sub(cmp.len()) / 2;
             cmp.splice(0..0, std::iter::repeat_n(String::new(), lift));
+            // the sharp pictures' cells on the screen: under the title, a
+            // blank and the frame's edge; right of the groups' frame, a
+            // space and the comparison's edge
+            for p in self.placements.borrow_mut().iter_mut() {
+                p.row += 2 + 1 + lift;
+                p.col += left_w + 2;
+            }
             let right_edge = edge.lerp(hue, 0.45);
             let (foot, foot_w) =
                 edge_keys(t, right_edge, &self.pair_keys(), right_w.saturating_sub(6));
@@ -1612,8 +1663,10 @@ impl State {
         out.push(self.bottom_line(t, panels, &list_keys));
         if self.keys_open {
             // the key map on a card over the body, the screen faded under
-            // it; the cursor's line is not drawn again over it
+            // it; the cursor's line is not drawn again over it, nor the
+            // sharp pictures
             self.cursor_at.set(None);
+            self.placements.borrow_mut().clear();
             let card = self.key_card(t, t.width.saturating_sub(1), body_rows);
             let cw = card.first().map_or(0, |l| visible_width(l));
             let x = t.width.saturating_sub(1 + cw) / 2;

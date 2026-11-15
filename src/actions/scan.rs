@@ -226,6 +226,21 @@ pub(crate) fn scan_and_group(inv: &Invocation, r: &Renderer) -> Found {
             lp.finish_stage(Stage::Match, lp.match_summary(&stats, e));
             let (mark, segs) = similar_segments(t, &near_groups, &stats);
             lp.settle(Hue::Similar, mark, &segs);
+            // what the hash tiers cannot see, said where it matters: a
+            // batch over a large folder without the learned model
+            // (Phase 19: on 30 photographs a crop's PDQ is 66–120 bits from
+            // its original's window 5 % off its zoom; the model found 15 of
+            // 15 crops a library held)
+            if t.fold && inv.command == crate::cli::Command::Batch && !stats.deep {
+                r.line(&fold::aside_line(
+                    t,
+                    &[
+                        fold::dim(t, "crops and heavy edits"),
+                        fold::dim(t, "only the deep model finds them"),
+                        fold::dim(t, "dedupe doctor installs it"),
+                    ],
+                ));
+            }
         } else if !reps.is_empty() {
             // one image: nothing to compare, said once; none: no stage line
             let stats = NearStats {

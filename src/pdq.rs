@@ -360,16 +360,17 @@ pub fn compute_fixed(l: &Luma, filter: image::imageops::FilterType, side: usize)
     if (l.width, l.height) == (side, side) {
         return finish(downsample(l));
     }
-    // the image crate holds a float pixel in 0–1 and clamps to it
-    let Some(plane) = image::ImageBuffer::<image::Luma<f32>, Vec<f32>>::from_raw(
-        l.width as u32,
-        l.height as u32,
-        l.data.iter().map(|v| v / 255.0).collect(),
-    ) else {
+    // the image crate holds a float pixel in 0–1 and clamps to it; the
+    // same resize on one plane, bit for bit (`resample`, Phase 19)
+    if l.data.len() != l.width * l.height {
         return compute_plain(l);
+    }
+    let unit: Vec<f32> = l.data.iter().map(|v| v / 255.0).collect();
+    let kernel = match filter {
+        image::imageops::FilterType::Lanczos3 => crate::resample::Kernel::Lanczos3,
+        _ => crate::resample::Kernel::Triangle,
     };
-    let work: Vec<f32> = image::imageops::resize(&plane, side as u32, side as u32, filter)
-        .into_raw()
+    let work: Vec<f32> = crate::resample::resize_unit(&unit, l.width, l.height, side, side, kernel)
         .into_iter()
         .map(|v| v * 255.0)
         .collect();

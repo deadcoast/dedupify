@@ -385,7 +385,18 @@ impl LiveProgress {
     }
 }
 
+/// Pictures a decode must have before the fold shows them going by.
+const STRIP_AFTER: u64 = 60;
+
 impl Progress for LiveProgress {
+    fn wants_picture(&self) -> bool {
+        self.theme.fold && fold::wants_picture()
+    }
+
+    fn picture(&self, still: image::RgbImage, path: &std::path::Path) {
+        fold::picture(&still, &path.to_string_lossy());
+    }
+
     fn done(&self, stage: Stage, stats: &PipelineStats) {
         if self.theme.fold {
             // VERIFY is a section of its own; the others fold with theirs
@@ -438,6 +449,10 @@ impl Progress for LiveProgress {
                 .map(|e| format!("· {e}"))
                 .unwrap_or_default();
             fold::step(phase_of(stage), done, Some(total), eta);
+            // a long decode: the film strip under the line (Phase 19)
+            if stage == Stage::Decode && total >= STRIP_AFTER && done == 0 {
+                fold::strip_open();
+            }
             return;
         }
         let mut st = self.lock();

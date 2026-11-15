@@ -393,10 +393,15 @@ fn seat_keeper<'a>(
 }
 
 /// Whether a member's relation leaves a question only the fit answers:
-/// hash-grouped and PDQ did not confirm, or admitted by the descriptor.
+/// hash-grouped and PDQ did not confirm, admitted by PDQ alone, or
+/// admitted by the descriptor.
 /// Kin members are decided already.
 fn needs_fit(r: &Relation) -> bool {
-    !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only() || (!r.hash_pair() && r.deep_band()))
+    !r.kin
+        && ((r.hash_pair() && !r.pdq_ok())
+            || r.pdq_pair()
+            || r.deep_only()
+            || (!r.hash_pair() && r.deep_band()))
 }
 
 /// Copies chained into another picture's group, given a group of their own

@@ -462,6 +462,20 @@ output stays for the hard cases. Earlier the same day: thirteen keys
 listed under the workspace in plain words is not a design (OUT-07). The
 design is CLI.md §2b and §4; the keys' §2a. Items: SHELVED.md § Phase 18.
 
+## Phase 19 — what large folders show   ← delivered 2026-11-14 (owner's direction, 2026-11-14)
+
+The owner's direction on three findings from the batch pipeline's first
+runs: the workspace's pictures in blocks become a display option and the
+terminal's own sharp pictures the default (OUT-09, OUT-10); the
+lookalikes a large folder still hid — "sniff, find, fix" (CORE-18: five
+resized copies the gradient hash refused; crops measured and left to the
+deep tier, said by `batch`, NOTE-01); and the time a large folder takes,
+cut (TECH-16) and then made to pass — "visuals and animation that is
+more than necessary… BE CREATIVE" (OUT-11 the darkroom, OUT-12 the
+ribs). The design is CLI.md §2a (pictures, `b`, graphics) and §3a (the
+track, the darkroom); the evidence RESEARCH § 2.2b. Items: SHELVED.md §
+Phase 19.
+
 ## Docs chain
 
 ```txt
@@ -481,8 +495,9 @@ pass runs.
 - Thresholds ship only after they are measured on a corpus in the phase
   that introduces them.
 - A tier acts (moves or bins) only when two independent families of
-  evidence agree: the two 64-bit hashes with PDQ or the geometric fit, or
-  the learned descriptor with the fit. A single family lists. Two files
+  evidence agree: the two 64-bit hashes with PDQ or the geometric fit,
+  PDQ alone with the fit (Phase 19), or the learned descriptor with the
+  fit. A single family lists. Two files
   that state different capture moments are never acted on, and neither is
   a camera RAW by the near tier (Phase 10). In the workspace a person may
   choose a listed file by hand — their look is the second family for that

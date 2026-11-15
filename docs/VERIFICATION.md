@@ -4150,3 +4150,128 @@ green on ubuntu-latest and windows-latest.
   similar pass is the time (39 s of 45 on two cores).
 - Why five 1280-pixel re-encodes of the library's procedural pictures
   fall outside the near tier: not measured here.
+
+## VERIFICATION — Phase 19 (what large folders show), 2026-11-14
+
+The owner's direction on three things the batch pipeline's runs showed:
+pictures in blocks made a display option and the terminal's own sharp
+pictures the default; the lookalikes a large folder still hid, found
+and fixed; the time a large folder takes, cut and then made to pass.
+Measured on this machine (2 cores) on the Phase 18 library (2,378
+files) unless said; "before" is ac83221 built and run on the same files.
+Released as 0.3.0.
+
+## The lookalikes
+
+Phase 18 left five of the library's 120 resized downloads ungrouped.
+Against their originals (`examples/pair_diag.rs`): dHash 11–13, pHash 0,
+PDQ 0–2, fit 1.00 — the gradient hash alone refused them. PDQ now
+admits a pair alone when both sides' PDQ quality is 50 or more and the
+distance is 31 or less, and the pair acts only with the fit
+(RESEARCH § 2.2b).
+
+| set | pictures | pairs | 64-bit rule | PDQ alone |
+| --- | --- | --- | --- | --- |
+| Copydays (original + strong) | 386 | 74,305 | 13 | 0 |
+| real photographs (ocv, real, tx, bridge, sample) | 275 | 37,675 | 373 | 0 |
+| the library (Pictures, Downloads) | 2,371 | 2,809,635 | 916 | 15, all confirmed by the fit (0.96–1.00) |
+
+The library's 15: the five resized downloads (eight pairs, with their
+originals' byte copies) and seven pairs of `_B` frames (each its
+original moved 12 × 6 pixels; the 64-bit rule already grouped 33 of the
+40, all as `near copy`). `find library . img -v`, before → now: 115 →
+120 of the resized downloads; 186 → 196 similar pairs; 354 → 374 images
+grouped. Diffing the two listings' members: 20 lines added (the five
+downloads, five `_B` frames, their ten keepers), none removed.
+
+Crops (the library's 15 `Edits/*-crop.jpg`, a sixth off every side):
+no hash pass groups them, before or now. Hashing windows of the
+original was measured and not built (`examples/crop_probe.rs`, 20 real
+photographs, the worst of them at each crop): the exact window's PDQ is
+16–48 bits from the crop's (over 31 for five of ten crops), a window 5 %
+off 66–144, 2–3 % off 60–68. With the model installed the deep tier
+groups all 15 (`find crops img`, 30 pictures, 6.2 s; without it 0 in
+0.4 s). `batch` without the model now says so under its similar line:
+`crops and heavy edits · only the deep model finds them · dedupe doctor
+installs it` (seen in `batch library -n`).
+
+## Speed
+
+`resample.rs` gives the `image` crate's resize bit for bit on one
+plane (tests on u8 and unit-float planes, six sizes, both kernels); the
+bars' thumbnail is an exact block average with the crate's grey (tested
+bit for bit). `examples/stage_prof.rs`, 150 of the library's 1600×1200
+photos, one core, two runs each:
+
+| stage | before | now |
+| --- | --- | --- |
+| decode | 10.5–11.1 ms | 10.8–11.0 ms |
+| signature | 23.9–25.7 ms | 15.5–15.8 ms |
+| bars | 7.3–7.8 ms | 3.2 ms |
+
+`find library . img -v`: 38.2 s, 38.2 s before; 24.9 s, 26.7 s now.
+`batch library -n`: 44.7 s before (similar 39 s); 30.4 s now (similar
+25 s), 837 files would move instead of 827.
+
+PDQ's own index (16 substrings of 16 bits at radius 1) costs match time
+(`hamming::tests::mih_at_scale`, random codes): 10,000 signatures 0.28 s
+before, 0.40 s now; 50,000 2.76 s before, 6.81 s now. Its first version
+(hash-map tables) took 1.03 and 10.10 s; the tables are counting-sorted
+arrays now. `pdq_alone_admits_alike_in_both_engines`: the linear and the
+indexed engine return the same pairs.
+
+## The darkroom and the ribs
+
+Rendered from the program's own byte stream (a pty at 120 × 34 and a
+terminal emulator written for the check, `vtpix.py` in the session's
+scratch: cursor moves, SGR colour, erase, and sixel) during `batch
+library -n`: one live line, the strip under it — sprockets, ten frames
+of the library's pictures, the newest developing in the safelight's
+red at the right — and the trace (`61 a second`, the file in hand); the
+track's fill carries the ribs. Across 270 frames captured in 12 s every
+frame moved up exactly 7 rows to its line, and every row was at most 119
+cells on the 120-column screen. A first capture showed the line twice:
+the emulator had cut an escape at a read's end; fixed in the emulator,
+not the program, and the frames above are from the fixed one.
+
+## Sharp pictures in the workspace
+
+The sixel encoder's palette (`quant.rs`) against NeuQuant, tried first,
+on `home.jpg` fitted to 342 × 257, decoded back from the sixel: pixels
+more than 24 levels off on a channel 1.59 % → 0.19 %; mean error after a
+1-pixel blur 1.54 → 1.18; the sky's contour lines and checkerboard gone
+(looked at, 3× zoom). Five more photographs: blurred mean error
+0.85–1.29, far pixels 0.03–0.94 %. Encoding 15–48 ms a picture (NeuQuant
+58 ms on `home`).
+
+The workspace driven in the same emulator with `DEDUPE_GRAPHICS=sixel`
+at 150 × 46, cells 9 × 19 pixels as the pty reported them: the two
+pictures sharp in the comparison, centred in their cells; moving within
+a group sent no picture (11–27 KB a key: the lines that changed),
+moving to another group sent its two (about 440–830 KB); `b` drew blocks, `b` again
+sharp; `?` took the pictures away under the key card and they came back
+after it; `v` and back drew the screen and its pictures again. Unit
+tests on the drawing: a picture is sent once and the text written round
+it, never through; a picture that goes has its rows written through;
+kitty's pictures are deleted and placed again. The kitty command is
+chunked at 4,096 bytes, `a=T`, `C=1` (the cursor stays), `q=2` (no
+replies on the key input), and its payload decodes to the picture; the
+iTerm2 command names the PNG's size and pixel dimensions and decodes to
+the picture; a sharp picture fills its cells at its proportions, up or
+down. `b` acts only where pictures are drawn, and only there is it on
+the key card.
+
+## Tests
+
+Suite here: 161 unit, 42 end to end; `cargo fmt --check` and clippy
+`-D warnings` clean, clippy for the Windows target
+(`--no-default-features --features blake3/pure`) clean.
+
+## Phase 19 Not verified here
+
+- Sharp pictures on a real terminal: Windows Terminal (sixel), kitty and
+  iTerm2 were not run here. Sixel was checked through the emulator;
+  kitty's and iTerm2's commands by unit tests only.
+- The strip on Windows Terminal: its frames are the same text and
+  colours the fold already draws there; not seen running.
+- Crops at the deep tier on Windows: measured on Linux only.

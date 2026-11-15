@@ -197,6 +197,14 @@ pub struct State {
     /// `?`: the key map in place of the comparison (of the groups on a
     /// narrow screen) until `?` or esc; the keys still act under it.
     pub keys_open: bool,
+    /// The terminal's graphics and its cell in pixels, when it has them:
+    /// the comparison's pictures are drawn sharp (Phase 19).
+    pub sharp: Option<(crate::preview::Protocol, (u32, u32))>,
+    /// `b`: the comparison's pictures in quadrant blocks even where the
+    /// terminal could draw them sharp.
+    pub blocks: bool,
+    /// Where the last screen put its sharp pictures (absolute cells).
+    pub placements: std::cell::RefCell<Vec<super::screen::Placement>>,
     /// The first body line drawn: the fold's lines are not the rows (other
     /// groups fold to a line, other sections too), so the screen scrolls
     /// them itself and keeps its place here.
@@ -279,6 +287,9 @@ impl State {
             changes: 0,
             message: None,
             keys_open: false,
+            sharp: None,
+            blocks: false,
+            placements: std::cell::RefCell::new(Vec::new()),
             vtop: Cell::new(0),
             cursor_at: Cell::new(None),
         };
@@ -385,11 +396,6 @@ impl State {
             Row::Member(g, m) => Some(self.layout.groups[*g].members[*m].path.clone()),
             Row::Head(_) => None,
         }
-    }
-
-    /// The screen line the cursor was last drawn on.
-    pub(super) fn cursor_line(&self) -> Option<usize> {
-        self.cursor_at.get()
     }
 
     pub(super) fn cursor_group(&self) -> Option<usize> {
@@ -864,6 +870,10 @@ impl State {
                 }
                 Key::Char('?') => {
                     self.keys_open = true;
+                    Effect::None
+                }
+                Key::Char('b') if self.sharp.is_some() => {
+                    self.blocks = !self.blocks;
                     Effect::None
                 }
                 Key::Char('q') | Key::Esc | Key::Quit => Effect::Quit,
@@ -1345,5 +1355,19 @@ pub(super) mod tests {
         st.cursor = 0;
         assert_eq!(st.handle(Key::Char('f')), Effect::None);
         assert!(st.message.as_deref().unwrap().contains("folder"));
+    }
+
+    #[test]
+    fn b_turns_sharp_pictures_to_blocks_only_where_pictures_are_drawn() {
+        let mut st = State::new(layout(), 20);
+        // a terminal without pictures: b does nothing
+        assert_eq!(st.handle(Key::Char('b')), Effect::None);
+        assert!(!st.blocks);
+        // one with them: b and b again
+        st.sharp = Some((crate::preview::Protocol::Sixel, (10, 20)));
+        st.handle(Key::Char('b'));
+        assert!(st.blocks);
+        st.handle(Key::Char('b'));
+        assert!(!st.blocks);
     }
 }

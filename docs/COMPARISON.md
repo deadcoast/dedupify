@@ -43,8 +43,8 @@ too, as `dedupe` does for all eight dihedral variants.
 
 | | czkawka Similar Images (as its docs and source show) | `dedupe` |
 | --- | --- | --- |
-| evidence to group | one perceptual hash at a chosen size, Hamming distance under a preset (`SIMILAR_VALUES`, e.g. ≤ 15 of 256 bits at 16×16 "Medium") | two 64-bit hashes of different construction (gradient and DCT) must both be within threshold on the same orientation |
-| evidence to delete or move | the same single distance | a second family must agree: PDQ ≤ 31 (frequency domain, 256 bits) **or** the geometric fit ≥ 0.92 (spatial correlation); the learned descriptor admits but never acts alone |
+| evidence to group | one perceptual hash at a chosen size, Hamming distance under a preset (`SIMILAR_VALUES`, e.g. ≤ 15 of 256 bits at 16×16 "Medium") | two 64-bit hashes of different construction (gradient and DCT) must both be within threshold on the same orientation; or PDQ ≤ 31 alone where both sides' PDQ quality is ≥ 50 (Phase 19: resizes the gradient hash refuses) |
+| evidence to delete or move | the same single distance | a second family must agree: PDQ ≤ 31 (frequency domain, 256 bits) **or** the geometric fit ≥ 0.92 (spatial correlation); a pair PDQ admitted alone, or the learned descriptor admitted, acts only with the fit |
 | crops, letterboxes, small rotations | not matched by block hashes (nor by `dedupe`'s) | found by the fit when the hashes or the descriptor bring the pair in; the fit also tells which is the crop and by how much |
 | burst frames, stereo pairs, the same scene from another position | grouped when the hash distance is small | the hashes may group them; PDQ and the fit refuse them (measured: chessboard poses fit 0.31–0.45, at most 0.823 under the Phase 11 search); different EXIF capture moments, or one moment under names a camera numbered apart (a burst), make them `kin`, never acted on unless a person chooses them (`c`) |
 | thresholds | user-chosen presets | fixed, each measured on a corpus before shipping, with the measurement in `docs/VERIFICATION.md` |

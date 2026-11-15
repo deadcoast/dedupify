@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use image::imageops::FilterType;
-use image::{DynamicImage, GrayImage};
+use image::DynamicImage;
 
 use crate::pdq::{self, Hash256, Pdq};
 
@@ -127,7 +127,15 @@ pub fn load_grid(path: &Path) -> Result<(Vec<f32>, u32, u32), DecodeError> {
 /// Rec. 601 luminance, box-prefiltered by an integer factor so the short
 /// side lands in [2·GRID, 4·GRID). One pass over the pixels.
 pub fn prefiltered_luma(img: &DynamicImage) -> (Vec<f32>, usize, usize) {
-    let rgb = img.to_rgb8();
+    // a decoded JPEG is RGB8 already: read it where it is (Phase 19)
+    let owned;
+    let rgb = match img.as_rgb8() {
+        Some(r) => r,
+        None => {
+            owned = img.to_rgb8();
+            &owned
+        }
+    };
     let (w, h) = (rgb.width() as usize, rgb.height() as usize);
     let k = (w.min(h) / (2 * GRID)).max(1);
     let (pw, ph) = (w / k, h / k);
@@ -152,14 +160,18 @@ pub fn prefiltered_luma(img: &DynamicImage) -> (Vec<f32>, usize, usize) {
     (pre, pw, ph)
 }
 
-/// Lanczos3 from the prefiltered plane to GRID×GRID.
+/// Lanczos3 from the prefiltered plane to GRID×GRID: the plane rounded to
+/// grey levels, resized as `imageops::resize` resizes a `GrayImage`, bit
+/// for bit (`resample`, Phase 19).
 pub fn grid_from_luma(pre: &[f32], pw: usize, ph: usize) -> Vec<f32> {
-    let mut g = GrayImage::new(pw as u32, ph as u32);
-    for (dst, src) in g.as_mut().iter_mut().zip(pre.iter()) {
-        *dst = src.round().clamp(0.0, 255.0) as u8;
-    }
-    let small = image::imageops::resize(&g, GRID as u32, GRID as u32, FilterType::Lanczos3);
-    small.as_raw().iter().map(|&v| v as f32).collect()
+    let g: Vec<u8> = pre
+        .iter()
+        .map(|v| v.round().clamp(0.0, 255.0) as u8)
+        .collect();
+    crate::resample::resize_u8(&g, pw, ph, GRID, GRID, crate::resample::Kernel::Lanczos3)
+        .into_iter()
+        .map(|v| v as f32)
+        .collect()
 }
 
 /// Both planes from one decoded image.

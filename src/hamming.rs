@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rayon::prelude::*;
 
-use crate::pdq::distance as pdq_distance;
+use crate::pdq::{distance as pdq_distance, Hash256, PDQ_MAX, PDQ_QUALITY_MIN};
 use crate::perceptual::{hamming, Signature, Variant, VARIANTS, VARIANT_ORDER};
 
 /// Above this many signatures the index is used instead of the scan.
@@ -43,49 +43,88 @@ impl MatchProgress for NoMatchProgress {
     fn tick(&self, _: u64, _: u64) {}
 }
 
-/// Best (lowest d+p) variant comparison of `a`'s identity against every
-/// variant of `b`, within thresholds. `None` when nothing is within both.
+/// How a variant comparison was admitted, for ranking: the two 64-bit
+/// hashes within their thresholds first (by d + p), then PDQ alone within
+/// `PDQ_MAX` on hashes both sides rate reliable (by q). Phase 19: on 120
+/// resized and re-encoded copies, five had pHash 0, PDQ 0–2 and a fit of
+/// 1.00, and dHash 11–13 — a gradient sign flips in a flat region when a
+/// picture is resized — and the pair rule alone dropped them.
 #[inline]
-fn best_against(a: &Signature, b: &Signature, td: u32, tp: u32) -> Option<(usize, u32, u32)> {
-    let mut best: Option<(usize, u32, u32)> = None;
+fn rank(d: u32, p: u32, q: u32, td: u32, tp: u32, pdq: bool) -> Option<(u8, u32)> {
+    if d <= td && p <= tp {
+        Some((0, d + p))
+    } else if pdq && q <= PDQ_MAX {
+        Some((1, q))
+    } else {
+        None
+    }
+}
+
+/// Both sides' PDQ is one PDQ itself rates reliable.
+#[inline]
+fn reliable(a: &Signature, b: &Signature) -> bool {
+    a.pdq_quality >= PDQ_QUALITY_MIN && b.pdq_quality >= PDQ_QUALITY_MIN
+}
+
+/// One admitted variant comparison: (variant, d, p, q, rank).
+type Admitted = (usize, u32, u32, u32, (u8, u32));
+
+/// Best admitted variant comparison of `a`'s identity against every
+/// variant of `b`. `None` when none is admitted.
+#[inline]
+fn best_against(a: &Signature, b: &Signature, td: u32, tp: u32) -> Option<Admitted> {
+    let pdq = reliable(a, b);
+    let mut best: Option<Admitted> = None;
     for k in 0..VARIANTS {
         let d = hamming(a.dhash[0], b.dhash[k]);
-        if d > td {
-            continue;
-        }
         let p = hamming(a.phash[0], b.phash[k]);
-        if p > tp {
+        let hashed = d <= td && p <= tp;
+        if !hashed && !pdq {
             continue;
         }
-        if best.is_none_or(|(_, bd, bp)| d + p < bd + bp) {
-            best = Some((k, d, p));
+        let q = pdq_distance(&a.pdq[0], &b.pdq[k]);
+        let Some(r) = rank(d, p, q, td, tp, pdq) else {
+            continue;
+        };
+        if best.is_none_or(|b| r < b.4) {
+            best = Some((k, d, p, q, r));
         }
     }
     best
 }
 
 fn pair(a: usize, b: usize, sa: &Signature, sb: &Signature, td: u32, tp: u32) -> Option<Match> {
-    let fwd = best_against(sa, sb, td, tp).map(|(k, d, p)| Match {
-        a,
-        b,
-        variant: VARIANT_ORDER[k],
-        flipped: false,
-        d,
-        p,
-        q: pdq_distance(&sa.pdq[0], &sb.pdq[k]),
+    let fwd = best_against(sa, sb, td, tp).map(|(k, d, p, q, r)| {
+        (
+            Match {
+                a,
+                b,
+                variant: VARIANT_ORDER[k],
+                flipped: false,
+                d,
+                p,
+                q,
+            },
+            r,
+        )
     });
-    let rev = best_against(sb, sa, td, tp).map(|(k, d, p)| Match {
-        a,
-        b,
-        variant: VARIANT_ORDER[k],
-        flipped: true,
-        d,
-        p,
-        q: pdq_distance(&sb.pdq[0], &sa.pdq[k]),
+    let rev = best_against(sb, sa, td, tp).map(|(k, d, p, q, r)| {
+        (
+            Match {
+                a,
+                b,
+                variant: VARIANT_ORDER[k],
+                flipped: true,
+                d,
+                p,
+                q,
+            },
+            r,
+        )
     });
     match (fwd, rev) {
-        (Some(f), Some(r)) => Some(if f.d + f.p <= r.d + r.p { f } else { r }),
-        (f, r) => f.or(r),
+        (Some(f), Some(r)) => Some(if f.1 <= r.1 { f.0 } else { r.0 }),
+        (f, r) => f.or(r).map(|m| m.0),
     }
 }
 
@@ -252,10 +291,102 @@ fn for_each_within(q: u16, radius: u32, mut f: impl FnMut(u16)) {
     }
 }
 
-/// Pairs via the index: each identity dHash queries all variant codes, pHash
-/// verifies on the same variant, both directions fall out naturally.
+/// PDQ's 256 bits as sixteen 16-bit substrings, every variant of every
+/// signature PDQ rates reliable: a query within `PDQ_MAX` (31) searches
+/// each table at radius 1 (31 = 16 × 1 + 15: Proposition 1, every table at
+/// r′ = 1), seventeen probes a table. (Phase 19)
+struct PdqIndex {
+    entries: Vec<(u32, u8)>,
+    codes: Vec<Hash256>,
+    /// Per substring: the codes sorted by its value (`items`) and where
+    /// each of the 65,536 values starts among them (`starts`), so a probe
+    /// is two array reads, not a hash lookup.
+    starts: Vec<Vec<u32>>,
+    items: Vec<Vec<u32>>,
+}
+
+impl PdqIndex {
+    fn sub(h: &Hash256, s: usize) -> u16 {
+        ((h[s / 4] >> (16 * (s % 4))) & 0xFFFF) as u16
+    }
+
+    fn build(sigs: &[Signature]) -> PdqIndex {
+        let mut entries = Vec::new();
+        let mut codes = Vec::new();
+        for (i, s) in sigs.iter().enumerate() {
+            if s.pdq_quality < PDQ_QUALITY_MIN {
+                continue;
+            }
+            for (k, h) in s.pdq.iter().enumerate() {
+                entries.push((i as u32, k as u8));
+                codes.push(*h);
+            }
+        }
+        let mut starts = Vec::with_capacity(16);
+        let mut items = Vec::with_capacity(16);
+        for s in 0..16 {
+            // counting sort of the codes by this substring
+            let mut start = vec![0u32; (1 << 16) + 1];
+            for h in &codes {
+                start[Self::sub(h, s) as usize + 1] += 1;
+            }
+            for v in 0..1 << 16 {
+                start[v + 1] += start[v];
+            }
+            let mut at = start.clone();
+            let mut it = vec![0u32; codes.len()];
+            for (idx, h) in codes.iter().enumerate() {
+                let v = Self::sub(h, s) as usize;
+                it[at[v] as usize] = idx as u32;
+                at[v] += 1;
+            }
+            starts.push(start);
+            items.push(it);
+        }
+        PdqIndex {
+            entries,
+            codes,
+            starts,
+            items,
+        }
+    }
+
+    /// (image, variant, distance) of every code within `PDQ_MAX` of `h`.
+    /// A code found under several substrings is verified each time (four
+    /// XOR-popcounts, cheaper than sorting the candidates); the few that
+    /// pass are deduplicated.
+    fn query(&self, h: &Hash256) -> Vec<(u32, u8, u32)> {
+        let mut hits: Vec<(u32, u32)> = Vec::new();
+        for s in 0..16 {
+            let (start, items) = (&self.starts[s], &self.items[s]);
+            for_each_within(Self::sub(h, s), 1, |v| {
+                let (a, b) = (start[v as usize] as usize, start[v as usize + 1] as usize);
+                for &idx in &items[a..b] {
+                    let q = pdq_distance(h, &self.codes[idx as usize]);
+                    if q <= PDQ_MAX {
+                        hits.push((idx, q));
+                    }
+                }
+            });
+        }
+        hits.sort_unstable();
+        hits.dedup();
+        hits.into_iter()
+            .map(|(idx, q)| {
+                let (i, k) = self.entries[idx as usize];
+                (i, k, q)
+            })
+            .collect()
+    }
+}
+
+/// Pairs via the indexes: each identity dHash queries all variant codes,
+/// pHash verifies on the same variant; each reliable identity PDQ queries
+/// the PDQ index for what the 64-bit pair rule misses. Both directions
+/// fall out naturally.
 pub fn mih_pairs(sigs: &[Signature], td: u32, tp: u32, progress: &dyn MatchProgress) -> Vec<Match> {
     let index = Mih::build(sigs);
+    let pdq_index = PdqIndex::build(sigs);
     let total = sigs.len() as u64;
     let done = AtomicU64::new(0);
     let mut out: Vec<Match> = (0..sigs.len())
@@ -287,6 +418,29 @@ pub fn mih_pairs(sigs: &[Signature], td: u32, tp: u32, progress: &dyn MatchProgr
                     q,
                 });
             }
+            if si.pdq_quality >= PDQ_QUALITY_MIN {
+                for (j, k, q) in pdq_index.query(&si.pdq[0]) {
+                    let (j, k) = (j as usize, k as usize);
+                    if j == i {
+                        continue;
+                    }
+                    let d = hamming(si.dhash[0], sigs[j].dhash[k]);
+                    let p = hamming(si.phash[0], sigs[j].phash[k]);
+                    if d <= td && p <= tp {
+                        continue; // the dHash index has it
+                    }
+                    let (a, b, flipped) = if i < j { (i, j, false) } else { (j, i, true) };
+                    v.push(Match {
+                        a,
+                        b,
+                        variant: VARIANT_ORDER[k],
+                        flipped,
+                        d,
+                        p,
+                        q,
+                    });
+                }
+            }
             let dn = done.fetch_add(1, Ordering::Relaxed) + 1;
             if dn.is_multiple_of(256) || dn == total {
                 progress.tick(dn, total);
@@ -294,8 +448,14 @@ pub fn mih_pairs(sigs: &[Signature], td: u32, tp: u32, progress: &dyn MatchProgr
             v.into_iter()
         })
         .collect();
-    // one match per unordered pair: keep the closest
-    out.sort_by_key(|m| (m.a, m.b, m.d + m.p));
+    // one match per unordered pair: keep the best admitted, by `rank`
+    out.sort_by_key(|m| {
+        (
+            m.a,
+            m.b,
+            rank(m.d, m.p, m.q, td, tp, true).unwrap_or((2, 0)),
+        )
+    });
     out.dedup_by_key(|m| (m.a, m.b));
     out
 }
@@ -435,6 +595,58 @@ mod tests {
         assert_eq!(lk, mk);
         for (l, m) in lin.iter().zip(mih.iter()) {
             assert_eq!(l.d + l.p, m.d + m.p, "{l:?} vs {m:?}");
+        }
+    }
+
+    /// Copies the 64-bit pair rule misses — dHash and pHash random, PDQ a
+    /// few bits from a variant of their original — are admitted by both
+    /// engines alike, and only where both PDQs are reliable. (Phase 19)
+    #[test]
+    fn pdq_alone_admits_alike_in_both_engines() {
+        let mut sigs = corpus(1_200, 17);
+        let mut s = 0x9E37_79B9u64;
+        let mut planted = Vec::new();
+        for i in (0..sigs.len()).step_by(97) {
+            let src = sigs[i].clone();
+            let k = (rng(&mut s) % VARIANTS as u64) as usize;
+            let mut c = corpus(1, rng(&mut s)).remove(0);
+            for (word, w) in c.pdq[0].iter_mut().zip(src.pdq[k].iter()) {
+                *word = flip_bits(*w, (rng(&mut s) % 6) as u32, &mut s);
+            }
+            // every third one unreliable: not admitted
+            if planted.len() % 3 == 2 {
+                c.pdq_quality = PDQ_QUALITY_MIN - 1;
+            }
+            planted.push((i, sigs.len(), c.pdq_quality >= PDQ_QUALITY_MIN));
+            sigs.push(c);
+        }
+        let lin = linear_pairs(&sigs, 10, 14, &NoMatchProgress);
+        let mih = mih_pairs(&sigs, 10, 14, &NoMatchProgress);
+        let lk: Vec<(usize, usize)> = lin.iter().map(|m| (m.a, m.b)).collect();
+        let mk: Vec<(usize, usize)> = mih.iter().map(|m| (m.a, m.b)).collect();
+        assert_eq!(lk, mk);
+        for (a, b, reliable) in planted {
+            assert_eq!(lk.contains(&(a, b)), reliable, "{a} {b}");
+        }
+        for (l, m) in lin.iter().zip(mih.iter()) {
+            assert_eq!((l.d, l.p, l.q), (m.d, m.p, m.q), "{l:?} vs {m:?}");
+        }
+    }
+
+    /// The index alone at library sizes, both hash indexes in it;
+    /// `cargo test --release -- --ignored mih_at_scale --nocapture`.
+    #[test]
+    #[ignore]
+    fn mih_at_scale() {
+        for n in [10_000usize, 50_000] {
+            let sigs = corpus(n, 3);
+            let t = std::time::Instant::now();
+            let pairs = mih_pairs(&sigs, 10, 14, &NoMatchProgress);
+            println!(
+                "{n:>6} signatures  {:>6.2} s  {} pairs",
+                t.elapsed().as_secs_f64(),
+                pairs.len()
+            );
         }
     }
 

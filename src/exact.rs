@@ -96,6 +96,14 @@ pub trait Progress: Sync {
     fn tick(&self, stage: Stage, done: u64, total: u64);
     /// A stage has completed; `stats` holds everything known so far.
     fn done(&self, _stage: Stage, _stats: &PipelineStats) {}
+    /// Whether a picture just decoded is wanted now (the fold's film
+    /// strip takes a few a second; asked before one is made). [CLAUDE,
+    /// Phase 19]
+    fn wants_picture(&self) -> bool {
+        false
+    }
+    /// A picture just decoded, as `still_of` makes it, and its file.
+    fn picture(&self, _still: image::RgbImage, _path: &std::path::Path) {}
 }
 
 pub struct NoProgress;

@@ -18,6 +18,7 @@
 //! that writes to stdout takes `OUT` and clears the live line first; the
 //! ticker redraws it under what was written on its next frame.
 
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -34,6 +35,11 @@ static LIVE_ON: AtomicBool = AtomicBool::new(false);
 static TICKER: OnceLock<()> = OnceLock::new();
 /// Bumped when a line opens or folds: a frame composed before is stale.
 static GEN: AtomicU64 = AtomicU64::new(0);
+/// The film strip is under the live line and takes pictures.
+static STRIP_ON: AtomicBool = AtomicBool::new(false);
+/// When the strip last took a picture, in milliseconds since `EPOCH`.
+static LAST_STILL: AtomicU64 = AtomicU64::new(0);
+static EPOCH: OnceLock<Instant> = OnceLock::new();
 
 /// One frame: 25 a second.
 pub(crate) const FRAME: Duration = Duration::from_millis(40);
@@ -110,6 +116,10 @@ struct Live {
     drawn: Instant,
     /// After the count: the unit, the time left, the file in hand.
     detail: String,
+    /// The film strip under the line, on a long pass (`strip_open`).
+    strip: Option<Strip>,
+    /// The track's ribs: how far they have run, when last drawn.
+    ribs: Mutex<(f64, Instant)>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -131,7 +141,10 @@ pub(crate) fn open(t: &Theme, hue: Hue) {
         shown: 0.0,
         drawn: now,
         detail: String::new(),
+        strip: None,
+        ribs: Mutex::new((0.0, now)),
     });
+    STRIP_ON.store(false, Ordering::SeqCst);
     if t.live {
         start_ticker();
         if !LIVE_ON.swap(true, Ordering::SeqCst) {
@@ -185,31 +198,37 @@ pub(crate) fn settle(t: &Theme, hue: Hue, mark: Mark, segments: &[String]) {
         _ => None,
     };
     *live = None;
+    STRIP_ON.store(false, Ordering::SeqCst);
     GEN.fetch_add(1, Ordering::SeqCst);
     drop(live);
     let line = settled_line(t, hue, mark, segments, elapsed);
     let _o = lock(&OUT);
     let mut out = io::stdout().lock();
     if LIVE_ON.swap(false, Ordering::SeqCst) {
-        let _ = write!(out, "\r{line}\x1b[K\n\x1b[?25h");
+        // the live line and the strip under it go; the settled line stays
+        let _ = write!(out, "\r\x1b[J{line}\n\x1b[?25h");
     } else {
         let _ = writeln!(out, "{line}");
     }
     let _ = out.flush();
 }
 
-/// Before anything else writes to stdout: the live line off the row it
-/// is on (the ticker draws it again under what is written).
+/// Before anything else writes to stdout: the live line and the strip
+/// under it off the screen (the ticker draws them again under what is
+/// written).
 pub(crate) fn clear_for_write(out: &mut impl Write) {
     if LIVE_ON.load(Ordering::SeqCst) {
-        let _ = write!(out, "\r\x1b[K");
+        let _ = write!(out, "\r\x1b[J");
     }
 }
 
-/// Ctrl-C while a line is live: the cursor back, the line ended.
+/// Ctrl-C while a line is live: the strip gone, the cursor back, the line
+/// ended.
 pub(crate) fn abandon() {
+    STRIP_ON.store(false, Ordering::SeqCst);
     if LIVE_ON.swap(false, Ordering::SeqCst) {
         let mut out = io::stdout();
+        let _ = write!(out, "\x1b[s\n\x1b[J\x1b[u");
         let _ = writeln!(out, "\x1b[?25h");
         let _ = out.flush();
     }
@@ -231,14 +250,23 @@ fn start_ticker() {
                     }
                     let now = Instant::now();
                     l.roll(now);
-                    (live_line(l, now), GEN.load(Ordering::SeqCst))
+                    let mut frame = format!("\r{}\x1b[K", live_line(l, now));
+                    if let Some(rows) = strip_lines(l, now) {
+                        // the strip under the line, then back up to it
+                        let n = rows.len();
+                        for r in rows {
+                            frame.push_str(&format!("\n{r}\x1b[K"));
+                        }
+                        frame.push_str(&format!("\x1b[{n}A\r"));
+                    }
+                    (frame, GEN.load(Ordering::SeqCst))
                 };
                 let _o = lock(&OUT);
                 if GEN.load(Ordering::SeqCst) != gen || !LIVE_ON.load(Ordering::SeqCst) {
                     continue;
                 }
                 let mut out = io::stdout().lock();
-                let _ = write!(out, "\r{line}\x1b[K");
+                let _ = write!(out, "{line}");
                 let _ = out.flush();
             });
     });
@@ -297,6 +325,20 @@ impl<'a> Brush<'a> {
         self.out.push_str(s);
     }
 
+    /// A cell on its own ground: written at once, the run ended.
+    fn put_on(&mut self, fg: Rgb, bg: Rgb, s: &str) {
+        self.flush();
+        self.colour = None;
+        if self.t.color {
+            let (Rgb(r, g, b), Rgb(br, bgc, bb)) = (fg, bg);
+            self.out.push_str(&format!(
+                "\x1b[38;2;{r};{g};{b};48;2;{br};{bgc};{bb}m{s}\x1b[0m"
+            ));
+        } else {
+            self.out.push_str(s);
+        }
+    }
+
     fn flush(&mut self) {
         if self.run.is_empty() {
             return;
@@ -322,6 +364,19 @@ const ORBIT_ASCII: [&str; 4] = ["|", "/", "-", "\\"];
 
 fn wave(secs: f64, period: f64) -> f64 {
     0.5 + 0.5 * (secs / period * std::f64::consts::TAU).sin()
+}
+
+/// The ribs' speed at a stage's start, cells a second.
+const RIB_SPEED: f64 = 3.0;
+
+/// Where the ribs are: their phase integrates a speed that rises with
+/// `p`, so they quicken smoothly instead of jumping when the count does.
+fn rib_phase(l: &Live, now: Instant, p: f64) -> f64 {
+    let mut r = l.ribs.lock().unwrap_or_else(|e| e.into_inner());
+    let dt = now.duration_since(r.1).as_secs_f64().min(0.2);
+    r.0 += dt * RIB_SPEED * (1.0 + 3.0 * p * p);
+    r.1 = now;
+    r.0
 }
 
 /// The track's cells on a line `w` wide: none under 64 columns, where
@@ -380,15 +435,22 @@ fn live_line(l: &Live, now: Instant) -> String {
         };
         match l.total {
             Some(total) if total > 0 => {
-                let f = (l.shown / total as f64).clamp(0.0, 1.0) * cells as f64;
+                let p = (l.shown / total as f64).clamp(0.0, 1.0);
+                let f = p * cells as f64;
                 let full = f.floor() as usize;
                 let half = f - full as f64 >= 0.5;
-                let gloss = (secs * 16.0) % (cells as f64 + 10.0) - 5.0;
+                // ribs in the fill that run back against it, quickening as
+                // the stage nears its end: the two augmentations that made
+                // a bar's wait read shorter (Harrison, Yeo, Hudson, CHI
+                // 2010). One rib every four cells, `RIB_SPEED` cells a
+                // second at the start, four times that at the end.
+                let phase = rib_phase(l, now, p);
                 for i in 0..cells {
                     if i < full {
                         let base = hue.lerp(GROOVE, 0.4 - 0.4 * i as f64 / cells as f64);
-                        let g = (1.0 - (i as f64 - gloss).abs() / 2.5).max(0.0) * 0.55;
-                        b.put(base.lerp(Rgb::WHITE, g), false, on);
+                        let d = ((i as f64 + phase).rem_euclid(4.0) - 1.0).abs();
+                        let rib = (1.0 - d).max(0.0) * 0.38;
+                        b.put(base.lerp(Rgb::WHITE, rib), false, on);
                     } else if i == full && half {
                         b.put(hue, false, head);
                     } else {
@@ -442,6 +504,286 @@ fn live_line(l: &Live, now: Instant) -> String {
     b.raw(&" ".repeat(room - wrote + 2));
     b.put(DIM, false, &clock);
     b.done()
+}
+
+// ---------------------------------------------------------------------------
+// the darkroom: a film strip under a long pass [CLAUDE, Phase 19]
+// ---------------------------------------------------------------------------
+//
+// While the similar pass decodes a large folder, the pictures it reads go
+// by under its line on a strip of film: each frame the next picture on
+// quadrant blocks, sprocket holes above and below that travel with the
+// film, the newest frame entering at the right and developing out of the
+// dark (a moment in the amber of a safelight first). Under the strip, how
+// fast it goes: a trace of pictures a second over the last twenty
+// seconds, the figure, the file in hand. Time with something to watch in
+// it passes faster; the track's ribs (`live_line`) do the rest.
+
+/// A frame on the strip, in cells: a 4:3 picture fills it on quadrant
+/// blocks (22 × 8 pixels, each twice as tall as wide).
+pub(crate) const FRAME_W: usize = 11;
+pub(crate) const FRAME_H: usize = 4;
+/// The strip's rows: sprockets, the frames, sprockets, the trace.
+const STRIP_ROWS: usize = FRAME_H + 3;
+/// Rows a terminal needs for the strip to be drawn under the line.
+const STRIP_MIN_ROWS: u16 = 20;
+/// Columns it needs.
+const STRIP_MIN_COLS: usize = 60;
+/// How often the strip takes a picture.
+const STILL_EVERY: Duration = Duration::from_millis(110);
+/// How long a frame takes to develop.
+const DEVELOP: Duration = Duration::from_millis(520);
+/// The film's base, its holes, the dark a frame develops out of.
+const FILM: Rgb = Rgb(0x1D, 0x1A, 0x16);
+const HOLE: Rgb = Rgb(0x55, 0x4E, 0x43);
+const DARK: Rgb = Rgb(0x0B, 0x09, 0x07);
+const SAFELIGHT: Rgb = Rgb(0xC8, 0x3C, 0x14);
+
+struct Still {
+    px: Vec<Rgb>,
+    w: usize,
+    h: usize,
+    came: Instant,
+}
+
+struct Strip {
+    stills: VecDeque<Still>,
+    /// Cells the film still has to travel left (it eases to 0).
+    slide: f64,
+    /// Cells it has travelled in all: the holes move with it.
+    travelled: f64,
+    /// (when, how many done), twice a second: the trace.
+    samples: VecDeque<(Instant, u64)>,
+    name: String,
+}
+
+fn epoch_ms() -> u64 {
+    EPOCH.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+/// The live section's pass is long: the strip goes under its line, on a
+/// terminal with the room for it.
+pub(crate) fn strip_open() {
+    let mut live = lock(&LIVE);
+    let Some(l) = live.as_mut() else { return };
+    if l.strip.is_some() || !l.theme.live || !l.theme.color || !l.theme.unicode {
+        return;
+    }
+    let rows = crossterm::terminal::size().map(|(_, r)| r).unwrap_or(0);
+    if rows < STRIP_MIN_ROWS || l.theme.width < STRIP_MIN_COLS {
+        return;
+    }
+    l.strip = Some(Strip {
+        stills: VecDeque::new(),
+        slide: 0.0,
+        travelled: 0.0,
+        samples: VecDeque::new(),
+        name: String::new(),
+    });
+    STRIP_ON.store(true, Ordering::SeqCst);
+}
+
+/// Whether the strip takes the picture just decoded (one every
+/// `STILL_EVERY`; the first caller after that takes it).
+pub(crate) fn wants_picture() -> bool {
+    if !STRIP_ON.load(Ordering::Relaxed) {
+        return false;
+    }
+    let now = epoch_ms();
+    let last = LAST_STILL.load(Ordering::Relaxed);
+    now.saturating_sub(last) >= STILL_EVERY.as_millis() as u64
+        && LAST_STILL
+            .compare_exchange(last, now, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok()
+}
+
+/// A picture onto the strip: it enters at the right.
+pub(crate) fn picture(still: &image::RgbImage, name: &str) {
+    let mut live = lock(&LIVE);
+    let Some(strip) = live.as_mut().and_then(|l| l.strip.as_mut()) else {
+        return;
+    };
+    let px = still.pixels().map(|p| Rgb(p[0], p[1], p[2])).collect();
+    strip.stills.push_back(Still {
+        px,
+        w: still.width() as usize,
+        h: still.height() as usize,
+        came: Instant::now(),
+    });
+    while strip.stills.len() > 40 {
+        strip.stills.pop_front();
+    }
+    let step = (FRAME_W + 1) as f64;
+    strip.slide = (strip.slide + step).min(3.0 * step);
+    strip.travelled += step;
+    strip.name = name.to_string();
+}
+
+/// The strip's rows for this frame, when it is on.
+fn strip_lines(l: &mut Live, now: Instant) -> Option<Vec<String>> {
+    let done = l.done;
+    let hue = l.hue.rgb();
+    let t = l.theme;
+    let s = l.strip.as_mut()?;
+    // the film eases into place: most of the way in a fifth of a second
+    let dt = FRAME.as_secs_f64();
+    s.slide *= (-dt / 0.07).exp();
+    if s.slide < 0.05 {
+        s.slide = 0.0;
+    }
+    if s.samples
+        .back()
+        .is_none_or(|(at, _)| now.duration_since(*at) >= Duration::from_millis(500))
+    {
+        s.samples.push_back((now, done));
+        while s.samples.len() > 41 {
+            s.samples.pop_front();
+        }
+    }
+    let w = t.width.saturating_sub(2);
+    let shift = s.slide.round() as usize;
+    let phase = (s.travelled - s.slide).round() as i64;
+    let mut rows: Vec<String> = Vec::with_capacity(STRIP_ROWS);
+
+    // sprockets: a hole every third cell, travelling with the film
+    let sprockets = |b: &mut Brush| {
+        b.raw(" ");
+        for c in 0..w {
+            if (c as i64 + phase).rem_euclid(3) == 0 {
+                b.put_on(HOLE, FILM, "▪");
+            } else {
+                b.put_on(FILM, FILM, " ");
+            }
+        }
+    };
+    let mut b = Brush::new(&t);
+    sprockets(&mut b);
+    rows.push(b.done());
+
+    // the frames, newest at the right
+    let step = FRAME_W + 1;
+    for r in 0..FRAME_H {
+        let mut b = Brush::new(&t);
+        b.raw(" ");
+        let mut c = 0usize;
+        while c < w {
+            // which frame this cell is in: counted from the right edge,
+            // the film shifted right by what it still has to travel
+            let from_right = (w - 1 - c) as i64 + shift as i64 - (step as i64 - 1);
+            let k = from_right.div_euclid(step as i64);
+            let x = (step as i64 - 1) - from_right.rem_euclid(step as i64) - 1;
+            let still = if k >= 0 && (0..FRAME_W as i64).contains(&x) {
+                s.stills
+                    .len()
+                    .checked_sub(1 + k as usize)
+                    .map(|i| &s.stills[i])
+            } else {
+                None
+            };
+            match still {
+                Some(f) => {
+                    let (glyph, fg, bg) = still_cell(f, x as usize, r, now);
+                    b.put_on(fg, bg, glyph);
+                }
+                None => b.put_on(FILM, FILM, " "),
+            }
+            c += 1;
+        }
+        rows.push(b.done());
+    }
+    let mut b = Brush::new(&t);
+    sprockets(&mut b);
+    rows.push(b.done());
+
+    // the trace: pictures a second over the last twenty seconds
+    let rates: Vec<f64> = s
+        .samples
+        .iter()
+        .zip(s.samples.iter().skip(1))
+        .map(|((a, da), (b, db))| (db - da) as f64 / b.duration_since(*a).as_secs_f64().max(1e-3))
+        .collect();
+    let mut b = Brush::new(&t);
+    b.raw("   ");
+    let top = rates.iter().cloned().fold(1.0, f64::max);
+    let trace_w = 40usize.min(w / 3);
+    for i in 0..trace_w {
+        let v = rates
+            .len()
+            .checked_sub(trace_w - i)
+            .and_then(|k| rates.get(k))
+            .copied();
+        match v {
+            Some(v) => {
+                let lvl = ((v / top) * 7.0).round().clamp(0.0, 7.0) as usize;
+                b.put(
+                    GROOVE.lerp(hue, 0.35 + 0.65 * lvl as f64 / 7.0),
+                    false,
+                    BLOCKS[lvl],
+                );
+            }
+            None => b.put(GROOVE, false, "▁"),
+        }
+    }
+    let now_rate =
+        rates.iter().rev().take(4).sum::<f64>() / rates.iter().rev().take(4).count().max(1) as f64;
+    b.raw("  ");
+    if !rates.is_empty() {
+        b.put(PLATE, true, &fmt_count(now_rate.round() as u64));
+        b.put(DIM, false, " a second");
+    }
+    let used = 3
+        + trace_w
+        + 2
+        + if rates.is_empty() {
+            0
+        } else {
+            fmt_count(now_rate.round() as u64).len() + 9
+        };
+    let room = t.width.saturating_sub(used + 6);
+    if !s.name.is_empty() && room > 8 {
+        let n = std::path::Path::new(&s.name)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        b.put(DIM, false, "   ");
+        b.put(
+            GROOVE.lerp(PLATE, 0.55),
+            false,
+            &shorten_middle(&n, room, "…"),
+        );
+    }
+    rows.push(b.done());
+    Some(rows)
+}
+
+/// One cell of a frame: its four pixels as a quadrant block, the picture
+/// centred in the frame on the film's base, developing out of the dark
+/// through the safelight's amber.
+fn still_cell(f: &Still, x: usize, r: usize, now: Instant) -> (&'static str, Rgb, Rgb) {
+    let a = (now.duration_since(f.came).as_secs_f64() / DEVELOP.as_secs_f64()).min(1.0);
+    let a = 1.0 - (1.0 - a).powi(3);
+    let (ox, oy) = ((2 * FRAME_W - f.w) / 2, (2 * FRAME_H - f.h) / 2);
+    let px = |px: usize, py: usize| -> Rgb {
+        if px < ox || py < oy || px >= ox + f.w || py >= oy + f.h {
+            return FILM;
+        }
+        let c = f.px[(py - oy) * f.w + (px - ox)];
+        // dark, then the safelight's amber on the picture's light, then it
+        let lum = (c.0 as f64 * 0.3 + c.1 as f64 * 0.59 + c.2 as f64 * 0.11) / 255.0;
+        let lit = DARK.lerp(SAFELIGHT, lum * 0.8);
+        if a < 0.45 {
+            DARK.lerp(lit, a / 0.45)
+        } else {
+            lit.lerp(c, (a - 0.45) / 0.55)
+        }
+    };
+    let (m, fg, bg) = crate::workspace::quad([
+        px(2 * x, 2 * r),
+        px(2 * x + 1, 2 * r),
+        px(2 * x, 2 * r + 1),
+        px(2 * x + 1, 2 * r + 1),
+    ]);
+    (crate::workspace::QUADS[m], fg, bg)
 }
 
 /// A section's time: milliseconds under a second, where tenths would
@@ -986,6 +1328,8 @@ mod tests {
                     shown: 1_234_567.0,
                     drawn: Instant::now(),
                     detail: "about 1 h 30 m left".into(),
+                    strip: None,
+                    ribs: Mutex::new((0.0, Instant::now())),
                 };
                 lines.push(live_line(&l, Instant::now() + Duration::from_secs(4000)));
                 for line in lines {

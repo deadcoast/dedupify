@@ -94,6 +94,15 @@ impl Relation {
         self.fit.is_some_and(|f| f.confirmed())
     }
 
+    /// Admitted by PDQ alone: the 64-bit pair rule fails (most often dHash,
+    /// whose gradient signs flip in flat regions when a picture is
+    /// resized) and PDQ is within its threshold on reliable hashes. Acted
+    /// on only when the fit confirms it: PDQ (frequency) and the fit
+    /// (spatial) are then the two families. (Phase 19) [CLAUDE]
+    pub fn pdq_pair(&self) -> bool {
+        !self.hash_pair() && self.pdq_ok()
+    }
+
     /// Admitted by the learned descriptor: at `DEEP_MIN`, or in the band
     /// under it when the fit confirms the pair as well.
     pub fn deep_in(&self) -> bool {
@@ -109,7 +118,7 @@ impl Relation {
 
     /// Grouped by the deep tier alone: the two 64-bit hashes disagree.
     pub fn deep_only(&self) -> bool {
-        !self.hash_pair() && self.deep_in()
+        !self.hash_pair() && !self.pdq_ok() && self.deep_in()
     }
 
     /// What `milk` and `purge` require before touching the file.
@@ -119,6 +128,8 @@ impl Relation {
         }
         if self.hash_pair() {
             self.pdq_ok() || self.fit_ok()
+        } else if self.pdq_ok() {
+            self.fit_ok()
         } else {
             self.deep_in() && self.fit_ok()
         }
@@ -199,8 +210,9 @@ impl Relation {
             return "similar, unconfirmed".to_string();
         }
         let mut parts: Vec<String> = Vec::new();
-        // orientation: a 64-bit finding, so only when the hashes agree
-        let orientation = if self.hash_pair() {
+        // orientation: found by the hashes that admitted the pair (the
+        // 64-bit pair or PDQ; the descriptor names none)
+        let orientation = if self.hash_pair() || self.pdq_ok() {
             match self.variant {
                 Variant::Identity => "",
                 Variant::Rotate90 => "rotated 90°",
@@ -281,7 +293,7 @@ impl Relation {
             parts.push("from the RAW".to_string());
         }
         if parts.is_empty() {
-            parts.push(if !self.hash_pair() {
+            parts.push(if !self.hash_pair() && !self.pdq_ok() {
                 // in through the descriptor and the fit: the picture is
                 // there, the pixels were worked on
                 "edited".to_string()
@@ -330,6 +342,13 @@ impl Relation {
         };
         if self.deep_only() {
             return format!("deep {:.2} only; {fit_txt}", self.deep.unwrap_or(0.0));
+        }
+        if self.pdq_pair() {
+            return if self.d > DHASH_MAX {
+                format!("PDQ only, d {} over {}; {fit_txt}", self.d, DHASH_MAX)
+            } else {
+                format!("PDQ only, p {} over {}; {fit_txt}", self.p, PHASH_MAX)
+            };
         }
         if self.q_quality < PDQ_QUALITY_MIN {
             format!(
@@ -416,6 +435,18 @@ pub fn twins(a: &std::path::Path, b: &std::path::Path) -> bool {
 }
 
 pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool) -> Relation {
+    // the orientation that admitted the pair, as the matcher ranks it:
+    // the 64-bit pair by d + p, then PDQ alone by q, then the rest by d + p
+    let reliable = k.pdq_quality.min(m.pdq_quality) >= PDQ_QUALITY_MIN;
+    let rank = |d: u32, p: u32, q: u32| -> (u8, u32) {
+        if d <= DHASH_MAX && p <= PHASH_MAX {
+            (0, d + p)
+        } else if reliable && q <= PDQ_MAX {
+            (1, q)
+        } else {
+            (2, d + p)
+        }
+    };
     let mut best: Option<(Variant, u32, u32, u32)> = None;
     for (i, v) in perceptual::VARIANT_ORDER.iter().enumerate() {
         let d1 = perceptual::hamming(k.dhash[0], m.dhash[i]);
@@ -425,7 +456,7 @@ pub fn relation_deep(k: &Signature, m: &Signature, deep: Option<f32>, kin: bool)
         let p2 = perceptual::hamming(m.phash[0], k.phash[i]);
         let q2 = pdq_distance(&m.pdq[0], &k.pdq[i]);
         for (d, p, q) in [(d1, p1, q1), (d2, p2, q2)] {
-            if best.is_none_or(|(_, bd, bp, _)| d + p < bd + bp) {
+            if best.is_none_or(|(_, bd, bp, bq)| rank(d, p, q) < rank(bd, bp, bq)) {
                 best = Some((*v, d, p, q));
             }
         }

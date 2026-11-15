@@ -80,7 +80,7 @@ impl NearGroup {
         let mut thumb: Option<Option<geometry::Thumb>> = None;
         for m in self.members.iter_mut().skip(1) {
             let mut r = relation_of(&keeper, &m.hashed);
-            let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.deep_only());
+            let needs = !r.kin && ((r.hash_pair() && !r.pdq_ok()) || r.pdq_pair() || r.deep_only());
             if needs {
                 let k = thumb.get_or_insert_with(|| geometry::thumb_of(&keeper.rep.cand.path));
                 r.fit = k.as_ref().and_then(|k| {
@@ -228,6 +228,11 @@ pub fn hash_all(
             // the capture time comes from the route when it read the
             // metadata (HEIF, RAW), else from the file's EXIF
             let r = crate::decode::load(&rep.cand.path).map(|d| {
+                // the fold's film strip: a picture now and then, made
+                // only when it is wanted
+                if progress.wants_picture() {
+                    progress.picture(still_of(&d.img), &rep.cand.path);
+                }
                 let sig = perceptual::signature_from_image(&d.img);
                 let emb = deep.and_then(|m| match m.embed(&d.img) {
                     Ok(e) => Some(e),
@@ -293,6 +298,33 @@ pub fn hash_all(
         }
     }
     (out, stats)
+}
+
+/// A decoded picture for the fold's film strip: inside its frame's
+/// pixels at its proportions on quadrant blocks (a pixel twice as tall as
+/// wide), by the crate's block average. [CLAUDE, Phase 19]
+pub fn still_of(img: &image::DynamicImage) -> image::RgbImage {
+    use crate::render::fold::{FRAME_H, FRAME_W};
+    let (fw, fh) = ((2 * FRAME_W) as f64, (2 * FRAME_H) as f64);
+    let (w, h) = (img.width().max(1) as f64, img.height().max(1) as f64);
+    let a = w / h;
+    let (pw, ph) = if a >= fw / (2.0 * fh) {
+        (
+            fw as u32,
+            ((fw / (2.0 * a)).round() as u32).clamp(1, fh as u32),
+        )
+    } else {
+        (
+            ((2.0 * fh * a).round() as u32).clamp(1, fw as u32),
+            fh as u32,
+        )
+    };
+    match img.as_rgb8() {
+        Some(rgb) if rgb.width() >= pw && rgb.height() >= ph => block_thumb(rgb, pw, ph),
+        _ => img
+            .resize_exact(pw, ph, image::imageops::FilterType::Triangle)
+            .to_rgb8(),
+    }
 }
 
 /// Keeper order inside one group: the member the most other members match

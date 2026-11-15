@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use image::RgbImage;
 
-use crate::preview::Visual;
+use crate::preview::{Protocol, Visual};
 
 /// One picture's state.
 #[derive(Debug, Clone)]
@@ -21,12 +21,25 @@ pub enum Thumb {
     Coming(Instant),
     /// Decoded and scaled, when it arrived, and the picture's own pixels.
     Ready(Arc<RgbImage>, Instant, (u32, u32)),
+    /// Decoded, scaled to the box's pixels and encoded for the terminal's
+    /// graphics (Phase 19): the escape sequence, the cells it covers, when
+    /// it arrived, the picture's own pixels.
+    Sharp(Arc<String>, (u32, u32), Instant, (u32, u32)),
     /// The file did not decode (or a video without ffmpeg).
     Unreadable,
 }
 
-/// A picture for a box of cells: the panel asks again when it is resized.
-type Key = (PathBuf, u32, u32);
+/// How a picture is wanted: quadrant blocks for a box of cells, or the
+/// terminal's own graphics for a box of cells of a given pixel size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mode {
+    Blocks,
+    Sharp(Protocol, (u32, u32)),
+}
+
+/// A picture for a box of cells, drawn one way: the panel asks again when
+/// it is resized or the drawing changes.
+type Key = (PathBuf, u32, u32, Mode);
 
 /// Requests kept waiting: older ones are dropped (their slots cleared, so
 /// coming back to them asks again).
@@ -66,7 +79,12 @@ impl Thumbs {
     /// cell each way (quadrant blocks), its proportions kept on cells twice
     /// as tall as wide: as it is, or asked for now.
     pub fn get(&self, v: &Visual, w: u32, h: u32) -> Thumb {
-        let key = (v.path().to_path_buf(), w, h);
+        self.get_as(v, w, h, Mode::Blocks)
+    }
+
+    /// The picture of `v` for a box `w` cells by `h` rows, drawn `mode`.
+    pub fn get_as(&self, v: &Visual, w: u32, h: u32, mode: Mode) -> Thumb {
+        let key = (v.path().to_path_buf(), w, h, mode);
         let now = Instant::now();
         {
             let mut slots = lock(&self.shared.slots);
@@ -97,7 +115,7 @@ impl Thumbs {
         lock(&self.shared.slots).values().any(|t| match t {
             Thumb::Coming(_) => true,
             Thumb::Ready(_, at, _) => at.elapsed() < fade,
-            Thumb::Unreadable => false,
+            Thumb::Sharp(..) | Thumb::Unreadable => false,
         })
     }
 }
@@ -140,13 +158,29 @@ fn work(s: &Shared) {
         if !matches!(lock(&s.slots).get(&key), Some(Thumb::Coming(_))) {
             continue;
         }
-        let thumb = match visual.load() {
-            Some(img) => Thumb::Ready(
+        let thumb = match (visual.load(), key.3) {
+            (Some(img), Mode::Blocks) => Thumb::Ready(
                 Arc::new(quadrant_pixels(&img, key.1, key.2)),
                 Instant::now(),
                 (img.width(), img.height()),
             ),
-            None => Thumb::Unreadable,
+            (Some(img), Mode::Sharp(p, (cw, ch))) => {
+                // the box's pixels, the picture fitted inside at its
+                // proportions, never enlarged past them; encoded here, off
+                // the key loop
+                let fitted = crate::preview::fit_pixels_sharp(&img, key.1 * cw, key.2 * ch);
+                let cells = (
+                    fitted.width().div_ceil(cw).min(key.1),
+                    fitted.height().div_ceil(ch).min(key.2),
+                );
+                Thumb::Sharp(
+                    Arc::new(crate::preview::encode(p, &fitted)),
+                    cells,
+                    Instant::now(),
+                    (img.width(), img.height()),
+                )
+            }
+            (None, _) => Thumb::Unreadable,
         };
         lock(&s.slots).insert(key, thumb);
     }

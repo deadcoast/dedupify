@@ -235,17 +235,22 @@ edge:
 - **The two pictures**, the keeper and the file under the cursor (the
   group's first other file when the cursor is on the group or its
   keeper), side by side, `=` between copies and `≈` between similar
-  files. Each is drawn in quadrant blocks — four pixels a cell, two
-  across and two down, each cell in the two of its colours that fit its
-  four best (of the seven ways to split four pixels in two, the one
-  closest to its own means), 24-bit — at its own proportions on cells
-  twice as tall as wide, so any terminal with colour shows them; `v`
-  still shows them at full size where the terminal draws pictures. They
-  are decoded by two workers off the key loop, the newest asked first
-  (eight waiting at most) and each kept for the sitting; while one is
-  coming a sheen runs across its place, and when it arrives it rises out
-  of the panel's ground over 0.22 s. A video shows its frame a third of
-  the way in; a file that does not decode says `no picture`.
+  files. Where the terminal draws pictures (sixel, kitty or iTerm2
+  graphics, below) each is drawn sharp, in the terminal's own pixels, at
+  its own proportions in the cells the panel gives it, sized to the
+  terminal's cell **[CLAUDE, Phase 19]**; `b` draws them in quadrant
+  blocks instead, and `b` again sharp. Quadrant blocks — four pixels a
+  cell, two across and two down, each cell in the two of its colours that
+  fit its four best (of the seven ways to split four pixels in two, the
+  one closest to its own means), 24-bit, on cells twice as tall as wide —
+  are what every other terminal with colour shows, and there `b` is not
+  on the key card. `v` shows the two at full size. They are decoded (and
+  a sharp one encoded) by two workers off the key loop, the newest asked
+  first (eight waiting at most) and each kept for the sitting; while one
+  is coming a sheen runs across its place; a picture in blocks rises out
+  of the panel's ground over 0.22 s when it arrives, a sharp one is
+  there at once. A video shows its frame a third of the way in; a file
+  that does not decode says `no picture`.
 - **Under each picture**, in columns under it: its role; its name; its
   folder (the top folder by its own name); its pixels (as the scan read
   them, or as the picture decoded — the byte-for-byte pass reads none);
@@ -315,6 +320,7 @@ choice of frame and did no better than taking the first (VERIFICATION
 | `k` | on a file: it becomes the group's keeper; the group is re-related to it (the geometric fit included where the cheaper evidence leaves the question open) and reprinted; choices on members whose role did not change are kept |
 | `c` | on a group with other shots (`kin`): choose them all, by hand; again: let them go (Phase 11) |
 | `v` | the keeper beside the file under the cursor, drawn in the terminal (sixel, kitty or iTerm2 graphics; a video shows the frame a third of the way in), with both paths and the file's words; any key back, `o` reveals the member. Where the terminal draws no pictures, both files open in the system viewer |
+| `b` | the two pictures in quadrant blocks; again, sharp. Only where the terminal draws pictures **[CLAUDE, Phase 19]** |
 | `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
 | `g` | type a group's number, enter: the group at the top of the window |
 | `/` | filter: the groups narrow, as the text is typed, to those with a path containing it (any case); enter keeps it, esc puts back the last one, an empty filter shows every group. The line under the screen says `14 of 612 groups` while it is typed; `a`, `space` counts, `n`, `m` and `p` work on the groups shown, and choices made in hidden groups are kept for when they show again. A group keeps its number (`g` to a hidden one says so) (Phase 16); the groups' title says `4 of 12` |
@@ -332,8 +338,25 @@ Terminal (`WT_SESSION`), foot and mlterm → sixel; otherwise none.
 `DEDUPE_GRAPHICS=sixel|kitty|iterm|none` overrides it. The terminal is
 not queried: a reply would arrive on the same input the keys come from,
 and on Windows crossterm reads console input records, not the reply.
-Sixel pictures use the 216-colour cube with 4 × 4 ordered dithering; the
-cell is taken as the terminal reports it (Unix) or 9 × 18 pixels.
+A sixel picture has a palette of its own **[CLAUDE, Phase 19]**: 255
+colours, its pixels' colours split as median cut does — always the box
+with the largest squared error, along its widest channel, at the cut
+that leaves the least error on both sides — then moved by three rounds
+of k-means; the pixels are mapped to it by Floyd–Steinberg error
+diffusion on a serpentine path, and only the colours used are defined.
+(The 216-colour cube with ordered dithering before it posterised skin
+and skies; NeuQuant's sampled palette, tried in between, left gaps in a
+sky that showed as contour lines, VERIFICATION § Phase 19.) The cell is
+taken as the terminal reports it, or 10 × 20 pixels on Windows (the
+cell Windows Terminal draws sixel on) and 9 × 18 elsewhere.
+
+In the workspace the screen is written line by line, only the lines that
+changed, and around the pictures that stay on it, never through them: a
+picture is sent once and stays while the cursor moves within its group.
+A picture that goes has its rows written through; kitty pictures, which
+lie over the text, are deleted and the ones that stay placed again.
+Whatever draws over the screen (the view, an action's lines, a resize)
+has the whole screen, pictures included, drawn again after it.
 
 Piped, or with stdin not a terminal, none of this runs: `find` prints
 the `next` lines, as it always has.
@@ -380,8 +403,10 @@ against its keeper before the bin call, and the near-duplicate image and
 video passes as `find` and `milk` run them. Near duplicates
 cannot be byte-verified; `purge` bins one only when a second family of
 evidence agrees with the two 64-bit hashes — PDQ (256-bit, Phase 2b) or
-the geometric fit (Phase 6) — or, for a member the deep descriptor
-admitted, when the fit confirms it. Such lines carry `~` and the
+the geometric fit (Phase 6) — or, for a member PDQ admitted alone (both
+sides' PDQ quality 50 or more and within 31, where the gradient hash
+refused a resize; Phase 19), or one the deep descriptor admitted, when
+the fit confirms it. Such lines carry `~` and the
 distances, plus `fit 1.00  crop 95%` when the fit was the deciding
 evidence. A member nothing confirmed prints as `kept~` with the reason
 and stays. `purge` reports the OS bin it used and how
@@ -547,8 +572,13 @@ second, so it moves while a stage is silent (a large file hashing):
 - the track, on a terminal 64 columns or wider (a fifth of the width,
   12–28 cells): toward a known total it fills with heavy rule `━` shaded
   from dark at its start to the hue at its edge, a half cell `╸` at the
-  edge and a gloss travelling along it; with no total yet (the walk) a
-  comet of seven cells, its tail fading into the groove `─`, runs along it;
+  edge; ribs of light, one every four cells, run back through the fill
+  against its direction, 3 cells a second at the stage's start and
+  quickening smoothly to four times that at its end — the two
+  augmentations that made a progress bar's wait read shorter (backward
+  ripples and accelerating pulses, Harrison, Yeo and Hudson, CHI 2010)
+  **[CLAUDE, Phase 19]**; with no total yet (the walk) a comet of seven
+  cells, its tail fading into the groove `─`, runs along it;
 - the stage's word (`size`, `sample`, `hash`, `decode`, `match`,
   `frames`, `verify`, `moving`, `binning`, `restoring`), the count rolling
   toward its value (most of the way in a tenth of a second, so a burst
@@ -557,6 +587,19 @@ second, so it moves while a stage is silent (a large file hashing):
 - the time since the section opened, right-aligned: milliseconds under a
   second (`<1 ms`, `551 ms`), where tenths would read `0.0 s`, then
   `1.2 s`, `14 s`, `11 m 3 s`.
+
+*The darkroom* **[CLAUDE, Phase 19]**. When the similar pass has 60 or
+more pictures to decode, on a terminal with colour, Unicode, 20 rows and
+60 columns, a strip of film runs under its line while it decodes: the
+pictures it reads go by on it, one taken every 110 ms, each a frame of
+11 × 4 cells in quadrant blocks (a 4:3 picture fills it), the newest
+entering at the right as the film slides left and eases into place, the
+sprocket holes above and below travelling with it. A new frame develops
+out of the dark over 0.52 s, its light parts first in the amber of a
+safelight, then in their colours. Under the film, how fast it goes: a
+trace of pictures a second over the last twenty seconds, the figure,
+and the file in hand. The strip goes with the line when the section
+folds; nothing of it stays in the scrollback.
 
 *Folded*, when the section is done: the line is rewritten in place to
 
@@ -952,8 +995,8 @@ newest, as before.
   one the bin let go anyway is put back from it and refused. In the
   workspace a refused file is offered to `_milked`. Near
   duplicates are moved or binned only when two families of evidence agree
-  — images: dHash and pHash with PDQ or the geometric fit, or the deep
-  descriptor with the fit; videos: TMK level 2 ≥ 0.9, or the three image
+  — images: dHash and pHash with PDQ or the geometric fit, PDQ alone
+  with the fit, or the deep descriptor with the fit; videos: TMK level 2 ≥ 0.9, or the three image
   hashes agree on the sampled frames — marked `~` on their line; the rest
   print as `kept~` in `milk` as well as `purge`. Two files with different
   EXIF capture moments are `kin` and never acted on; a camera RAW is never

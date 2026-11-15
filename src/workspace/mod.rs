@@ -14,6 +14,7 @@
 
 mod screen;
 pub(crate) use screen::fit_parts as fit_keys;
+pub(crate) use screen::{quad, QUADS};
 pub mod state;
 mod thumbs;
 
@@ -247,25 +248,120 @@ fn leave_screen() {
     let _ = terminal::disable_raw_mode();
 }
 
-fn draw(lines: &[String]) -> io::Result<()> {
-    let mut out = io::stdout().lock();
-    queue!(out, cursor::MoveTo(0, 0))?;
-    for (i, l) in lines.iter().enumerate() {
-        queue!(out, cursor::MoveTo(0, i as u16))?;
-        out.write_all(l.as_bytes())?;
-        queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
-    }
-    queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
-    out.flush()
+/// The screen as the terminal holds it, sharp pictures included (Phase
+/// 19) [CLAUDE]. A sixel or iTerm2 picture lives in the cells it covers
+/// and is erased by text written over them; a kitty picture lives over
+/// the cells until it is deleted. So the screen is written line by line,
+/// only the lines that changed, and around every picture that stays —
+/// left of it, then right of it — never through it; a picture that goes
+/// has its rows written through; a picture that comes is sent once, after
+/// the text. An unchanged screen sends nothing.
+pub(crate) struct Gallery {
+    protocol: preview::Protocol,
+    prev: Vec<String>,
+    shown: Vec<screen::Placement>,
 }
 
-/// One line of the screen again (the pointer breathing).
-fn draw_line(i: usize, line: &str) -> io::Result<()> {
-    let mut out = io::stdout().lock();
-    queue!(out, cursor::MoveTo(0, i as u16))?;
-    out.write_all(line.as_bytes())?;
-    queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
-    out.flush()
+impl Gallery {
+    pub(crate) fn new(protocol: preview::Protocol) -> Gallery {
+        Gallery {
+            protocol,
+            prev: Vec::new(),
+            shown: Vec::new(),
+        }
+    }
+
+    /// Something else drew on the screen: everything is written again.
+    pub(crate) fn reset(&mut self) {
+        let _ = self.reset_to(&mut io::stdout().lock());
+    }
+
+    fn reset_to(&mut self, out: &mut impl Write) -> io::Result<()> {
+        if self.protocol == preview::Protocol::Kitty && !self.shown.is_empty() {
+            out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\")?;
+            out.flush()?;
+        }
+        self.prev.clear();
+        self.shown.clear();
+        Ok(())
+    }
+
+    pub(crate) fn present(
+        &mut self,
+        lines: &[String],
+        pics: &[screen::Placement],
+    ) -> io::Result<()> {
+        self.present_to(&mut io::stdout().lock(), lines, pics)
+    }
+
+    fn present_to(
+        &mut self,
+        out: &mut impl Write,
+        lines: &[String],
+        pics: &[screen::Placement],
+    ) -> io::Result<()> {
+        let kitty = self.protocol == preview::Protocol::Kitty;
+        let stays: Vec<bool> = self.shown.iter().map(|p| pics.contains(p)).collect();
+        let gone: Vec<&screen::Placement> = self
+            .shown
+            .iter()
+            .zip(&stays)
+            .filter(|(_, s)| !**s)
+            .map(|(p, _)| p)
+            .collect();
+        // kitty: what goes is deleted, what stays is placed again with it
+        let (kept, fresh): (Vec<&screen::Placement>, Vec<&screen::Placement>) = if kitty {
+            if !gone.is_empty() {
+                out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\")?;
+                (Vec::new(), pics.iter().collect())
+            } else {
+                (
+                    pics.iter().filter(|p| self.shown.contains(p)).collect(),
+                    pics.iter().filter(|p| !self.shown.contains(p)).collect(),
+                )
+            }
+        } else {
+            (
+                pics.iter().filter(|p| self.shown.contains(p)).collect(),
+                pics.iter().filter(|p| !self.shown.contains(p)).collect(),
+            )
+        };
+        for (i, l) in lines.iter().enumerate() {
+            let changed = self.prev.get(i) != Some(l);
+            let under_gone = !kitty && gone.iter().any(|p| (p.row..p.row + p.ch).contains(&i));
+            if !changed && !under_gone {
+                continue;
+            }
+            // the pictures that stay on this row, left to right
+            let mut holes: Vec<(usize, usize)> = kept
+                .iter()
+                .filter(|p| (p.row..p.row + p.ch).contains(&i))
+                .map(|p| (p.col, p.col + p.cw))
+                .collect();
+            holes.sort_unstable();
+            let mut at = 0usize;
+            for (a, b) in holes {
+                queue!(out, cursor::MoveTo(at as u16, i as u16))?;
+                out.write_all(crate::util::slice_sgr(l, at, a).as_bytes())?;
+                at = b;
+            }
+            queue!(out, cursor::MoveTo(at as u16, i as u16))?;
+            out.write_all(crate::util::slice_sgr(l, at, usize::MAX).as_bytes())?;
+            queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
+        }
+        if lines.len() < self.prev.len() || self.prev.is_empty() {
+            queue!(out, cursor::MoveTo(0, lines.len() as u16))?;
+            queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        }
+        for p in fresh {
+            queue!(out, cursor::MoveTo(p.col as u16, p.row as u16))?;
+            out.write_all(p.payload.as_bytes())?;
+        }
+        out.flush()?;
+        self.prev = lines.to_vec();
+        self.shown = pics.to_vec();
+        Ok(())
+    }
 }
 
 /// A one-line bar on the main screen; waits for one key (raw mode only for
@@ -364,6 +460,11 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
     let mut st = State::new(layout_of(f, &inv.root), rows.saturating_sub(4));
     let mut lines = Listing::of(f, inv, r, &st, cols);
     let protocol = preview::detect();
+    // the comparison's pictures sharp where the terminal draws pictures
+    if protocol != preview::Protocol::None && r.theme.color {
+        st.sharp = Some((protocol, preview::cell_pixels()));
+    }
+    let mut gallery = Gallery::new(protocol);
 
     if enter_screen().is_err() {
         leave_screen();
@@ -409,7 +510,8 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                     breath: breath(born),
                     clock: born.elapsed().as_secs_f64(),
                 };
-                let _ = draw(&st.screen(&t, &title, &lines.by_row, rows, &frame, Some(&pictures)));
+                let screen = st.screen(&t, &title, &lines.by_row, rows, &frame, Some(&pictures));
+                let _ = gallery.present(&screen, &st.placements.borrow());
                 match next_input(Some(std::time::Duration::from_millis(30))) {
                     Ok(Some(i)) => {
                         pending = Some(i);
@@ -425,14 +527,15 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             clock: at.elapsed().as_secs_f64(),
             ..Frame::STILL
         };
-        let _ = draw(&st.screen(
+        let screen = st.screen(
             &t,
             &title,
             &lines.by_row,
             rows,
             &still(born),
             Some(&pictures),
-        ));
+        );
+        let _ = gallery.present(&screen, &st.placements.borrow());
         // between keys the pointer breathes (its line drawn again, 12 a
         // second); while a picture is coming or fading in, the whole
         // screen, 25 a second
@@ -455,11 +558,9 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
                             &still(born),
                             Some(&pictures),
                         );
-                        if moving || pictures.moving(screen::FADE) {
-                            let _ = draw(&screen);
-                        } else if let Some(i) = st.cursor_line() {
-                            let _ = draw_line(i, &screen[i]);
-                        }
+                        // what changed is written: the pointer's line,
+                        // a picture fading in or arriving
+                        let _ = gallery.present(&screen, &st.placements.borrow());
                     }
                     Err(e) => break Err(e),
                 }
@@ -468,6 +569,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
         let key = match input {
             Ok(Input::Key(k)) => k,
             Ok(Input::Resize) => {
+                gallery.reset();
                 (cols, rows) = term_size(r);
                 st.set_height(rows.saturating_sub(4));
                 lines = Listing::of(f, inv, r, &st, cols);
@@ -475,7 +577,13 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             }
             Err(_) => Key::Quit,
         };
-        match st.handle(key) {
+        let effect = st.handle(key);
+        // what an effect draws (the view, a bar, an action's lines) is
+        // drawn over the screen: the next one is written whole
+        if effect != Effect::None {
+            gallery.reset();
+        }
+        match effect {
             Effect::None => {}
             Effect::Quit => {
                 leave_screen();
@@ -873,4 +981,102 @@ fn visuals(f: &Found, g: usize, m: usize) -> Option<(Visual, Visual, String)> {
         return None;
     }
     Some((grp.visual(0)?, grp.visual(m)?, grp.words(m)))
+}
+
+#[cfg(test)]
+mod gallery_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn pic(row: usize, col: usize, cw: usize, ch: usize, payload: &str) -> screen::Placement {
+        screen::Placement {
+            row,
+            col,
+            cw,
+            ch,
+            payload: Arc::new(payload.to_string()),
+        }
+    }
+
+    fn run(g: &mut Gallery, lines: &[&str], pics: &[screen::Placement]) -> String {
+        let lines: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        let mut out = Vec::new();
+        g.present_to(&mut out, &lines, pics).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn a_sixel_picture_is_sent_once_and_text_goes_round_it() {
+        let mut g = Gallery::new(preview::Protocol::Sixel);
+        let p = pic(1, 4, 3, 2, "<SIXEL>");
+        let first = run(
+            &mut g,
+            &["title", "ab", "cd", "end"],
+            std::slice::from_ref(&p),
+        );
+        assert_eq!(first.matches("<SIXEL>").count(), 1, "{first:?}");
+        assert!(
+            first.contains("title") && first.contains("end"),
+            "{first:?}"
+        );
+        // the same screen again: nothing at all
+        assert_eq!(
+            run(
+                &mut g,
+                &["title", "ab", "cd", "end"],
+                std::slice::from_ref(&p)
+            ),
+            ""
+        );
+        // a line under the picture changes: left of it, then right of it
+        let next = run(
+            &mut g,
+            &["title", "0123456789", "cd", "end"],
+            std::slice::from_ref(&p),
+        );
+        assert!(!next.contains("<SIXEL>"), "{next:?}");
+        assert!(next.contains("\x1b[2;1H0123\x1b[2;8H789"), "{next:?}");
+        assert!(!next.contains("456"), "{next:?}");
+        // only that line
+        assert!(!next.contains("title") && !next.contains("cd"), "{next:?}");
+    }
+
+    #[test]
+    fn a_picture_that_goes_has_its_rows_written_through() {
+        let mut g = Gallery::new(preview::Protocol::Sixel);
+        let p = pic(1, 0, 4, 2, "<A>");
+        run(&mut g, &["t", "", "", "e"], std::slice::from_ref(&p));
+        let gone = run(&mut g, &["t", "", "", "e"], &[]);
+        // rows 1 and 2 cleared from their first cell, row 0 and 3 left
+        assert!(
+            gone.contains("\x1b[2;1H\x1b[K") && gone.contains("\x1b[3;1H\x1b[K"),
+            "{gone:?}"
+        );
+        assert!(!gone.contains('t') && !gone.contains('e'), "{gone:?}");
+        // and another in its place is sent
+        let q = pic(1, 0, 4, 2, "<B>");
+        let back = run(&mut g, &["t", "", "", "e"], std::slice::from_ref(&q));
+        assert!(back.contains("<B>") && !back.contains("<A>"), "{back:?}");
+    }
+
+    #[test]
+    fn kitty_deletes_and_places_again() {
+        let mut g = Gallery::new(preview::Protocol::Kitty);
+        let (a, b) = (pic(1, 0, 2, 1, "<A>"), pic(1, 5, 2, 1, "<B>"));
+        run(&mut g, &["t", "", "e"], &[a.clone(), b.clone()]);
+        // B goes: all deleted, A placed again, no text needed
+        let out = run(&mut g, &["t", "", "e"], std::slice::from_ref(&a));
+        assert!(out.starts_with("\x1b_Ga=d,d=A,q=2\x1b\\"), "{out:?}");
+        assert_eq!(out.matches("<A>").count(), 1, "{out:?}");
+        assert!(!out.contains("<B>"), "{out:?}");
+        // reset (a view drew over the screen): deleted, all written again
+        let mut sink = Vec::new();
+        g.reset_to(&mut sink).unwrap();
+        assert_eq!(String::from_utf8(sink).unwrap(), "\x1b_Ga=d,d=A,q=2\x1b\\");
+        let again = run(&mut g, &["t", "", "e"], std::slice::from_ref(&a));
+        assert!(
+            again.contains("<A>") && again.contains('t') && again.contains('e'),
+            "{again:?}"
+        );
+    }
 }
