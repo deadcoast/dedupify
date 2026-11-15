@@ -3973,3 +3973,39 @@ and windows-latest (fmt, clippy, the suite, the Windows bin tests).
   Windows at the launcher's next run, whose `pictures` line reads the
   workspace's screen (it looks for a section line now: `GROUP 001` is no
   longer drawn).
+
+---
+
+## VERIFICATION — dedupe 0.2.0, 2026-11-14
+
+The version is 0.2.0. `build.rs` puts the commit the binary is built from
+into it (`git rev-parse --short=7 HEAD`, `+` when `src`, `Cargo.toml`,
+`Cargo.lock` or `build.rs` differ from it); `dedupe --version` / `-V`
+prints `dedupe 0.2.0 · <commit>`, and the help page's first line ends
+with the same where its rule ends. Test: `version_names_the_build`
+(the three forms print one identical line; the help line ends with it
+at the rule's last cell, 99 at 100 columns). Here at 2533872: 144 unit,
+40 end to end; clippy `-D warnings` and fmt clean.
+
+## The 0.2.0 binaries
+
+| step | observed |
+| --- | --- |
+| tag `v0.2.0` pushed from this session | refused twice, HTTP 403 on `refs/tags/v0.2.0`; branch pushes go through, tags do not |
+| `release.yml` on 1b660c0 (`[release]`), run 43655543291 | green: Windows x64 (MSVC, windows-latest) and Linux x64 built with `--release --locked`; publish skipped (no tag) |
+| Windows artifact | `dedupe-v0.2.0-x86_64-pc-windows-msvc.zip`, its SHA-256 file checks; `dedupe.exe` 29,874,176 bytes, SHA-256 `2734d20f9981d1c2415b603325ea26397d440269d8544acb81971f3665c600f9`, carries `1b660c0` and `0.2.0` |
+| written to `C:\github\dedupify\target\release\dedupe.exe` | the file there has the same size and SHA-256 (read back through the connected folder) |
+| CI on 1b660c0, run 43655543232 | ubuntu-latest green; windows-latest cancelled during its tests by the push of 4972442 (one run per branch, the newer cancels the older) |
+| 4972442 (the owner's docs, merged) | `src`, `tests`, `Cargo.toml`, `Cargo.lock`, `build.rs`, `.github` identical to 1b660c0, so the binary above is this tree's |
+
+The commit carrying this section runs CI on both systems.
+
+## 0.2.0 Not verified here
+
+- The binary run on the owner's machine. Its first run prints
+  `dedupe 0.2.0 · 1b660c0` for `dedupe --version`; a local
+  `cargo build --release` replaces it with one naming the local HEAD.
+- The GitHub release: it is published by a tag `v0.2.0` pushed from a
+  clone whose credentials may push tags (`git tag v0.2.0` then
+  `git push origin v0.2.0`); the workflow checks the tag against
+  Cargo.toml and attaches both archives and their SHA-256 files.
