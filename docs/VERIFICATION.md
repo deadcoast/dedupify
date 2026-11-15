@@ -4132,6 +4132,15 @@ inside 40 to 200 columns). Suite here: 148 unit, 42 end to end; clippy
 `-D warnings` and fmt clean, clippy for the Windows target. The Windows
 launcher gains `batch + undo`, the same round trip as `milk + undo`.
 
+CI on 1c61c98, run 43666962578: ubuntu-latest green; windows-latest
+failed one test, `keepers_are_said_as_short_as_says_them`, whose input
+`b/c` Windows displays as typed while the walk gives `b\c` — the test's
+input, not the program's: it now builds the path with the system's
+separator. The release build of 1c61c98, run 43666962504, green;
+`dedupe.exe` 30,131,712 bytes, SHA-256 `43e18188…72310`, written to
+`C:\github\dedupify\target\release\dedupe.exe` and read back with the
+same hash. The commit carrying this paragraph runs CI again.
+
 ## Phase 18 Not verified here
 
 - Batch on Windows, and its end bar's `o` opening `_milked` in

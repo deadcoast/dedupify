@@ -675,10 +675,11 @@ mod tests {
             format!("2020{sep}01-Jan, 02-Feb, 03-Mar")
         );
         assert_eq!(keepers_words(&set(&[""]), root), "library");
-        assert_eq!(
-            keepers_words(&set(&["a", "b/c"]), root),
-            format!("a, b{sep}c")
-        );
+        // paths as the walk gives them: in the system's separator
+        let two: BTreeSet<PathBuf> = [PathBuf::from("a"), Path::new("b").join("c")]
+            .into_iter()
+            .collect();
+        assert_eq!(keepers_words(&two, root), format!("a, b{sep}c"));
         let many: Vec<String> = (1..=12)
             .flat_map(|m| [format!("2019/{m:02}"), format!("2020/{m:02}")])
             .collect();
