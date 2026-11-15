@@ -4050,3 +4050,9 @@ line at every width; the end-to-end workspace test reads the keycaps
 through a pseudo-terminal, and the resize test the cursor's file in
 place of the removed `group N/M`. Suite here: 146 unit, 40 end to end;
 clippy `-D warnings` and fmt clean, and clippy for the Windows target.
+
+CI on 979cc5d: run 43659438529 green on ubuntu-latest and windows-latest
+(the Windows suite of the 0.2.0 tree with it). Release build, run
+43659438565: `dedupe.exe` 29,919,744 bytes, SHA-256 `bc1daff3…cab96`,
+written to `C:\github\dedupify\target\release\dedupe.exe` and read back
+with the same hash.
