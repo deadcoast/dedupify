@@ -4009,3 +4009,44 @@ The commit carrying this section runs CI on both systems.
   clone whose credentials may push tags (`git tag v0.2.0` then
   `git push origin v0.2.0`); the workflow checks the tag against
   Cargo.toml and attaches both archives and their SHA-256 files.
+
+---
+
+## VERIFICATION — the workspace's keys, 2026-11-14
+
+The owner's finding: thirteen keys spelled out across the bottom of the
+workspace in two lines of plain words, under a status line. Reviewed as
+drawn (cell renderer, as in § Phase 17 §10), at 150 × 40, 100 × 30,
+80 × 24, 60 × 24 and 40 × 24, and changed:
+
+| before | now |
+| --- | --- |
+| three lines under the gauge: status, eleven navigation keys, the action bar | one line: what is chosen, then the keys that act on it as keycaps |
+| `group 1/12` on the status line | gone: the pointer shows where the cursor is |
+| `s sort`, `/ filter` in the key line | `s as listed ─ / filter` on the groups' frame, the state after its key |
+| `k keeper`, `v view`, `o reveal`, `f keep this folder`, `c other shots` in the key line | on the comparison's bottom edge, only those that act on the file under the cursor: on a dupe `v k f o`, on the keeper `v f o` |
+| `g`, `a`, `n`, `u`, `q`, PgUp/PgDn/Home/End in the key line | on the card `?` opens, with every other key |
+| keys as letters before words | keycaps: the key bold in amber on a chip (`[k]` without colour) |
+
+The body gains the two lines (the screen's chrome is four lines: the
+title, a blank, the gauge, the bottom line). At 80 columns the bottom
+line reads `13 selected  3.03 MB   [m] milk → _milked  [p] purge →
+Recycle Bin  [?] keys`; at 60 `13 selected  3.03 MB   [m] milk  [p]
+purge  [?] keys`; at 40 `13 selected   [m] milk  [?] keys` — `?` is
+never dropped, the keys before it go first.
+
+The key card: framed over the middle of the screen, the screen under it
+faded three quarters of the way to the ground, the title and the bottom
+line left as they are; MOVE, CHOOSE, LOOK, ACT in two columns, the caps
+set right against their words; short words where the long would not
+fit (80 columns). `?` or esc closes it, esc then no longer leaves.
+
+Tests: `question_mark_lays_every_key_on_a_card_and_esc_takes_it_away`
+(six sizes from 40 × 16 to 200 × 50: the card once, every kind and key
+where there are 24 rows, every line inside the width, the title and the
+bottom line unchanged, esc closes then leaves);
+`the_pair_keys_follow_the_cursor`; the screen test reads the one bottom
+line at every width; the end-to-end workspace test reads the keycaps
+through a pseudo-terminal, and the resize test the cursor's file in
+place of the removed `group N/M`. Suite here: 146 unit, 40 end to end;
+clippy `-D warnings` and fmt clean, and clippy for the Windows target.

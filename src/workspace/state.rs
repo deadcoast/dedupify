@@ -194,6 +194,9 @@ pub struct State {
     pub changes: usize,
     /// One status note, cleared by the next key.
     pub message: Option<String>,
+    /// `?`: the key map in place of the comparison (of the groups on a
+    /// narrow screen) until `?` or esc; the keys still act under it.
+    pub keys_open: bool,
     /// The first body line drawn: the fold's lines are not the rows (other
     /// groups fold to a line, other sections too), so the screen scrolls
     /// them itself and keeps its place here.
@@ -220,7 +223,7 @@ pub fn all_rows(layout: &Layout) -> Vec<Row> {
 }
 
 /// The folder a listed path sits in (`/` and `\` both separators).
-fn folder_of(shown: &str) -> &str {
+pub(super) fn folder_of(shown: &str) -> &str {
     shown.rfind(['/', '\\']).map_or("", |i| &shown[..i])
 }
 
@@ -275,6 +278,7 @@ impl State {
             mode: Mode::Browse,
             changes: 0,
             message: None,
+            keys_open: false,
             vtop: Cell::new(0),
             cursor_at: Cell::new(None),
         };
@@ -636,7 +640,7 @@ impl State {
 
     /// The (group, member) a per-file key works on: the member under the
     /// cursor, or on a header the group's first member after the keeper.
-    fn target(&self) -> Option<(usize, usize)> {
+    pub(super) fn target(&self) -> Option<(usize, usize)> {
         match self.rows.get(self.cursor)? {
             Row::Member(g, m) => Some((*g, *m)),
             Row::Head(g) => (self.layout.groups[*g].members.len() > 1).then_some((*g, 1)),
@@ -645,6 +649,10 @@ impl State {
 
     pub fn handle(&mut self, key: Key) -> Effect {
         self.message = None;
+        if self.keys_open && self.mode == Mode::Browse && matches!(key, Key::Char('?') | Key::Esc) {
+            self.keys_open = false;
+            return Effect::None;
+        }
         match self.mode.clone() {
             Mode::GoTo(mut typed) => {
                 match key {
@@ -853,6 +861,10 @@ impl State {
                         self.message = Some("nothing changed this sitting".into());
                         Effect::None
                     }
+                }
+                Key::Char('?') => {
+                    self.keys_open = true;
+                    Effect::None
                 }
                 Key::Char('q') | Key::Esc | Key::Quit => Effect::Quit,
                 _ => Effect::None,

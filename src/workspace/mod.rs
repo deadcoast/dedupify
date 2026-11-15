@@ -276,7 +276,7 @@ fn pause(r: &Renderer, parts: &[(&str, &str)]) -> Key {
         .map(|(a, b)| (a.to_string(), b.to_string()))
         .collect();
     r.blank();
-    print!("{}", screen::fit_parts(t, t.glyphs.pointer, &v, t.width));
+    print!("{}", screen::fit_parts(t, &v, t.width));
     let _ = io::stdout().flush();
     let key = (|| -> io::Result<Key> {
         terminal::enable_raw_mode()?;
@@ -360,7 +360,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
     let (mut cols, mut rows) = term_size(r);
     // the keepers `f` changed: (new, old), to take the rule back
     let mut preferred: Vec<(PathBuf, PathBuf)> = Vec::new();
-    let mut st = State::new(layout_of(f, &inv.root), rows.saturating_sub(6));
+    let mut st = State::new(layout_of(f, &inv.root), rows.saturating_sub(4));
     let mut lines = Listing::of(f, inv, r, &st, cols);
     let protocol = preview::detect();
 
@@ -468,7 +468,7 @@ pub(crate) fn run(f: &mut Found, inv: &Invocation, r: &Renderer) -> i32 {
             Ok(Input::Key(k)) => k,
             Ok(Input::Resize) => {
                 (cols, rows) = term_size(r);
-                st.set_height(rows.saturating_sub(6));
+                st.set_height(rows.saturating_sub(4));
                 lines = Listing::of(f, inv, r, &st, cols);
                 continue;
             }
@@ -836,7 +836,6 @@ fn view(
     let _ = execute!(out, cursor::MoveTo(0, (rows - 1) as u16));
     let bar = screen::fit_parts(
         t,
-        t.glyphs.pointer,
         &[
             ("any key".into(), "back".into()),
             ("o".into(), "reveal the member".into()),

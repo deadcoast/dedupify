@@ -158,6 +158,50 @@ pub fn cut_sgr(s: &str, max: usize) -> String {
     out
 }
 
+/// The cells `from..to` of a line with SGR escapes, in the colours they
+/// have there (every escape before them is kept, so the state carries),
+/// padded with spaces to `to` when the line is shorter and `to` is not
+/// `usize::MAX`; a wide character split by an edge is a space. Ends with
+/// a reset when the line has escapes.
+pub fn slice_sgr(s: &str, from: usize, to: usize) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut at = 0;
+    let mut styled = false;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            styled = true;
+            out.push(c);
+            for d in chars.by_ref() {
+                out.push(d);
+                if d.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+        let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+        if at >= to {
+            break;
+        }
+        if at >= from && at + w <= to {
+            out.push(c);
+        } else if at + w > from && at < to {
+            // straddles an edge: its cells inside as spaces
+            let inside = (at + w).min(to) - at.max(from);
+            out.push_str(&" ".repeat(inside));
+        }
+        at += w;
+    }
+    if to != usize::MAX && at < to {
+        out.push_str(&" ".repeat(to - at.max(from)));
+    }
+    if styled {
+        out.push_str("\x1b[0m");
+    }
+    out
+}
+
 pub fn strip_sgr(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();

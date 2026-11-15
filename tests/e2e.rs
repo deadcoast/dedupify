@@ -2041,12 +2041,16 @@ fn find_on_a_terminal_acts_from_the_result() {
         eprintln!("no pseudo-terminal (script(1), or a Windows pseudo console); skipped");
         return;
     };
-    // the groups screen: marks, the selection count, the keys
-    assert!(out.contains("selected"), "the status line\n{out}");
-    assert!(out.contains("m milk"), "the bar\n{out}");
-    assert!(out.contains("p purge"), "{out}");
-    assert!(out.contains("space select"), "{out}");
-    assert!(out.contains("k keeper"), "{out}");
+    // the groups screen: the selection count and the keys that act on
+    // it as keycaps, `?` for the rest; the pair's keys on its frame
+    let cap = |k: &str, words: &str| {
+        out.contains(&format!(" {k}  {words}")) || out.contains(&format!("[{k}] {words}"))
+    };
+    assert!(out.contains("selected"), "the bottom line\n{out}");
+    assert!(cap("m", "milk"), "the bottom line\n{out}");
+    assert!(cap("p", "purge"), "{out}");
+    assert!(cap("?", "keys"), "{out}");
+    assert!(out.contains("k keep this"), "{out}");
     // n: the preview, with the native dry-run command named
     assert!(out.contains("dedupe milk . img --dry-run"), "{out}");
     assert!(out.contains("would~"), "{out}");
@@ -2057,13 +2061,13 @@ fn find_on_a_terminal_acts_from_the_result() {
         assert_eq!(out.matches("SCAN ").count(), 1, "no second scan\n{out}");
     }
     assert!(out.contains("7 moved"), "{out}");
-    assert!(out.contains("u undo it"), "{out}");
+    assert!(cap("u", "undo it"), "{out}");
     // u: reversed on the spot
     assert!(out.contains("7 restored"), "{out}");
     assert_eq!(files(&fx.root), before, "tree back as it was");
     // piped, no workspace, the typed forms instead
     let (_, piped, _) = run(&fx, &["find", ".", "img"]);
-    assert!(!piped.contains("m milk"), "{piped}");
+    assert!(!piped.contains("milk \u{2192} _milked"), "{piped}");
     assert!(piped.contains("next   dedupe milk . img"), "{piped}");
     // shown by `--nocapture`: the Windows launcher's summary reads it
     eprintln!("the workspace driven through a pseudo-terminal: 7 moved, 7 restored");
@@ -2072,7 +2076,7 @@ fn find_on_a_terminal_acts_from_the_result() {
 /// A resize during a sitting (Phase 16, TECH-12; Phase 9 left it
 /// unverified): the screen is redrawn at the new width — its rules 78
 /// cells at 80 columns, none wider than the terminal — with the cursor's
-/// group and the selection as they were before.
+/// file and the selection as they were before.
 #[cfg(any(unix, windows))]
 #[test]
 fn a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection() {
@@ -2107,22 +2111,29 @@ fn a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection() {
         rules(&after).iter().all(|&n| n <= 80),
         "nothing wider\n{after}"
     );
-    // the status line's selection and cursor group, last before and after
-    let status = |s: &str| -> Option<(String, String)> {
-        let l = s
-            .lines()
-            .rev()
-            .find(|l| l.contains(" selected") && l.contains("group "))?;
-        let words: Vec<&str> = l.split_whitespace().collect();
+    // the selection on the bottom line and the file on the cursor's line,
+    // last before and after (the cursor's line is the one the pointer is
+    // on; the file is the longest of the tree's names on it)
+    let names: Vec<String> = files(&fx.root)
+        .iter()
+        .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
+        .collect();
+    let state = |s: &str| -> Option<(String, String)> {
+        let sel = s.lines().rev().find(|l| l.contains(" selected"))?;
+        let words: Vec<&str> = sel.split_whitespace().collect();
         let n = words.iter().position(|w| *w == "selected")?;
-        let g = words.iter().position(|w| *w == "group")?;
-        Some((words[n - 1].to_string(), words.get(g + 1)?.to_string()))
+        let cur = s.lines().rev().find(|l| l.contains('▸'))?;
+        let file = names
+            .iter()
+            .filter(|n| cur.contains(n.as_str()))
+            .max_by_key(|n| n.len())?;
+        Some((words[n - 1].to_string(), file.clone()))
     };
-    let (b, a) = (status(&before), status(&after));
-    assert!(b.is_some(), "a status line before\n{before}");
+    let (b, a) = (state(&before), state(&after));
+    assert!(b.is_some(), "a selection and a cursor before\n{before}");
     assert_eq!(
         a, b,
-        "the selection and the cursor's group kept\nbefore {before}\nafter {after}"
+        "the selection and the cursor's file kept\nbefore {before}\nafter {after}"
     );
 }
 

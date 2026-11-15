@@ -77,13 +77,28 @@ pub const PANELS_MIN: usize = 100;
 /// A picture's fade from the panel's ground, once it arrives.
 pub const FADE: Duration = Duration::from_millis(220);
 
-/// `▸ m milk 12 → _milked  p purge …` fitted to `width`: parts whose text
-/// would overflow keep their first two words, then their first, then the
-/// trailing parts are dropped. Returns the painted line.
-pub fn fit_parts(t: &Theme, lead: &str, parts: &[(String, String)], width_cells: usize) -> String {
-    let render = |take: usize, count: usize| -> (String, String) {
-        let mut plain = format!(" {lead}");
-        let mut painted = format!(" {}", t.paint_bold(Paint::Keep, lead));
+/// The chip a key sits on: a shade above the ground.
+const CHIP: Rgb = Rgb(0x2B, 0x28, 0x22);
+
+/// A key as a keycap: the key bold in amber on its chip, a cell of chip
+/// either side; `[k]` without colour. Its width is the key's and two.
+pub fn cap(t: &Theme, key: &str) -> String {
+    if t.color {
+        let Rgb(r, g, b) = AMBER;
+        let Rgb(cr, cg, cb) = CHIP;
+        format!("\x1b[1;38;2;{r};{g};{b};48;2;{cr};{cg};{cb}m {key} \x1b[0m")
+    } else {
+        format!("[{key}]")
+    }
+}
+
+/// Keys on a line: each a keycap and its words dim, two cells between;
+/// the words shorten to their first, then the last keys go. A bar's
+/// most used keys come first. Its width is `width_cells` at most.
+pub fn fit_parts(t: &Theme, parts: &[(String, String)], width_cells: usize) -> String {
+    let render = |take: usize, count: usize| -> (usize, String) {
+        let mut w = 0;
+        let mut painted = String::new();
         for (key, text) in parts.iter().take(count) {
             let text: String = if take == 0 {
                 text.clone()
@@ -93,31 +108,52 @@ pub fn fit_parts(t: &Theme, lead: &str, parts: &[(String, String)], width_cells:
                     .collect::<Vec<_>>()
                     .join(" ")
             };
-            let sep = if plain.trim().is_empty() { " " } else { "  " };
-            plain.push_str(&format!("{sep}{key} {text}"));
+            let sep = if w == 0 { " " } else { "  " };
+            w += width(sep) + width(key) + 2 + 1 + width(&text);
             painted.push_str(&format!(
                 "{sep}{} {}",
-                t.paint_bold(Paint::Keep, key),
-                t.paint(Paint::Plate, &text)
+                cap(t, key),
+                t.paint_rgb(DIM.lerp(PLATE, 0.35), &text)
             ));
         }
-        (plain, painted)
+        (w, painted)
     };
-    // whole texts, then two words, then one; then the trailing parts go
-    // (the bars list the most used keys first)
-    for take in [0usize, 2, 1] {
+    for take in [0usize, 1] {
         let c = render(take, parts.len());
-        if width(&c.0) <= width_cells {
+        if c.0 <= width_cells {
             return c.1;
         }
     }
     for count in (1..parts.len()).rev() {
         let c = render(1, count);
-        if width(&c.0) <= width_cells {
+        if c.0 <= width_cells {
             return c.1;
         }
     }
     render(1, 1).1
+}
+
+/// Keys on a frame's edge, as many as fit `room` in order: the key lit,
+/// its words in the plate's dim, the edge's rule between them. With the
+/// cells it takes.
+fn edge_keys(t: &Theme, edge: Rgb, items: &[(String, String)], room: usize) -> (String, usize) {
+    let hz = if t.unicode { "─" } else { "-" };
+    let mut out = String::new();
+    let mut w = 0;
+    for (key, words) in items {
+        let add = width(key) + 1 + width(words) + if w == 0 { 0 } else { 3 };
+        if w + add > room {
+            break;
+        }
+        if w > 0 {
+            out.push_str(&t.paint_rgb(edge, &format!(" {hz} ")));
+        }
+        out.push_str(&t.paint_rgb_bold(AMBER, key));
+        out.push(' ');
+        out.push_str(&t.paint_rgb(DIM.lerp(PLATE, 0.35), words));
+        w += add;
+    }
+    (out, w)
 }
 
 /// `text` on the cursor's ground — its kind's colour, faint — across the
@@ -136,24 +172,114 @@ fn lit(t: &Theme, text: &str, hue: Rgb, max: usize) -> String {
     )
 }
 
+/// A line faded toward the ground, as under a card: every colour it sets
+/// three quarters of the way to the ground, the text it leaves in the
+/// terminal's colour a dim grey.
+fn fade(t: &Theme, line: &str) -> String {
+    if !t.color {
+        return line.to_string();
+    }
+    let base = GROOVE.lerp(GROUND, 0.2);
+    let Rgb(r, g, b) = base;
+    let dim_fg = format!("\x1b[38;2;{r};{g};{b}m");
+    let mut out = dim_fg.clone();
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' || chars.peek() != Some(&'[') {
+            out.push(c);
+            continue;
+        }
+        chars.next();
+        let mut params = String::new();
+        let mut fin = 'm';
+        for d in chars.by_ref() {
+            if d.is_ascii_alphabetic() {
+                fin = d;
+                break;
+            }
+            params.push(d);
+        }
+        if fin != 'm' {
+            out.push_str(&format!("\x1b[{params}{fin}"));
+            continue;
+        }
+        let p: Vec<&str> = params.split(';').collect();
+        let mut kept: Vec<String> = Vec::new();
+        let mut i = 0;
+        let mut reset = false;
+        while i < p.len() {
+            match p[i] {
+                "38" | "48" if p.get(i + 1) == Some(&"2") && i + 4 < p.len() => {
+                    let n = |k: usize| p[i + k].parse::<u8>().unwrap_or(0);
+                    let Rgb(r, g, b) = Rgb(n(2), n(3), n(4)).lerp(GROUND, 0.75);
+                    kept.push(format!("{};2;{r};{g};{b}", p[i]));
+                    i += 5;
+                }
+                "0" | "" => {
+                    reset = true;
+                    i += 1;
+                }
+                "1" => i += 1,
+                other => {
+                    kept.push(other.into());
+                    i += 1;
+                }
+            }
+        }
+        // a reset comes back to the dim grey, then what the escape sets
+        if reset {
+            out.push_str("\x1b[0m");
+            out.push_str(&dim_fg);
+        }
+        if !kept.is_empty() {
+            out.push_str(&format!("\x1b[{}m", kept.join(";")));
+        }
+    }
+    out.push_str("\x1b[0m");
+    out
+}
+
 /// A panel's frame around `inner` lines `w` cells wide (the frame adds
-/// two), its title in the top edge; every line padded to the frame, so
-/// nothing — a cursor's ground included — runs past it.
-fn framed(t: &Theme, title: &str, edge: Rgb, inner: &[String], w: usize, h: usize) -> Vec<String> {
+/// two): its title in the top edge on the left, `tail` (`tail_w` cells)
+/// in it on the right, `foot` (`foot_w` cells) in the bottom edge on the
+/// right; every line padded to the frame, so nothing — a cursor's ground
+/// included — runs past it. A label the edge has no room for is left off.
+#[allow(clippy::too_many_arguments)]
+fn framed(
+    t: &Theme,
+    title: &str,
+    (tail, tail_w): (&str, usize),
+    (foot, foot_w): (&str, usize),
+    edge: Rgb,
+    inner: &[String],
+    w: usize,
+    h: usize,
+) -> Vec<String> {
     let (tl, tr, bl, br, hz, vt) = if t.unicode {
         ("╭", "╮", "╰", "╯", "─", "│")
     } else {
         ("+", "+", "+", "+", "-", "|")
     };
+    let rule = |n: usize| t.paint_rgb(edge, &hz.repeat(n));
     let mut out = Vec::with_capacity(h + 2);
     let title_w = visible_width(title);
-    let rest = w.saturating_sub(title_w + 3);
     if title_w > 0 && w > title_w + 3 {
-        out.push(format!(
-            "{}{title}{}",
+        let mut rest = w - (title_w + 3);
+        let tail_fits = tail_w > 0 && rest >= tail_w + 4;
+        if tail_fits {
+            rest -= tail_w + 3;
+        }
+        let mut top = format!(
+            "{}{title}{}{}",
             t.paint_rgb(edge, &format!("{tl}{hz} ")),
-            t.paint_rgb(edge, &format!(" {}{tr}", hz.repeat(rest)))
-        ));
+            t.paint_rgb(edge, " "),
+            rule(rest)
+        );
+        if tail_fits {
+            top.push_str(&format!(" {tail} {}", rule(1)));
+        }
+        top.push_str(&t.paint_rgb(edge, tr));
+        out.push(top);
     } else {
         out.push(t.paint_rgb(edge, &format!("{tl}{}{tr}", hz.repeat(w))));
     }
@@ -169,7 +295,16 @@ fn framed(t: &Theme, title: &str, edge: Rgb, inner: &[String], w: usize, h: usiz
         let pad = w.saturating_sub(visible_width(&l));
         out.push(format!("{side}{l}{}{side}", " ".repeat(pad)));
     }
-    out.push(t.paint_rgb(edge, &format!("{bl}{}{br}", hz.repeat(w))));
+    if foot_w > 0 && w >= foot_w + 4 {
+        out.push(format!(
+            "{}{} {foot} {}",
+            t.paint_rgb(edge, bl),
+            rule(w - foot_w - 3),
+            t.paint_rgb(edge, &format!("{hz}{br}"))
+        ));
+    } else {
+        out.push(t.paint_rgb(edge, &format!("{bl}{}{br}", hz.repeat(w))));
+    }
     out
 }
 
@@ -835,6 +970,368 @@ impl State {
     }
 
     /// The gauge: what is chosen, of all the groups shown can free, in
+    /// The keys for what the comparison shows, most used first: the two
+    /// side by side; this file as the keeper, its folder's copies kept;
+    /// its folder.
+    fn pair_keys(&self) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = Vec::new();
+        if self.target().is_some() {
+            v.push(("v".into(), "view".into()));
+        }
+        match self.rows.get(self.cursor).copied() {
+            Some(Row::Member(g, m)) => {
+                if m > 0 {
+                    v.push(("k".into(), "keep this".into()));
+                }
+                let folder = folder_of(&self.layout.groups[g].members[m].shown).to_string();
+                v.push((
+                    "f".into(),
+                    if self.prefer.as_deref() == Some(folder.as_str()) {
+                        "any folder".into()
+                    } else {
+                        "keep this folder".into()
+                    },
+                ));
+                v.push(("o".into(), "reveal".into()));
+            }
+            Some(Row::Head(g)) => {
+                if !self.shots(g).is_empty() {
+                    v.push(("c".into(), "other shots".into()));
+                }
+                v.push(("o".into(), "reveal".into()));
+            }
+            None => {}
+        }
+        v
+    }
+
+    /// The bottom line: on the left what is chosen of what there is (or
+    /// the prompt of a mode), on the right the keys that act on it as
+    /// keycaps, `?` for the rest.
+    fn bottom_line(&self, t: &Theme, panels: bool, list_keys: &[(String, String)]) -> String {
+        let g = t.glyphs;
+        let (n, bytes, hand) = self.stats();
+        let all: u64 = self
+            .view
+            .iter()
+            .map(|&g| self.layout.groups[g].reclaim)
+            .sum();
+        let pairs = |v: &[(&str, &str)]| -> Vec<(String, String)> {
+            v.iter()
+                .map(|(a, b)| (a.to_string(), b.to_string()))
+                .collect()
+        };
+        let lit = |s: &str| t.paint_rgb_bold(PLATE, s);
+        let dim = |s: &str| t.paint_rgb(DIM, s);
+        let (left, keys): (Vec<String>, Vec<(String, String)>) = match &self.mode {
+            Mode::Browse => {
+                let mut l = vec![String::new()];
+                if hand > 0 {
+                    l.push(t.paint(Paint::Warn, &format!("{hand} by hand")));
+                }
+                if let Some(p) = &self.prefer {
+                    l.push(format!(
+                        "{} {}",
+                        dim("keeping in"),
+                        t.paint(Paint::Plate, if p.is_empty() { "." } else { p })
+                    ));
+                }
+                // on one screen the groups' frame carries these
+                if !panels {
+                    if self.view.len() < self.layout.groups.len() {
+                        l.push(dim(&format!(
+                            "{} of {} groups",
+                            fmt_count(self.view.len() as u64),
+                            fmt_count(self.layout.groups.len() as u64)
+                        )));
+                    }
+                    if self.order != Order::Listing {
+                        l.push(dim(&list_keys[0].1));
+                    }
+                }
+                if let Some(m) = &self.message {
+                    l.push(t.paint(Paint::Warn, m));
+                }
+                let mut k: Vec<(String, String)> = Vec::new();
+                if n > 0 {
+                    k.push((
+                        "m".into(),
+                        format!("milk {} {}", g.arrow, crate::MILKED_DIR),
+                    ));
+                    k.push(("p".into(), format!("purge {} Recycle Bin", g.arrow)));
+                } else {
+                    k.push(("space".into(), "select".into()));
+                }
+                k.push(("?".into(), "keys".into()));
+                (l, k)
+            }
+            Mode::Confirm(act) => {
+                let (verb, dest) = match act {
+                    Act::Milk => ("milk", crate::MILKED_DIR),
+                    Act::Purge => ("purge", "Recycle Bin"),
+                };
+                let mut what = format!(
+                    "{} {} {} {}",
+                    t.paint_rgb_bold(AMBER, verb),
+                    lit(&fmt_count(n)),
+                    dim(&format!("{} {dest} ·", g.arrow)),
+                    lit(&fmt_bytes(bytes))
+                );
+                if hand > 0 {
+                    what.push_str(&format!(
+                        "  {}",
+                        t.paint(Paint::Warn, &format!("{hand} by hand"))
+                    ));
+                }
+                let shots = self.chosen_shots();
+                if shots > 0 {
+                    what.push_str(&format!(
+                        "  {}",
+                        t.paint(
+                            Paint::Warn,
+                            &format!("{shots} other shot{}", if shots == 1 { "" } else { "s" })
+                        )
+                    ));
+                }
+                (vec![what], pairs(&[("enter", "go"), ("esc", "back")]))
+            }
+            Mode::Filter { typed, .. } => (
+                vec![format!(
+                    "{} {}{}  {}",
+                    t.paint_rgb_bold(AMBER, "/"),
+                    lit(typed),
+                    t.paint_rgb(AMBER, "_"),
+                    dim(&format!(
+                        "{} of {} groups",
+                        fmt_count(self.view.len() as u64),
+                        fmt_count(self.layout.groups.len() as u64)
+                    ))
+                )],
+                pairs(&[("enter", "keep"), ("esc", "back")]),
+            ),
+            Mode::GoTo(typed) => (
+                vec![format!(
+                    "{} {}{}  {}",
+                    dim("go to group"),
+                    lit(typed),
+                    t.paint_rgb(AMBER, "_"),
+                    dim(&format!("1–{}", self.layout.groups.len()))
+                )],
+                pairs(&[("enter", "go"), ("esc", "back")]),
+            ),
+        };
+        // what is chosen, as far as the line lets it say: of what there
+        // is, then the bytes alone, then the count alone
+        let browse = matches!(self.mode, Mode::Browse);
+        let forms = [
+            format!(
+                "{} {}  {} {} {}",
+                lit(&fmt_count(n)),
+                dim("selected"),
+                lit(&fmt_bytes(bytes)),
+                dim("of"),
+                dim(&fmt_bytes(all.max(bytes)))
+            ),
+            format!(
+                "{} {}  {}",
+                lit(&fmt_count(n)),
+                dim("selected"),
+                lit(&fmt_bytes(bytes))
+            ),
+            format!("{} {}", lit(&fmt_count(n)), dim("selected")),
+        ];
+        // the keys keep the room the shortest of those leaves them
+        let least = if browse {
+            visible_width(&forms[2]) + 3
+        } else {
+            24
+        };
+        let keys_room = t.width.saturating_sub(least + 1).max(12);
+        // `?` is the way to every other key: the keys before it go first
+        let mut keys = keys;
+        let tightest = |k: &[(String, String)]| -> usize {
+            k.iter()
+                .map(|(key, words)| {
+                    width(key) + 3 + width(words.split_whitespace().next().unwrap_or(""))
+                })
+                .sum::<usize>()
+                + 2 * k.len().saturating_sub(1)
+                + 1
+        };
+        while keys.len() > 2 && tightest(&keys) > keys_room {
+            keys.remove(keys.len() - 2);
+        }
+        let right = fit_parts(t, &keys, keys_room);
+        let right_w = visible_width(&right);
+        let room = t.width.saturating_sub(right_w + 3);
+        let joined = |l: &[String]| format!(" {}", l.join(&dim("  ·  ")));
+        let mut l = left;
+        if browse {
+            let extras = l.split_off(1);
+            l = forms
+                .iter()
+                .map(|f| {
+                    let mut v = vec![f.clone()];
+                    v.extend(extras.iter().cloned());
+                    while v.len() > 1 && visible_width(&joined(&v)) > room {
+                        v.pop();
+                    }
+                    v
+                })
+                .find(|v| visible_width(&joined(v)) <= room)
+                .unwrap_or_else(|| vec![forms[2].clone()]);
+        } else {
+            while l.len() > 1 && visible_width(&joined(&l)) > room {
+                l.pop();
+            }
+        }
+        let mut left = joined(&l);
+        if visible_width(&left) > room {
+            left = crate::util::cut_sgr(&left, room);
+        }
+        let gap = t
+            .width
+            .saturating_sub(1 + visible_width(&left) + right_w)
+            .max(1);
+        format!("{left}{}{right}", " ".repeat(gap))
+    }
+
+    /// The key map `?` opens, on a card at most `w` × `h`: every key by
+    /// what it is for, four kinds in two columns, each key a keycap set
+    /// right against its words, the kind's name over the words; the words
+    /// shortened forms where the card is narrow. Framed, its title KEYS, `?` or esc to close on its edge.
+    fn key_card(&self, t: &Theme, w: usize, h: usize) -> Vec<String> {
+        let g = t.glyphs;
+        let ud = format!("{} {}", g.up, g.down);
+        // (key, words, words where the card is narrow)
+        type Entry<'a> = (&'a str, &'a str, &'a str);
+        let sections: [(&str, Vec<Entry>); 4] = [
+            (
+                "MOVE",
+                vec![
+                    (ud.as_str(), "a line", "a line"),
+                    ("PgUp PgDn", "a page", "a page"),
+                    ("Home End", "the first, the last", "first, last"),
+                    ("g", "go to a group by number", "go to group"),
+                ],
+            ),
+            (
+                "CHOOSE",
+                vec![
+                    ("space", "the file, or the group's copies", "file or group"),
+                    ("a", "every copy shown, or none", "all or none"),
+                    ("k", "keep this file instead", "keep this one"),
+                    ("f", "keep the copies in its folder", "keep its folder"),
+                    ("c", "the group's other shots too", "other shots too"),
+                ],
+            ),
+            (
+                "LOOK",
+                vec![
+                    ("v", "the two side by side", "side by side"),
+                    ("o", "show it in its folder", "show in folder"),
+                    ("/", "filter the groups by path", "filter by path"),
+                    ("s", "sort the groups", "sort"),
+                ],
+            ),
+            (
+                "ACT",
+                vec![
+                    ("m", "milk the selection to _milked", "milk"),
+                    ("p", "purge it to the Recycle Bin", "purge"),
+                    ("n", "preview it: a dry run", "dry run"),
+                    ("u", "undo the last change", "undo"),
+                    ("q", "leave", "leave"),
+                ],
+            ),
+        ];
+        let kw = sections
+            .iter()
+            .flat_map(|s| s.1.iter())
+            .map(|e| width(e.0) + 2)
+            .max()
+            .unwrap_or(3);
+        let words = |long: bool| -> usize {
+            sections
+                .iter()
+                .flat_map(|s| s.1.iter())
+                .map(|e| width(if long { e.1 } else { e.2 }))
+                .max()
+                .unwrap_or(0)
+        };
+        // a column: key, two cells, words; two columns with four between;
+        // the frame and a cell of room each side
+        let col = |long: bool| kw + 2 + words(long);
+        let span = |c: usize, two: bool| if two { 2 * c + 4 } else { c } + 4;
+        let (long, two) = [(true, true), (false, true), (true, false), (false, false)]
+            .into_iter()
+            .find(|&(l, two)| span(col(l), two) <= w)
+            .unwrap_or((false, false));
+        let cw = col(long);
+        let inner_w = span(cw, two) - 2;
+        let block = |(name, keys): &(&str, Vec<Entry>)| -> Vec<String> {
+            let mut v = vec![format!(
+                "{}{}",
+                " ".repeat(kw + 2),
+                t.paint_rgb_bold(AMBER, name)
+            )];
+            // the caps right-aligned on the words' column
+            for (k, l, sh) in keys {
+                let pad = kw - (width(k) + 2);
+                let text = crate::util::fit(if long { l } else { sh }, cw - kw - 2);
+                v.push(format!(
+                    "{}{}  {}",
+                    " ".repeat(pad),
+                    cap(t, k),
+                    t.paint_rgb(DIM.lerp(PLATE, 0.55), &text)
+                ));
+            }
+            v
+        };
+        let pad_to =
+            |l: &str, n: usize| format!("{l}{}", " ".repeat(n.saturating_sub(visible_width(l))));
+        let mut body: Vec<String> = vec![String::new()];
+        let groups: Vec<Vec<&(&str, Vec<Entry>)>> = if two {
+            sections.chunks(2).map(|c| c.iter().collect()).collect()
+        } else {
+            sections.iter().map(|s| vec![s]).collect()
+        };
+        for row in groups {
+            let blocks: Vec<Vec<String>> = row.iter().map(|s| block(s)).collect();
+            let n = blocks.iter().map(Vec::len).max().unwrap_or(0);
+            for i in 0..n {
+                let mut l = String::from(" ");
+                for (j, b) in blocks.iter().enumerate() {
+                    if j > 0 {
+                        l.push_str("    ");
+                    }
+                    l.push_str(&pad_to(b.get(i).map_or("", String::as_str), cw));
+                }
+                body.push(pad_to(&l, inner_w));
+            }
+            body.push(String::new());
+        }
+        // what does not fit the height is left off, the last kinds first
+        body.truncate(h.saturating_sub(2));
+        let edge = PLATE.lerp(GROOVE, 0.55);
+        let (foot, foot_w) = edge_keys(
+            t,
+            edge,
+            &[("?".into(), "or esc closes".into())],
+            inner_w.saturating_sub(8),
+        );
+        framed(
+            t,
+            &t.paint_rgb_bold(PLATE, "KEYS"),
+            ("", 0),
+            (&foot, foot_w),
+            edge,
+            &body,
+            inner_w,
+            body.len(),
+        )
+    }
+
     /// each kind's colour; `shown` rolls it.
     fn gauge_line(&self, t: &Theme, shown: Option<u64>) -> String {
         let (_, by) = self.chosen_in(&self.view);
@@ -874,7 +1371,8 @@ impl State {
     }
 
     /// The full screen, exactly `total_height` lines: the title, a blank
-    /// line, the body, the gauge, the status line, the keys. `lines` are
+    /// line, the body, the gauge, the bottom line (what is chosen and the
+    /// keys that act on it). `lines` are
     /// the full listing's lines by row (a group's files when it unfolds).
     pub fn screen(
         &self,
@@ -890,7 +1388,7 @@ impl State {
         let mut out: Vec<String> = Vec::with_capacity(total_height);
         out.push(title.to_string());
         out.push(String::new());
-        let body_rows = total_height.saturating_sub(6);
+        let body_rows = total_height.saturating_sub(4);
         // two panels when there is room for them: the groups, framed, and
         // the comparison; the groups' lines then fit the left frame
         let panels = t.width >= PANELS_MIN && body_rows >= 12;
@@ -1021,16 +1519,50 @@ impl State {
                 )
             ));
         }
+        // the keys that act on a panel sit on its edge; the rest are on `?`
+        let edge = PLATE.lerp(GROOVE, 0.75);
+        let shown = self.view.len();
+        let groups_n = self.layout.groups.len();
+        let list_keys: Vec<(String, String)> = {
+            let mut v = vec![("s".to_string(), self.order.words().to_string())];
+            v.push((
+                "/".into(),
+                if self.filter.is_empty() {
+                    "filter".into()
+                } else {
+                    self.filter.clone()
+                },
+            ));
+            v
+        };
         if panels {
-            let edge = PLATE.lerp(GROOVE, 0.75);
             let here = self.cursor_group().map(|g| &self.layout.groups[g]);
             let hue = here.map_or(PLATE, |g| g.kind.rgb());
-            let lt = format!(
-                "{}{}",
-                t.paint_rgb_bold(PLATE, "GROUPS"),
-                t.paint_rgb(DIM, &format!("  {}", self.order.words()))
+            let mut lt = t.paint_rgb_bold(PLATE, "GROUPS");
+            lt.push_str(&t.paint_rgb(
+                DIM,
+                &if shown < groups_n {
+                    format!(
+                        "  {} of {}",
+                        fmt_count(shown as u64),
+                        fmt_count(groups_n as u64)
+                    )
+                } else {
+                    format!("  {}", fmt_count(groups_n as u64))
+                },
+            ));
+            let room = (left_w - 2).saturating_sub(visible_width(&lt) + 8);
+            let (tail, tail_w) = edge_keys(t, edge, &list_keys, room);
+            let left = framed(
+                t,
+                &lt,
+                (&tail, tail_w),
+                ("", 0),
+                edge,
+                &list,
+                left_w - 2,
+                body,
             );
-            let left = framed(t, &lt, edge, &list, left_w - 2, body);
             let right_w = t.width.saturating_sub(left_w + 2).saturating_sub(2);
             let rt = match here {
                 Some(g) => t.paint_rgb_bold(
@@ -1047,7 +1579,19 @@ impl State {
             // the comparison sits in the middle of its frame
             let lift = body.saturating_sub(cmp.len()) / 2;
             cmp.splice(0..0, std::iter::repeat_n(String::new(), lift));
-            let right = framed(t, &rt, edge.lerp(hue, 0.45), &cmp, right_w, body);
+            let right_edge = edge.lerp(hue, 0.45);
+            let (foot, foot_w) =
+                edge_keys(t, right_edge, &self.pair_keys(), right_w.saturating_sub(6));
+            let right = framed(
+                t,
+                &rt,
+                ("", 0),
+                (&foot, foot_w),
+                right_edge,
+                &cmp,
+                right_w,
+                body,
+            );
             // the cursor's line counts the frame's top edge
             if let Some(c) = self.cursor_at.get() {
                 self.cursor_at.set(Some(c + 3));
@@ -1065,183 +1609,28 @@ impl State {
             }
         }
         out.push(self.gauge_line(t, frame.gauge));
-
-        // status: what is chosen, of what there is; where the cursor is
-        // or what a key said
-        let (n, bytes, hand) = self.stats();
-        let all: u64 = self
-            .view
-            .iter()
-            .map(|&g| self.layout.groups[g].reclaim)
-            .sum();
-        let mut left = format!(
-            " {} {}  {} {} {}",
-            t.paint_bold(Paint::Info, &fmt_count(n)),
-            t.paint_rgb(DIM, "selected"),
-            t.paint(Paint::Plate, &fmt_bytes(bytes)),
-            t.paint_rgb(DIM, "of"),
-            t.paint_rgb(DIM, &fmt_bytes(all.max(bytes)))
-        );
-        let mut left_plain = format!(
-            " {} selected  {} of {}",
-            fmt_count(n),
-            fmt_bytes(bytes),
-            fmt_bytes(all.max(bytes))
-        );
-        if hand > 0 {
-            left.push_str(&format!(
-                "  {}",
-                t.paint(Paint::Warn, &format!("{hand} by hand"))
-            ));
-            left_plain.push_str(&format!("  {hand} by hand"));
-        }
-        // the rule, the groups shown and their order, the cursor's group
-        // (Phase 16): the least telling go first on a narrow line
-        let right_plain = match &self.message {
-            Some(m) => m.clone(),
-            None => {
-                let mut parts: Vec<String> = Vec::new();
-                if let Some(p) = &self.prefer {
-                    parts.push(format!("keeping in {}", if p.is_empty() { "." } else { p }));
-                }
-                if self.view.len() < self.layout.groups.len() {
-                    parts.push(format!(
-                        "{} of {} groups",
-                        fmt_count(self.view.len() as u64),
-                        fmt_count(self.layout.groups.len() as u64)
-                    ));
-                }
-                if self.order != Order::Listing {
-                    parts.push(self.order.words().to_string());
-                }
-                if let Some(gi) = self.cursor_group() {
-                    parts.push(format!("group {}/{}", gi + 1, self.layout.groups.len()));
-                }
-                let room = t.width.saturating_sub(width(&left_plain) + 3);
-                crate::util::join_fit(&parts, room)
+        out.push(self.bottom_line(t, panels, &list_keys));
+        if self.keys_open {
+            // the key map on a card over the body, the screen faded under
+            // it; the cursor's line is not drawn again over it
+            self.cursor_at.set(None);
+            let card = self.key_card(t, t.width.saturating_sub(1), body_rows);
+            let cw = card.first().map_or(0, |l| visible_width(l));
+            let x = t.width.saturating_sub(1 + cw) / 2;
+            let y = 2 + body_rows.saturating_sub(card.len()) / 2;
+            for l in out.iter_mut().skip(2).take(body_rows) {
+                *l = fade(t, l);
             }
-        };
-        let right = if self.message.is_some() {
-            t.paint(Paint::Warn, &right_plain)
-        } else {
-            t.paint(Paint::Dupe, &right_plain)
-        };
-        let gap = t
-            .width
-            .saturating_sub(width(&left_plain) + width(&right_plain) + 1);
-        if gap >= 2 {
-            out.push(format!("{left}{}{right}", " ".repeat(gap)));
-        } else {
-            out.push(left);
-        }
-
-        // keys
-        let pairs = |v: &[(&str, &str)]| -> Vec<(String, String)> {
-            v.iter()
-                .map(|(a, b)| (a.to_string(), b.to_string()))
-                .collect()
-        };
-        let here = match self.rows.get(self.cursor) {
-            Some(Row::Head(g)) | Some(Row::Member(g, _)) => Some(*g),
-            None => None,
-        };
-        let mut nav = pairs(&[
-            (&format!("{}{}", g.up, g.down), "move"),
-            ("space", "select"),
-            ("a", "all"),
-            ("k", "keeper"),
-        ]);
-        if here.is_some_and(|g| !self.shots(g).is_empty()) {
-            nav.push(("c".into(), "other shots".into()));
-        }
-        nav.extend(pairs(&[
-            ("v", "view"),
-            ("o", "reveal"),
-            ("g", "go to"),
-            ("/", "filter"),
-            ("s", "sort"),
-            ("f", "keep this folder"),
-        ]));
-        out.push(fit_parts(t, " ", &nav, t.width));
-        let bar = match &self.mode {
-            Mode::Browse => {
-                let mut v: Vec<(String, String)> = Vec::new();
-                if n > 0 {
-                    v.push((
-                        "m".into(),
-                        format!("milk {} {} {}", fmt_count(n), g.arrow, crate::MILKED_DIR),
-                    ));
-                    v.push((
-                        "p".into(),
-                        format!("purge {} {} Recycle Bin", fmt_count(n), g.arrow),
-                    ));
-                    v.push(("n".into(), "preview".into()));
+            for (k, c) in card.iter().enumerate() {
+                if let Some(l) = out.get_mut(y + k) {
+                    *l = format!(
+                        "{}{c}{}",
+                        crate::util::slice_sgr(l, 0, x),
+                        crate::util::slice_sgr(l, x + cw, usize::MAX)
+                    );
                 }
-                if self.changes > 0 {
-                    v.push(("u".into(), "undo".into()));
-                }
-                v.push(("q".into(), "quit".into()));
-                fit_parts(t, g.pointer, &v, t.width)
             }
-            Mode::Confirm(act) => {
-                let (verb, dest) = match act {
-                    Act::Milk => ("milk", crate::MILKED_DIR),
-                    Act::Purge => ("purge", "Recycle Bin"),
-                };
-                let mut what = format!("{} {} {dest}, {}", fmt_count(n), g.arrow, fmt_bytes(bytes));
-                if hand > 0 {
-                    what.push_str(&format!(", {hand} by hand"));
-                }
-                let shots = self.chosen_shots();
-                if shots > 0 {
-                    what.push_str(&format!(
-                        ", {shots} other shot{}",
-                        if shots == 1 { "" } else { "s" }
-                    ));
-                }
-                fit_parts(
-                    t,
-                    g.pointer,
-                    &[
-                        (verb.to_string(), what),
-                        ("enter".into(), "go".into()),
-                        ("esc".into(), "back".into()),
-                    ],
-                    t.width,
-                )
-            }
-            Mode::Filter { typed, .. } => fit_parts(
-                t,
-                g.pointer,
-                &[
-                    (
-                        "/".into(),
-                        format!(
-                            "{typed}_  {} of {}",
-                            fmt_count(self.view.len() as u64),
-                            fmt_count(self.layout.groups.len() as u64)
-                        ),
-                    ),
-                    ("enter".into(), "keep".into()),
-                    ("esc".into(), "back".into()),
-                ],
-                t.width,
-            ),
-            Mode::GoTo(typed) => fit_parts(
-                t,
-                g.pointer,
-                &[
-                    (
-                        "go to group".into(),
-                        format!("{typed}_  (1-{})", self.layout.groups.len()),
-                    ),
-                    ("enter".into(), "go".into()),
-                    ("esc".into(), "back".into()),
-                ],
-                t.width,
-            ),
-        };
-        out.push(bar);
+        }
         out.truncate(total_height.max(6));
         out
     }
@@ -1271,8 +1660,8 @@ mod tests {
 
     #[test]
     fn the_screen_is_exactly_the_terminal_and_fits_its_width() {
-        for (h, all_open) in [(20usize, true), (12, false)] {
-            let st = State::new(layout(), h - 6);
+        for (h, all_open) in [(20usize, true), (10, false)] {
+            let st = State::new(layout(), h - 4);
             for w in [40usize, 60, 80, 120, 200] {
                 let t = theme(w);
                 let screen = st.screen(
@@ -1289,7 +1678,7 @@ mod tests {
                 }
                 // from 100 columns (and room for them) the groups and the
                 // comparison stand framed side by side
-                let panels = w >= PANELS_MIN && h - 6 >= 12;
+                let panels = w >= PANELS_MIN && h - 4 >= 12;
                 assert_eq!(screen[2].starts_with("╭─ GROUPS"), panels, "{screen:#?}");
                 // the cursor starts on a (1).jpg: its section open, its
                 // group unfolded on a tree, the pointer on the file
@@ -1319,11 +1708,14 @@ mod tests {
                     !screen.iter().any(|l| l.contains("b_next.jpg")),
                     "{screen:#?}"
                 );
-                assert!(
-                    screen[screen.len() - 3].contains("2 selected"),
-                    "{screen:#?}"
-                );
-                assert!(screen.last().unwrap().contains("m milk"), "{screen:#?}");
+                // one line under the gauge: what is chosen, the keys
+                // that act on it, `?` for the rest
+                let bottom = screen.last().unwrap();
+                assert!(bottom.contains("2 selected"), "{screen:#?}");
+                assert!(bottom.contains("[?] keys"), "{w}: {bottom}");
+                if w >= 60 {
+                    assert!(bottom.contains("[m] milk"), "{w}: {bottom}");
+                }
             }
         }
     }
@@ -1359,5 +1751,83 @@ mod tests {
             "{row}"
         );
         assert!(row.contains("near copy 3"), "{row}");
+    }
+
+    #[test]
+    fn question_mark_lays_every_key_on_a_card_and_esc_takes_it_away() {
+        for (w, h) in [
+            (40usize, 16usize),
+            (60, 20),
+            (80, 24),
+            (100, 30),
+            (150, 40),
+            (200, 50),
+        ] {
+            let mut st = State::new(layout(), h - 4);
+            let t = theme(w);
+            let plain = st.screen(
+                &t,
+                " dedupe find  root",
+                &listed(&st),
+                h,
+                &Frame::STILL,
+                None,
+            );
+            assert_eq!(st.handle(Key::Char('?')), Effect::None);
+            let screen = st.screen(
+                &t,
+                " dedupe find  root",
+                &listed(&st),
+                h,
+                &Frame::STILL,
+                None,
+            );
+            assert_eq!(screen.len(), h);
+            for l in &screen {
+                assert!(width(l) <= w, "{w}: {l:?}");
+            }
+            let card: Vec<&String> = screen.iter().filter(|l| l.contains("KEYS")).collect();
+            assert_eq!(card.len(), 1, "{w}: {screen:#?}");
+            // every kind on the card where it has the rows for them
+            if h >= 24 {
+                for kind in ["MOVE", "CHOOSE", "LOOK", "ACT"] {
+                    assert!(
+                        screen.iter().any(|l| l.contains(kind)),
+                        "{w} {kind}: {screen:#?}"
+                    );
+                }
+                for k in ["[space]", "[k]", "[f]", "[v]", "[/]", "[n]", "[u]"] {
+                    assert!(screen.iter().any(|l| l.contains(k)), "{w} {k}: {screen:#?}");
+                }
+            }
+            // the title and the bottom line are not under it
+            assert_eq!(screen[0], plain[0]);
+            assert_eq!(screen.last(), plain.last());
+            // the keys act under it; esc takes the card away, not the
+            // workspace, and the screen is as it was
+            assert_eq!(st.handle(Key::Esc), Effect::None);
+            let back = st.screen(
+                &t,
+                " dedupe find  root",
+                &listed(&st),
+                h,
+                &Frame::STILL,
+                None,
+            );
+            assert_eq!(back, plain, "{w}");
+            assert_eq!(st.handle(Key::Esc), Effect::Quit);
+        }
+    }
+
+    #[test]
+    fn the_pair_keys_follow_the_cursor() {
+        let mut st = State::new(layout(), 30);
+        // on a dupe: view, keep this, keep this folder, reveal
+        let keys: Vec<String> = st.pair_keys().into_iter().map(|k| k.0).collect();
+        assert_eq!(keys, ["v", "k", "f", "o"]);
+        // on the keeper: no k
+        st.handle(Key::Up);
+        let keys: Vec<String> = st.pair_keys().into_iter().map(|k| k.0).collect();
+        assert_eq!(keys, ["v", "f", "o"], "{:?}", st.rows.get(st.cursor));
     }
 }

@@ -141,38 +141,71 @@ output redesigned, long lists of one kind folded to a line]**:
 ```txt
  [dedupe] find  C:\Photos   recursive · images
 
-╭─ GROUPS  as listed ────────────────────────────╮ ╭─ shot_a.jpg ──────────────────────────────────────╮
-│ COPIES    2 groups · 339 KB · 2 chosen  ───────│ │                                                   │
-│ ■ starry_night.jpg  +1    301 KB ████   in ex……│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   │
-│ SIMILAR   10 groups · 2.69 MB · 11 chosen  ────│ │ (the keeper, in half      ≈ (the file under the   │
-│ ■ graf1.png         +1    961 KB ███████ mirr… │ │  blocks, 24-bit colour)     cursor, the same)     │
-│ ■ shot_a.jpg        +4    935 KB ███████ same… │ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   │
-│ ▸ ├ keep  shot_a.jpg                     536 KB│ │                                                   │
-│ ■ ├ near  exports/shot_a_export.jpg      229 KB│ │ keep                      near                    │
-│ ■ ├ near  aloeL.jpg                      313 KB│ │ shot_a.jpg                shot_a_export.jpg       │
-│ · ├ kin   shot_b.jpg                     647 KB│ │ the top folder            exports                 │
-│ ■ └ near  exports/shot_a_stripped.jpg    392 KB│ │ 1282×1110  536 KB         961×832  229 KB         │
-│ ■ rubberwhale1.png   +1    358 KB ███    re-e……│ │ 2026-11-09                2026-11-09              │
-│ □ right01.jpg        +2       0 B        unco……│ │                                                   │
-│                                                │ │ resized 75%                                       │
-│                                                │ │                                                   │
-│                                                │ │ dHash   ──────────────┊─────────   0  at most 10  │
-│                                                │ │ pHash   ──────────────┊─────────   0  at most 14  │
-│                                                │ │ PDQ     ━─────────────┊─────────   2  at most 31  │
-╰────────────────────────────────────────────────╯ ╰───────────────────────────────────────────────────╯
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
- 13 selected  3.03 MB of 3.03 MB                                                       group 4/12
-   ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  g go to  / filter …
- ▸  m milk 13 → _milked  p purge 13 → Recycle Bin  n preview  q quit
+╭─ GROUPS  12 ────────── s as listed ─ / filter ─╮ ╭─ shot_a.jpg ─────────────────────────────────────────────────────╮
+│ COPIES    2 groups · 339 KB · 2 chosen  ───────│ │                                                                  │
+│ ■ starr…ht.jpg  +1     301 KB  in exports      │ │      (the keeper in quadrant          (the file under the        │
+│ ■ home.jpg      +1    37.1 KB  in exports      │ │       blocks, 24-bit colour)    ≈      cursor, the same)         │
+│ SIMILAR   10 groups · 2.69 MB · 11 chosen  ────│ │                                                                  │
+│ ■ graf1.png     +1     961 KB  mirrored        │ │ keep                              near                           │
+│ ■ shot_a.jpg    +4     935 KB  same picture 2  │ │ shot_a.jpg                        shot_a_export.jpg              │
+│▸  ├ keep  shot_a.jpg                     536 KB│ │ photos                            exports                        │
+│ ■ ├ near  exports/shot_a_export.jpg      229 KB│ │ 1282×1110                         961×832                        │
+│ ■ ├ near  aloeL.jpg                      313 KB│ │ 536 KB                            229 KB                         │
+│ · ├ kin   shot_b.jpg                     647 KB│ │ 2026-11-14                        2026-11-14                     │
+│ ■ └ near  exports/shot_a_stripped.jpg    392 KB│ │                                                                  │
+│ ■ rubbe…e1.png  +1     358 KB  re-encoded      │ │ resized 75%                                                      │
+│ □ right01.jpg   +2        0 B  unconfirmed 2   │ │                                                                  │
+│                                                │ │ dHash   ━━━━━━━━━━━━━┃━━━━━━━━━━━━━━━━━━━━━━━━     0  ≤ 10    ✔  │
+│                                                │ │ pHash   ━━━━━━━━━━━━━┃━━━━━━━━━━━━━━━━━━━━━━━━     0  ≤ 14    ✔  │
+│                                                │ │ PDQ     ━━━━━━━━━━━━━┃━━━━━━━━━━━━━━━━━━━━━━━━     2  ≤ 31    ✔  │
+╰────────────────────────────────────────────────╯ ╰───────────────────────── v view ─ f keep this folder ─ o reveal ─╯
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ 13 selected  3.03 MB of 3.03 MB                                   [m] milk → _milked   [p] purge → Recycle Bin   [?] keys
 ```
+
+**Keys where they act** **[CLAUDE; the owner's direction of 2026-11-14:
+thirteen keys spelled out under the screen is not a design]**. No line of
+the screen lists keys. A key is shown where what it acts on is, and only
+while it does something there; every key is on the card `?` opens:
+
+- the groups' frame carries, on its top edge, the order and the filter,
+  each after the key that changes it: `s as listed`, `/ filter` (the
+  filter's text once there is one);
+- the comparison's frame carries, on its bottom edge, the keys for the
+  file under the cursor, most used first: `v view` (when there is a
+  pair), `k keep this` (on a file that is not the keeper), `f keep this
+  folder` (`f any folder` when its folder is the preferred one), `c
+  other shots` (on a group that has them), `o reveal`; what the edge has
+  no room for is left off from the right;
+- the bottom line: on the left what is chosen of what there is (shorter
+  forms as the width needs: `13 selected  3.03 MB`, then `13 selected`),
+  `2 by hand`, `keeping in exports`, and what a key just said; on the
+  right the keys that act on the selection as keycaps — the key bold in
+  amber on a chip a shade above the ground (`[m]` without colour) —
+  `m milk → _milked`, `p purge → Recycle Bin` (or `space select` with
+  nothing chosen), and `? keys`, which is never dropped: the keys before
+  it go first;
+- in a mode the bottom line is the mode's: `milk 13 → _milked · 3.03 MB`
+  with `enter go` `esc back`; `/ cas_  1 of 12 groups` with `enter keep`
+  `esc back`; `go to group 4_  1–12`.
+
+**The key card** (`?`): a framed card over the middle of the screen,
+the screen under it faded three quarters of the way to the ground; the
+title line and the bottom line stay as they are. Four kinds — MOVE,
+CHOOSE, LOOK, ACT — in two columns (one where the screen is narrower
+than the card), each key a keycap set right against its words, the
+kind's name over the words. Where the card would not fit, the words take
+their short forms (`keep its folder` for `keep the copies in its
+folder`). `?` or esc takes it away (esc then no longer leaves); the
+other keys act under it.
 
 From 100 columns (and 18 rows) the body is two framed panels, the
 frames' rounded corners and edges in the groove; nothing — the cursor's
 ground included — runs past a frame. Narrower, the groups alone fill the
 width (the same lines, a file's line the full output's own).
 
-**The groups**, left (42% of the width, 48–72 columns), titled with the
-order:
+**The groups**, left (42% of the width, 48–72 columns), titled `GROUPS`
+and how many there are (`4 of 12` under a filter):
 
 - **Sections**, one per kind, in the order `find` lists them: `COPIES`,
   `SIMILAR`, `VIDEO`, each in its kind's colour (§3a's hues) with its
@@ -195,7 +228,8 @@ order:
   between keys (its line drawn again twelve times a second).
 
 **The comparison**, right, titled with the keeper's name in the kind's
-colour, its frame tinted with it:
+colour, its frame tinted with it, the keys for its file on its bottom
+edge:
 
 - **The two pictures**, the keeper and the file under the cursor (the
   group's first other file when the cursor is on the group or its
@@ -250,7 +284,7 @@ ends them at once and is taken.
 
 By default the selection is exactly what `milk` and `purge` act on from
 the command line. A person may add an unconfirmed member (`similar,
-unconfirmed`, `looks alike`) by hand: the status line counts it (`2 by
+unconfirmed`, `looks alike`) by hand: the bottom line counts it (`2 by
 hand`), its action line says `by hand`, and the action's footer says
 those were confirmed by a look, not by a second family of evidence. The
 standing rule — two families before the program acts — is unchanged; a
@@ -264,8 +298,8 @@ takes one — not its rule, not `space` on the group's header, not `a`.
 `c` on a group that has them chooses all of them at once, by hand
 (`3 other shots chosen by you: different photographs, the keeper stays`);
 `c` again, or `space` on one, lets them go. The keeper is the shot that
-stays: `k` first to keep another. The bar shows `c other shots` only on
-such a group, the confirm bar counts them (`milk 4 → _milked, 2.05 MB,
+stays: `k` first to keep another. `c other shots` is on the
+comparison's edge only on such a group, the confirm line counts them (`milk 4 → _milked, 2.05 MB,
 3 by hand, 3 other shots`), and each prints `by hand` on its action
 line. Which frame of a burst is the sharpest is left to the person's
 look (`v`): a sharpness measure was tried against a burst pipeline's own
@@ -282,13 +316,14 @@ choice of frame and did no better than taking the first (VERIFICATION
 | `v` | the keeper beside the file under the cursor, drawn in the terminal (sixel, kitty or iTerm2 graphics; a video shows the frame a third of the way in), with both paths and the file's words; any key back, `o` reveals the member. Where the terminal draws no pictures, both files open in the system viewer |
 | `o` | reveal the file in Explorer, selected (Finder on macOS; the folder elsewhere) |
 | `g` | type a group's number, enter: the group at the top of the window |
-| `/` | filter: the groups narrow, as the text is typed, to those with a path containing it (any case); enter keeps it, esc puts back the last one, an empty filter shows every group. The status line says `14 of 612 groups`; `a`, `space` counts, `n`, `m` and `p` work on the groups shown, and choices made in hidden groups are kept for when they show again. A group keeps its number (`g` to a hidden one says so) (Phase 16) |
+| `/` | filter: the groups narrow, as the text is typed, to those with a path containing it (any case); enter keeps it, esc puts back the last one, an empty filter shows every group. The line under the screen says `14 of 612 groups` while it is typed; `a`, `space` counts, `n`, `m` and `p` work on the groups shown, and choices made in hidden groups are kept for when they show again. A group keeps its number (`g` to a hidden one says so) (Phase 16); the groups' title says `4 of 12` |
 | `s` | the order: as listed (exact, near, video), most reclaimable first, by the keeper's folder; the cursor stays on its file (Phase 16) |
-| `f` | on a file: its folder becomes the preferred home — every group with a member in it or below it takes the first such member for keeper (re-related, as `k` does) and the status line says `keeping in Photos\Library`; `f` on a file of that folder again takes the rule back and the keepers it changed with it. One key for what was one `k` per group (Phase 16) |
+| `f` | on a file: its folder becomes the preferred home — every group with a member in it or below it takes the first such member for keeper (re-related, as `k` does) and the bottom line says `keeping in Photos\Library`; `f` on a file of that folder again takes the rule back and the keepers it changed with it. One key for what was one `k` per group (Phase 16) |
 | `n` | the `would` lines of `milk --dry-run` for the selection, on the main screen, under the native command; enter comes back |
-| `m` / `p` | a confirm bar, `milk 12 → _milked, 2.87 MB, 2 by hand   enter go   esc back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit`, with `r retry N` when files were in use or refused and, after a purge, `m milk the N the bin refused into _milked` (Phase 10); `u undo it` appears only when the action changed something |
+| `m` / `p` | a confirm line, `milk 12 → _milked · 2.87 MB  2 by hand   [enter] go  [esc] back`; enter acts on the selection — on the main screen, under the native command, `purge` with its VERIFY stage — then a bar: `enter back to the groups (3 left)   u undo it   q quit`, with `r retry N` when files were in use or refused and, after a purge, `m milk the N the bin refused into _milked` (Phase 10); `u undo it` appears only when the action changed something |
 | `u` | reverse the newest change of this sitting (its own journal, by id), restore its groups, and come back; changes stack, so `u` again reverses the one before |
-| `q` / esc / Ctrl-C | leave; when nothing was changed, the `next` lines are printed so the typed forms sit in the scrollback |
+| `?` | the key card over the screen; `?` or esc again takes it away **[CLAUDE]** |
+| `q` / esc / Ctrl-C | leave (esc closes the key card first); when nothing was changed, the `next` lines are printed so the typed forms sit in the scrollback |
 
 Graphics: the protocol comes from the environment — kitty and Ghostty →
 kitty graphics; iTerm2 and WezTerm → iTerm2 inline images; Windows
