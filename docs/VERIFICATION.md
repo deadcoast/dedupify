@@ -4139,7 +4139,8 @@ input, not the program's: it now builds the path with the system's
 separator. The release build of 1c61c98, run 43666962504, green;
 `dedupe.exe` 30,131,712 bytes, SHA-256 `43e18188…72310`, written to
 `C:\github\dedupify\target\release\dedupe.exe` and read back with the
-same hash. The commit carrying this paragraph runs CI again.
+same hash. eb873ae (the test's fix) ran CI again, run 43668121080:
+green on ubuntu-latest and windows-latest.
 
 ## Phase 18 Not verified here
 
