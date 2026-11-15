@@ -397,7 +397,7 @@ cursor's group unfolded to the full output's lines for its files.
 
 ### 3a. The fold — the default output **[CLAUDE, Phase 17]**
 
-```
+```TXT
  [dedupe] find  D:\photos   recursive · images
 
  ✔ files    33 files · 8.29 MB                                              0.0 s
@@ -597,7 +597,7 @@ Palette:
 
 Result layout (`find`):
 
-```
+```txt
  dedupe find  D:\pics  recursive  all kinds
  ───────────────────────────────────────────────────────────────
  SCAN   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  12,480 files   38.2 GB   0.9 s
@@ -648,7 +648,7 @@ run fails; the frames are the same either way (Phase 14).
 
 Near groups follow the exact groups and continue the numbering:
 
-```
+```txt
  NEAR 003   4 similar  +1 kin   542 KB reclaimable
    keep  photos\beach.png                  1000×750   436 KB   2019-06-12
    near  photos\export\beach_mirror.png    1000×750   444 KB   mirrored                d  0  p  0  q   8
@@ -707,7 +707,7 @@ by hand (§2a).
 
 Video groups follow, numbered on:
 
-```
+```txt
  VIDEO 004   4 similar   8.04 MB reclaimable
    keep  a.mp4              640×360   0:20   h264  4.63 MB  2026-11-08
    near  a_mirror.mp4       640×360   0:20   h264  3.24 MB  mirrored               d  0 p  0  q   2  tmk    -
@@ -760,8 +760,8 @@ A single keyed menu driven by crossterm raw mode. No React, no widget
 library. Five workflows, four steps, one confirmation that shows the exact
 native command being run, so every menu session teaches the native form.
 
-```
- ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+```txt
+ ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
  ┃  WORKFLOW                                        ┃
  ┃  ▸ again   D:\pics  .  img                       ┃
  ┃    find    list duplicates, then decide          ┃
