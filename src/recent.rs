@@ -26,6 +26,9 @@ pub struct Recent {
     /// `--min` as typed, when the run had a size floor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min: Option<String>,
+    /// The run was the batch pipeline: `again` runs it again.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub batch: bool,
 }
 
 impl Recent {
@@ -35,13 +38,18 @@ impl Recent {
             recurse: inv.recurse,
             kind: inv.kind.token().to_string(),
             min: inv.min_display.clone(),
+            batch: inv.command == crate::cli::Command::Batch,
         }
     }
 
-    /// The argv `again` runs: `find <root> [.] [kind]`.
+    /// The argv `again` runs: `batch <root>` after a batch, else
+    /// `find <root> [.] [kind]`.
     pub fn args(&self) -> Vec<String> {
-        let mut v = vec!["find".to_string(), self.root.to_string_lossy().into_owned()];
-        if self.recurse {
+        let mut v = vec![
+            if self.batch { "batch" } else { "find" }.to_string(),
+            self.root.to_string_lossy().into_owned(),
+        ];
+        if self.recurse && !self.batch {
             v.push(".".into());
         }
         if !self.kind.is_empty() {
@@ -54,10 +62,12 @@ impl Recent {
         v
     }
 
-    /// `C:\Photos  .  img` — the line the menu shows.
+    /// `C:\Photos  .  img`, `C:\Photos  batch` — the line the menu shows.
     pub fn label(&self) -> String {
         let mut s = self.root.to_string_lossy().into_owned();
-        if self.recurse {
+        if self.batch {
+            s.push_str("  batch");
+        } else if self.recurse {
             s.push_str("  .");
         }
         if !self.kind.is_empty() {
@@ -118,6 +128,7 @@ mod tests {
             recurse: true,
             kind: "img".into(),
             min: None,
+            batch: false,
         };
         assert_eq!(load_in(app.path()), None);
         // a size floor travels with the record and its command

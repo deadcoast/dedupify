@@ -4056,3 +4056,87 @@ CI on 979cc5d: run 43659438529 green on ubuntu-latest and windows-latest
 43659438565: `dedupe.exe` 29,919,744 bytes, SHA-256 `bc1daff3…cab96`,
 written to `C:\github\dedupify\target\release\dedupe.exe` and read back
 with the same hash.
+
+---
+
+## VERIFICATION — Phase 18 (the batch pipeline), 2026-11-14
+
+The owner's direction: the workflow fits small folders and close review;
+a large folder — the usual case — needs a pipeline that takes the path
+and deals with it. Built and measured here; the design is CLI.md §2b
+(batch) and §4 (the menu).
+
+## The library it was measured on
+
+Generated (seeded, `gen/library.py` in the session's scratch): 1,523
+procedural photographs in `Pictures/2019|2020/<month>`; a backup of
+2019 January–June inside `Pictures` with the same names; a phone
+backup of 2020 January–March renamed by date; 120 downloads resized to
+1280 px and re-encoded; 30 brightened and 15 cropped edits; 40 frames
+a moment later beside their originals; 25 `- Copy` files; three videos,
+their `(1)` copies and one scaled down. 2,378 files, 720 MB.
+
+## What batch did with it
+
+| step | observed |
+| --- | --- |
+| scan, 120 columns, two cores | files 4 ms · copies 646 in 631 groups, 161 ms · similar 180 in 174 groups, 39 s · video 1 in 1 group, 4.8 s; the bar 44.6 s after the start |
+| keepers to one side | the backup's groups all kept in `Pictures` (the keeper rule already agreed there: same times, the backup a level deeper) |
+| move | 827 files, 236 MB into `_milked`, 52–64 ms (one volume: renames) |
+| `FROM  5 folders` | `Pictures/Backup (old drive)` 437, all, copies, mirrors Pictures · `Pictures/Phone Backup 2020-03/DCIM/Camera` 181, all, copies, kept in `Pictures/2020/01-Jan, 02-Feb, 03-Mar` · `Downloads` 116 of 121, resized 115, kept in Pictures, Videos · 24 folders · `Pictures/Edits` 30 of 45 · beside their keepers 63 in 23 folders |
+| end bar | `[o] open _milked  [u] undo it all  [enter] done`; `u`: `827 restored · 236 MB back in place`, 22 ms; 2,378 files again, `_milked` gone |
+| `-n` | the same account, nothing moved, the folders measured as they are |
+
+Left in place, and why (from `batch -n -v`): in `Edits`, exactly the 15
+crops (a sixth off every side), which no pass groups; in `Downloads`,
+five resized copies (`received_0240`, `0509`, `0571`, `0920`, `1014`)
+that the similar pass does not group with their originals — 115 of the
+120 resized downloads found. `find` and `milk` see the same groups:
+these are the near tier's recall on this library, not the batch's.
+
+Rendered and looked at (cell renderer) at 150, 120, 100, 80 and 60
+columns: the bar from 110 columns (six cells from 90, none below), the
+share's word always; a path cut at its middle folder keeping the last
+(`Pictures/…/Camera`, `…/Backup (old drive)`); where the keepers are in
+a shorter form before it is dropped (`kept in Pictures · 3 folders`,
+then `kept in 18 folders`).
+
+Two things changed on the way: the yield's gauge striped 631 one-cell
+groups in two tones, a barcode; a group of one cell is now in its kind's
+hue (OUT-08). And `milk`'s way back printed between the move and the
+account; a batch prints it after the account, or not at all on a
+terminal, where the end bar has `u`.
+
+## The menu
+
+Two steps, rendered at 100 columns: the pipelines (`BATCH` chosen,
+`REVIEW`, then `again`, `undo`, `doctor`), and the folder (the current
+one dim until a key replaces it; `library` typed; `[enter] run
+[esc] back`). Enter twice runs `dedupe batch` here.
+
+## Tests
+
+`batch_deals_with_a_tree_and_says_it_by_folder` (end to end: a backup
+inside the library emptied whole and said as `mirrors Pictures`, a copy
+beside its original, a resized download; `_milked` holds them at their
+paths; the journal names `dedupe batch`; `--undo` gives back the tree
+exactly); `batch_keeps_a_pair_of_folders_on_one_side` (three files in
+`keep` and `spare`, two older in `keep`, one in `spare`: `milk` leaves
+two and one, `batch` three and none);
+`the_account_fits_every_width_and_says_the_mirror` (40 to 200 columns,
+with and without Unicode); `a_mirror_is_raised_to_where_its_names_part`;
+`keepers_are_said_as_short_as_says_them`; five menu tests (batch first
+and two enters run it; a typed, pasted or dropped folder, quotes and
+all; a folder that is not one; `again` under the pipelines; every line
+inside 40 to 200 columns). Suite here: 148 unit, 42 end to end; clippy
+`-D warnings` and fmt clean, clippy for the Windows target. The Windows
+launcher gains `batch + undo`, the same round trip as `milk + undo`.
+
+## Phase 18 Not verified here
+
+- Batch on Windows, and its end bar's `o` opening `_milked` in
+  Explorer: the launcher's next run (`batch + undo`) and the owner's.
+- A library of tens of thousands of files: measured at 2,378 here; the
+  similar pass is the time (39 s of 45 on two cores).
+- Why five 1280-pixel re-encodes of the library's procedural pictures
+  fall outside the near tier: not measured here.

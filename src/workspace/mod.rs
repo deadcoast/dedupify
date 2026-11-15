@@ -13,6 +13,7 @@
 //! screen is the alternate screen and leaves no trace.
 
 mod screen;
+pub(crate) use screen::fit_parts as fit_keys;
 pub mod state;
 mod thumbs;
 
@@ -269,7 +270,7 @@ fn draw_line(i: usize, line: &str) -> io::Result<()> {
 
 /// A one-line bar on the main screen; waits for one key (raw mode only for
 /// the wait) and erases the bar.
-fn pause(r: &Renderer, parts: &[(&str, &str)]) -> Key {
+pub(crate) fn pause(r: &Renderer, parts: &[(&str, &str)]) -> Key {
     let t = &r.theme;
     let v: Vec<(String, String)> = parts
         .iter()

@@ -452,6 +452,16 @@ skeleton (a list of text lines), the workspace was rebuilt as two
 framed panels, the groups and the comparison — the two files as
 pictures, their evidence as meters (OUT-06).
 
+## Phase 18 — the batch pipeline   ← delivered 2026-11-14 (owner's direction, 2026-11-14)
+
+The owner's direction: the workflow built so far is right for small
+folders and close review, and wrong for what most folders are — large;
+that is how their duplicates got past their owners. A pipeline for the
+whole folder: pick it, give the path, nothing else asked; the in-depth
+output stays for the hard cases. Earlier the same day: thirteen keys
+listed under the workspace in plain words is not a design (OUT-07). The
+design is CLI.md §2b and §4; the keys' §2a. Items: SHELVED.md § Phase 18.
+
 ## Docs chain
 
 ```txt
@@ -485,5 +495,6 @@ pass runs.
   or by hand; work in between is verified here and pushed in batches, not
   after every change. A Windows-only fix that needs CI waits for the
   delivery run unless it blocks the phase.
-- New flags need a reason stronger than convenience; the menu stays at five
-  workflows (plus `again`, the last folder) per screen.
+- New flags need a reason stronger than convenience; the menu is two
+  pipelines and two tools (plus `again`, the last folder), and asks for
+  the folder and nothing else (Phase 18).

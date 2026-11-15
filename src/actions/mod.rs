@@ -12,6 +12,7 @@ use crate::interrupt;
 use crate::render::Renderer;
 
 mod act;
+mod batch;
 mod plan;
 mod scan;
 mod undo;
@@ -36,10 +37,14 @@ pub const EXIT_INTERRUPTED: i32 = interrupt::EXIT_INTERRUPTED;
 
 /// Dispatch. Returns the process exit code.
 pub fn run(inv: &Invocation, r: &Renderer) -> i32 {
-    if matches!(inv.command, Command::Find | Command::Milk | Command::Purge) {
+    if matches!(
+        inv.command,
+        Command::Batch | Command::Find | Command::Milk | Command::Purge
+    ) {
         crate::recent::record(inv);
     }
     match inv.command {
+        Command::Batch => batch::batch(inv, r),
         Command::Find => find(inv, r),
         Command::Milk => milk(inv, r),
         Command::Purge => purge(inv, r),

@@ -820,7 +820,7 @@ function RoundTrip($act, $label) {
     $diff = @(Compare-Object $before $after)
     if ($diff.Count -eq 0) {
         Save "$($act)_roundtrip" "tree identical after $act+undo: $($after.Count) files, every SHA-256 equal"
-        Settle $(if ($c1 -eq 0 -and $c2 -eq 0) { 0 } else { 1 }) "$moved $(if ($act -eq 'milk') { 'moved' } else { 'binned' }) and put back$dot$($after.Count) files, every SHA-256 equal to before"
+        Settle $(if ($c1 -eq 0 -and $c2 -eq 0) { 0 } else { 1 }) "$moved $(if ($act -eq 'purge') { 'binned' } else { 'moved' }) and put back$dot$($after.Count) files, every SHA-256 equal to before"
     } else {
         Save "$($act)_roundtrip" (@("TREE DIFFERS after $act+undo") + ($diff | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }))
         Settle 2 "the tree differs after $act and undo$dot$($diff.Count) lines${dot}runs\win\log\$($act)_roundtrip.txt"
@@ -830,6 +830,8 @@ RoundTrip 'milk' 'milk + undo'
 $left = if (Test-Path (Join-Path $sample '_milked')) { Get-ChildItem (Join-Path $sample '_milked') -Recurse -Force | ForEach-Object { $_.FullName } } else { '_milked gone' }
 Save 'milked_dir_after_undo' $left
 RoundTrip 'purge' 'purge + undo'
+# the batch pipeline: the whole tree in one pass, the same way back
+RoundTrip 'batch' 'batch + undo'
 
 Open 'help, errors'
 $checks = @(

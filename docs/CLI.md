@@ -13,6 +13,7 @@ dedupe <command> [PATH] [.] [img|vid]    native command
        [--skip NAME]… [--unskip NAME|all]… [--min SIZE] [-v]
 dedupe --undo | -u  [PATH]               reverse a change under PATH (several pending: choose)
 dedupe doctor | --doctor | -dr [PATH]    troubleshooting suite
+dedupe batch [PATH] [img|vid] [-n]       the whole tree, done for you (§2b)
 dedupe --help | -h                       help page
 dedupe --version | -V                    the version and the commit built from
 ```
@@ -417,6 +418,83 @@ nothing behind. Any other key leaves. No flag for it (Phase 16).
 
 ---
 
+### 2b. The batch pipeline (`dedupe batch PATH`) **[CLAUDE; the owner's direction of 2026-11-14]**
+
+The direction: a folder that needs deduplifying is a large one — that is
+how its duplicates got past its owner — and two thousand comparisons one
+by one is worse than Explorer and a pair of eyes. The workspace (§2a)
+stays for the hard cases and close review; `batch` is for the folder as a
+whole: the pipeline and the path are all it asks.
+
+```txt
+ [dedupe] batch  D:\Pictures   recursive · all kinds
+
+ ✔ files    2,378 · 720 MB                                                     4 ms
+ ✔ copies   646 in 631 groups · 207 MB                                       161 ms
+ ✔ similar  180 in 174 groups · 28.7 MB · resized 115 · near copy 42 · …       39 s
+ ✔ video    1 in 1 group · 116 KB · scaled                                    4.8 s
+
+ 236 MB reclaimable   827 files · 806 groups · 33% of 720 MB
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+ ╰ clip_3.mp4 5.68 MB
+
+ ✔ milk     827 moved · 236 MB into _milked                                   52 ms
+
+ FROM  5 folders
+ Backup (old drive)                437  ━━━━━━━━━━ all     copies · mirrors Pictures
+ Phone… 2020-03\DCIM\Camera        181  ━━━━━━━━━━ all     copies · kept in 2020\01-Jan, 02-Feb, 03-Mar
+ Downloads                         116  ━━━━━━━━━━ of 121  resized 115 · kept in 2019, 2020 · 24 folders
+ Edits                              30  ━━━━━━━─── of 45   re-encoded 22 · kept in 2019, 2020 · 18 folders
+ beside their keepers               63                     copies 28 · in 23 folders · near copy 34
+
+ [o] open _milked  [u] undo it all  [enter] done
+```
+
+What it does, in order, with nothing asked:
+
+1. **Scans the whole tree** below the folder (the `.` is implied),
+   pictures and videos, with every pass `find` runs (§3a's sections, the
+   same live lines).
+2. **Keeps to one side of a pair of folders.** Where two folders share
+   byte-for-byte copies, each group with members in both votes for the
+   side its keeper is on (the keeper rule, `keeper.rs`); the side with
+   more votes keeps all of them, and a group whose keeper was on the
+   other side takes its first member on the winning side instead. A tie
+   changes nothing; pairs are settled strongest first, a group's keeper
+   moves once. A backup is emptied whole, not half kept by modification
+   times. Lookalike groups keep their own keeper — the better picture,
+   which a folder does not outrank. (`milk` and `find` keep the rule
+   file by file.)
+3. **Moves** every byte-for-byte copy and every lookalike two families
+   confirm into `_milked`, the same rule as `milk` (§5), the tree's
+   paths kept under it, under one journal named `dedupe batch PATH`.
+   What nothing confirmed stays, said under the move as with `milk`.
+4. **Says it by folder** — `FROM` and how many folders, then a line per
+   folder files left, the most first (eight, the rest summed as `and N
+   more folders · files · bytes`): the folder; how many left it; a bar
+   of that against the files it held, `all` when it is empty now, else
+   `of N`; what they were (`copies`, the lookalikes' words with their
+   counts); where the files that stayed are. A folder whose subfolders
+   carry the same names as the keepers' (`Backup\2019\01-Jan` beside
+   `2019\01-Jan`) is raised to where the names part and said as
+   `mirrors <folder>`; otherwise `kept in` and the keepers' folders —
+   up to three by name, those under one parent as `parent\a, b, c`,
+   else their top folders and how many. Copies that sat beside their
+   keepers (`x - Copy.jpg`) are one line, `beside their keepers`, with
+   how many folders.
+5. **Ends on a bar**, on a terminal: `o` opens `_milked` in Explorer
+   and comes back to the bar, `u` undoes the whole batch at once, enter
+   is done. Piped, the way back is printed instead: `undo   dedupe
+   --undo PATH`.
+
+`-n` shows all of it without moving anything (`would move`, the folders
+measured as they are). `img` or `vid` narrows it to one kind. Measured
+on a 2,378-file library (1,523 photographs in year and month folders, a
+backup of half a year inside it, a phone backup renamed by date,
+downloads resized and re-encoded, edits, burst frames, copies beside
+their originals, videos): 44 s on two cores, 827 files moved in 52 ms
+(the same volume: renames), undone in 22 ms (VERIFICATION § Phase 18).
+
 ## 3. Output design — theme "MILK" **[CLAUDE]**
 
 Two outputs. The default is the fold (§3a): a run as one line per pass,
@@ -528,9 +606,10 @@ the verify line, not again.
 - the gauge: lower half blocks `▄` across the width — everything
   scanned — on which every group has its share: kind by kind in section
   order, the largest first within a kind, each in its kind's hue,
-  neighbours alternating between the hue and a deeper tone of it (the
-  hue 45% of the way to the groove) so a group one cell wide is told
-  from the next; a kind with any bytes gets a cell however small its
+  neighbours of two cells or more alternating between the hue and a
+  deeper tone of it (the hue 45% of the way to the groove) so each is
+  told from the next; a group of one cell is a sliver of its kind, in
+  its hue (hundreds of small groups read as one run, not as stripes); a kind with any bytes gets a cell however small its
   share;
 - under the gauge, the largest groups by keeper name and bytes, each
   hooked under its own share — `╰ name size` from one of its cells, or
@@ -789,45 +868,59 @@ and distances; the footer states once what `~` means.
 
 ---
 
-## 4. Interactive workflow (`dedupe` with no arguments)
+## 4. The menu (`dedupe` with no arguments)
 
-A single keyed menu driven by crossterm raw mode. No React, no widget
-library. Five workflows, four steps, one confirmation that shows the exact
-native command being run, so every menu session teaches the native form.
+Two pipelines and a folder **[the owner's direction of 2026-11-14:
+"select their pipeline, enter their path; that's literally all you
+need"]**. Drawn on the fold's theme (§3a): the name on its amber plate,
+the build on the right, keycaps under it.
 
 ```txt
- ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
- ┃  WORKFLOW                                        ┃
- ┃  ▸ again   D:\pics  .  img                       ┃
- ┃    find    list duplicates, then decide          ┃
- ┃    milk    move duplicates into _milked          ┃
- ┃    purge   send duplicates to the Recycle Bin    ┃
- ┃    undo    reverse the last change               ┃
- ┃    doctor  check this terminal, folder and tools ┃
- ┃                                                  ┃
- ┃  ↑↓ move   enter select   q quit                 ┃
- ┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+ [dedupe]  the deduplifier                                0.2.0 · 979cc5d
+
+  ▸ BATCH     a whole folder tree, done for you
+              copies and confirmed lookalikes into _milked · said by folder · one key undoes it
+
+    REVIEW    every group side by side; you choose
+              pictures, evidence and keys in the workspace
+
+    again     D:\Pictures  batch
+    undo      reverse the last change
+    doctor    check this terminal, folder and tools
+
+  [↑ ↓] choose  [enter] next  [q] quit
 ```
 
-`again` (Phase 9) **[CLAUDE]**: `find`, `milk` and `purge` record their
-root, scope and kind in `recent.json` beside the journals (never in the
-scanned folder); the menu's first line offers it and enter runs `find`
-there at once — the workspace follows. It is not offered when there is
-no record or its folder is gone.
+`BATCH` is chosen when the menu opens. Enter, then the folder:
 
-Steps after a workflow is chosen (undo and doctor skip to confirm):
+```txt
+ [dedupe]  batch
 
-1. **FOLDER** — current directory preselected; typing replaces it.
-2. **SCOPE** — `this folder only` / `include subfolders` (the `.` token).
-3. **KIND** — `everything` / `images` / `videos`.
-4. **CONFIRM** — shows `dedupe milk D:\pics . img` and runs it on enter.
+  FOLDER
+  ▸ D:\Pictures_
+    this folder, or type, paste or drop another
 
-`esc` steps back; at the first step it quits; `q` quits from any choice
-step (in FOLDER it is a typed character). When the folder is left as the
-current directory it is omitted from the composed command, so the menu
-runs `dedupe find . img`, not `dedupe find C:\Users\…\Pictures . img`, and
-the `next` lines it prints stay short. The menu offers five workflows,
-plus `again` when there is a last folder **[SPEC: no bloat]**.
+  [enter] run  [esc] back
+```
+
+The current folder stands dim until the first key replaces it; a pasted
+path or a folder dropped on the window (Windows Terminal types it,
+quoted) is taken without its quotes. Enter runs at once — `dedupe batch
+PATH` (§2b), `dedupe find PATH .` for review (the whole tree; the
+workspace follows, §2a), `dedupe --undo PATH`, `dedupe doctor PATH` —
+with the folder left out when it is the current one. A path that is not
+a folder stays on the step, `not a folder  D:\Picturs` under it. Esc
+goes back; at the pipelines esc or `q` quits.
+
+`again` (Phase 9) **[CLAUDE]**: `batch`, `find`, `milk` and `purge`
+record their root, scope and kind in `recent.json` beside the journals
+(never in the scanned folder); the line under the pipelines offers it,
+and enter runs it at once — `batch` again after a batch, else `find`
+there with the workspace after. It is not offered when there is no
+record or its folder is gone.
+
+Scope and kind are not asked: `batch` and `review` take the whole tree
+and every kind. The typed forms keep them (`dedupe find D:\pics img`).
 
 `--undo` with several changes pending under the folder, on a terminal,
 lists them newest first — `1  2026-11-09 08:57  dedupe purge … . vid   3

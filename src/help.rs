@@ -50,6 +50,13 @@ pub fn page(r: &Renderer) {
         ),
         String::new(),
         c(
+            "batch",
+            &format!(
+                "the whole tree: copies and lookalikes into PATH{}_milked",
+                std::path::MAIN_SEPARATOR
+            ),
+        ),
+        c(
             "find",
             "list every duplicate group, then decide in the workspace",
         ),

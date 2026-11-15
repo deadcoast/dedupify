@@ -3291,3 +3291,135 @@ fn a_bin_too_small_measured_by_flags() {
         "`_milked` made for the guard stays behind"
     );
 }
+
+/// The batch pipeline (docs/CLI.md §2b): one folder, the whole tree; a
+/// backup that mirrors the library is emptied whole, a copy beside its
+/// original and a resized copy go too, all into `_milked` under one
+/// journal; the account says it by folder; `--undo` puts it all back.
+#[test]
+fn batch_deals_with_a_tree_and_says_it_by_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("lib");
+    let fx = Fx {
+        root: root.clone(),
+        journal: tmp.path().join("journal"),
+        _tmp: tmp,
+    };
+    let t0 = 1_560_297_600;
+    let shots: Vec<Vec<u8>> = (0..4)
+        .map(|i| jpeg_bytes(&photo(40 + i, 640, 480), 90))
+        .collect();
+    put_at(&root, "Pictures/2019/a.jpg", &shots[0], t0);
+    put_at(&root, "Pictures/2019/b.jpg", &shots[1], t0);
+    put_at(&root, "Pictures/2020/c.jpg", &shots[2], t0);
+    put_at(&root, "Pictures/2020/d.jpg", &shots[3], t0);
+    // a backup of the library inside it, the same names a level down
+    put_at(&root, "Pictures/Backup/2019/a.jpg", &shots[0], t0);
+    put_at(&root, "Pictures/Backup/2019/b.jpg", &shots[1], t0);
+    put_at(&root, "Pictures/Backup/2020/c.jpg", &shots[2], t0);
+    // a copy beside its original; a shared copy, smaller
+    put_at(&root, "Pictures/2020/d - Copy.jpg", &shots[3], t0);
+    let small = image::imageops::resize(
+        &photo(41, 640, 480),
+        320,
+        240,
+        image::imageops::FilterType::Triangle,
+    );
+    put_at(&root, "Downloads/received.jpg", &jpeg_bytes(&small, 80), t0);
+    let before = files(&root);
+
+    let (code, out, err) = run(&fx, &["batch", "."]);
+    assert_eq!(code, 0, "{out}\n{err}");
+    let line = |lead: &str| -> String {
+        out.lines()
+            .find(|l| l.trim_start().starts_with(lead))
+            .unwrap_or_else(|| panic!("no {lead:?} line\n{out}"))
+            .to_string()
+    };
+    assert!(line("FROM").contains("3 folders"), "{out}");
+    let backup = line(&format!("Pictures{}Backup", std::path::MAIN_SEPARATOR));
+    assert!(backup.contains(" 3 ") && backup.contains("all"), "{backup}");
+    assert!(
+        backup.contains("copies") && backup.contains("mirrors Pictures"),
+        "{backup}"
+    );
+    let dl = line("Downloads");
+    assert!(dl.contains("resized") && dl.contains("all"), "{dl}");
+    assert!(line("beside their keepers").contains("copies"), "{out}");
+    assert!(out.contains("dedupe --undo"), "the way back\n{out}");
+    // what moved sits in _milked as it sat in the tree; the backup is
+    // empty, the library whole
+    let after = files(&root);
+    for gone in [
+        "Pictures/Backup/2019/a.jpg",
+        "Pictures/Backup/2019/b.jpg",
+        "Pictures/Backup/2020/c.jpg",
+        "Pictures/2020/d - Copy.jpg",
+        "Downloads/received.jpg",
+    ] {
+        assert!(!after.contains(&gone.to_string()), "{gone} still there");
+        assert!(
+            after.contains(&format!("_milked/{gone}")),
+            "{gone} not in _milked\n{after:?}"
+        );
+    }
+    for kept in [
+        "Pictures/2019/a.jpg",
+        "Pictures/2019/b.jpg",
+        "Pictures/2020/c.jpg",
+        "Pictures/2020/d.jpg",
+    ] {
+        assert!(after.contains(&kept.to_string()), "{kept} moved");
+    }
+    // the journal names the batch; undo puts every file back
+    let (code, out, _) = run(&fx, &["--undo", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("dedupe batch"), "{out}");
+    assert_eq!(files(&root), before, "tree back as it was");
+}
+
+/// Keepers hold to one side of a pair of folders: three files in `keep`
+/// and in `spare`, two older in `keep` and one older in `spare`. File by
+/// file `milk` keeps two in `keep` and one in `spare`; `batch` keeps the
+/// three in `keep` and empties `spare`.
+#[test]
+fn batch_keeps_a_pair_of_folders_on_one_side() {
+    let mk = || {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("lib");
+        let blobs: Vec<Vec<u8>> = (0..3).map(|i| blob(90 + i, 64 * 1024)).collect();
+        let (old, new) = (1_500_000_000, 1_600_000_000);
+        for (i, b) in blobs.iter().enumerate() {
+            let (k, s) = if i < 2 { (old, new) } else { (new, old) };
+            put_at(&root, &format!("keep/x{i}.bin"), b, k);
+            put_at(&root, &format!("spare/x{i}.bin"), b, s);
+        }
+        Fx {
+            root,
+            journal: tmp.path().join("journal"),
+            _tmp: tmp,
+        }
+    };
+    let count = |root: &Path, dir: &str| files(root).iter().filter(|f| f.starts_with(dir)).count();
+    let fx = mk();
+    let (code, out, _) = run(&fx, &["milk", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        (count(&fx.root, "keep/"), count(&fx.root, "spare/")),
+        (2, 1),
+        "{out}"
+    );
+    let fx = mk();
+    let (code, out, _) = run(&fx, &["batch", "."]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        (count(&fx.root, "keep/"), count(&fx.root, "spare/")),
+        (3, 0),
+        "{out}"
+    );
+    assert!(
+        out.lines()
+            .any(|l| l.trim_start().starts_with("spare") && l.contains("all")),
+        "{out}"
+    );
+}

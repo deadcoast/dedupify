@@ -91,7 +91,13 @@ pub(crate) fn act_milk(
 ) -> Acted {
     let milked = inv.root.join(MILKED_DIR);
     let milked_display = under_root(inv.root_display.as_deref(), MILKED_DIR);
-    let mut w = Writer::new(&inv.root, &inv.command_line_as(Command::Milk));
+    // the journal names what was run: a batch is undone as a batch
+    let journal_as = if inv.command == Command::Batch {
+        Command::Batch
+    } else {
+        Command::Milk
+    };
+    let mut w = Writer::new(&inv.root, &inv.command_line_as(journal_as));
     let mut moved: u64 = 0;
     let mut bytes: u64 = 0;
     let mut failed: u64 = 0;
@@ -253,7 +259,8 @@ pub(crate) fn act_milk(
     if stopped {
         interrupted_note(r, moved, "moves", journal_id.is_some());
     }
-    if journal_id.is_some() {
+    // a batch says the way back after its account by folder
+    if journal_id.is_some() && inv.command != Command::Batch {
         r.undo_hint(inv);
     }
     let code = if stopped {

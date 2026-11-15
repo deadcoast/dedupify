@@ -1,7 +1,11 @@
-//! The workflow menu (docs/CLI.md §4). The state machine is pure and
-//! tested; `run` wraps it in crossterm raw mode and returns the native
-//! argv the user composed, which `main` then parses and runs like any
-//! typed command.
+//! The menu (docs/CLI.md §4): `dedupe` alone. Two pipelines and a
+//! folder, nothing else asked [the owner's direction of 2026-11-14: pick
+//! the pipeline, give the path; anything more is what the in-depth output
+//! is for]. `batch` takes the whole tree below the folder and deals with
+//! it (§2b); `review` lists every group and opens the workspace (§2a).
+//! `again`, `undo` and `doctor` sit under them. The state machine is pure
+//! and tested; `run` wraps it in raw mode and returns the native argv,
+//! which `main` parses and runs like any typed command.
 
 use std::io::{self, Write};
 use std::path::Path;
@@ -9,44 +13,45 @@ use std::path::Path;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::{cursor, execute, terminal};
 
-use crate::theme::{Role, Theme};
-use crate::util::{fit, shorten_middle, width};
+use crate::render::fold::{DIM, PLATE};
+use crate::theme::{Rgb, Role, Theme};
+use crate::util::{fit, shorten_middle, visible_width, width};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Workflow {
-    Find,
-    Milk,
-    Purge,
+pub enum Pipeline {
+    Batch,
+    Review,
     Undo,
     Doctor,
 }
 
-pub const WORKFLOWS: [(Workflow, &str, &str); 5] = [
-    (Workflow::Find, "find", "list duplicates, then decide"),
-    (Workflow::Milk, "milk", "move duplicates into _milked"),
+/// The pipelines, then the tools: name, what it is, what it does.
+pub const PIPELINES: [(Pipeline, &str, &str, &str); 4] = [
     (
-        Workflow::Purge,
-        "purge",
-        "send duplicates to the Recycle Bin",
+        Pipeline::Batch,
+        "batch",
+        "a whole folder tree, done for you",
+        "copies and confirmed lookalikes into _milked · said by folder · one key undoes it",
     ),
-    (Workflow::Undo, "undo", "reverse the last change"),
     (
-        Workflow::Doctor,
+        Pipeline::Review,
+        "review",
+        "every group side by side; you choose",
+        "pictures, evidence and keys in the workspace",
+    ),
+    (Pipeline::Undo, "undo", "reverse the last change", ""),
+    (
+        Pipeline::Doctor,
         "doctor",
         "check this terminal, folder and tools",
+        "",
     ),
 ];
 
-pub const SCOPES: [(&str, &str); 2] = [("this folder only", ""), ("include subfolders", ".")];
-pub const KINDS: [(&str, &str); 3] = [("everything", ""), ("images", "img"), ("videos", "vid")];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Step {
-    Workflow,
+    Pick,
     Folder,
-    Scope,
-    Kind,
-    Confirm,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,17 +71,24 @@ pub enum Outcome {
     Run(Vec<String>),
 }
 
+/// The rows of the first step, in order on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Row {
+    Pipe(usize),
+    Again,
+}
+
 #[derive(Debug, Clone)]
 pub struct Menu {
     pub step: Step,
-    pub workflow: usize,
+    row: usize,
+    /// The folder as typed; empty means the current one, shown dim until
+    /// the first key replaces it.
     pub folder: String,
     pub folder_error: Option<String>,
-    pub scope: usize,
-    pub kind: usize,
     /// Where the user is; left out of the command when it is the folder.
     cwd: String,
-    /// The last folder looked at, offered as the first line (`again`).
+    /// The last folder looked at, offered under the pipelines (`again`).
     again: Option<crate::recent::Recent>,
 }
 
@@ -85,70 +97,81 @@ impl Menu {
         Menu::with_recent(cwd, None)
     }
 
-    /// The menu with the last run offered as its first line (QOL-03).
+    /// The menu with the last run offered under the pipelines (QOL-03).
     pub fn with_recent(cwd: &str, again: Option<crate::recent::Recent>) -> Menu {
         Menu {
-            step: Step::Workflow,
-            workflow: 0,
-            folder: cwd.to_string(),
+            step: Step::Pick,
+            row: 0,
+            folder: String::new(),
             folder_error: None,
-            scope: 0,
-            kind: 0,
             cwd: cwd.to_string(),
             again,
         }
     }
 
-    /// Rows on the first step: `again` (when there is a last run), then
-    /// the workflows.
-    fn rows(&self) -> usize {
-        WORKFLOWS.len() + usize::from(self.again.is_some())
+    /// batch, review, [again], undo, doctor
+    fn rows(&self) -> Vec<Row> {
+        let mut v = vec![Row::Pipe(0), Row::Pipe(1)];
+        if self.again.is_some() {
+            v.push(Row::Again);
+        }
+        v.push(Row::Pipe(2));
+        v.push(Row::Pipe(3));
+        v
     }
 
-    fn on_again(&self) -> bool {
-        self.again.is_some() && self.workflow == 0
+    fn current(&self) -> Row {
+        let rows = self.rows();
+        rows[self.row.min(rows.len() - 1)]
     }
 
-    fn selected(&self) -> Workflow {
-        let offset = usize::from(self.again.is_some());
-        WORKFLOWS[self
-            .workflow
-            .saturating_sub(offset)
-            .min(WORKFLOWS.len() - 1)]
-        .0
+    pub fn selected(&self) -> Option<Pipeline> {
+        match self.current() {
+            Row::Pipe(i) => Some(PIPELINES[i].0),
+            Row::Again => None,
+        }
     }
 
-    fn needs_scope(&self) -> bool {
-        matches!(
-            self.selected(),
-            Workflow::Find | Workflow::Milk | Workflow::Purge
-        )
+    /// The folder to run on: as typed (a pasted or dropped path loses its
+    /// quotes), or the current one.
+    fn folder_given(&self) -> String {
+        let f = self
+            .folder
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .trim();
+        if f.is_empty() {
+            self.cwd.clone()
+        } else {
+            f.to_string()
+        }
     }
 
     /// argv without the program name. The folder is passed only when it
-    /// is not the current directory, so the composed command — and every
-    /// `next` line it prints — stays as short as the typed form.
+    /// is not the current directory, so the composed command stays as
+    /// short as the typed form.
     pub fn args(&self) -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
-        match self.selected() {
-            Workflow::Find => v.push("find".into()),
-            Workflow::Milk => v.push("milk".into()),
-            Workflow::Purge => v.push("purge".into()),
-            Workflow::Undo => v.push("--undo".into()),
-            Workflow::Doctor => v.push("doctor".into()),
-        }
-        if self.folder != self.cwd {
-            v.push(self.folder.clone());
-        }
-        if self.needs_scope() {
-            let s = SCOPES[self.scope].1;
-            if !s.is_empty() {
-                v.push(s.into());
+        let Some(p) = self.selected() else {
+            return self.again.as_ref().map(|a| a.args()).unwrap_or_default();
+        };
+        v.push(
+            match p {
+                Pipeline::Batch => "batch",
+                Pipeline::Review => "find",
+                Pipeline::Undo => "--undo",
+                Pipeline::Doctor => "doctor",
             }
-            let k = KINDS[self.kind].1;
-            if !k.is_empty() {
-                v.push(k.into());
-            }
+            .into(),
+        );
+        let folder = self.folder_given();
+        if folder != self.cwd {
+            v.push(folder);
+        }
+        // review is the whole tree too
+        if p == Pipeline::Review {
+            v.push(".".into());
         }
         v
     }
@@ -166,16 +189,18 @@ impl Menu {
     }
 
     pub fn handle(&mut self, key: Key) -> Outcome {
+        let n = self.rows().len();
         match self.step {
-            Step::Workflow => match key {
-                Key::Up => self.workflow = (self.workflow + self.rows() - 1) % self.rows(),
-                Key::Down => self.workflow = (self.workflow + 1) % self.rows(),
-                Key::Enter if self.on_again() => {
-                    if let Some(a) = &self.again {
-                        return Outcome::Run(a.args());
-                    }
+            Step::Pick => match key {
+                Key::Up => self.row = (self.row + n - 1) % n,
+                Key::Down => self.row = (self.row + 1) % n,
+                Key::Enter if self.current() == Row::Again => {
+                    return Outcome::Run(self.args());
                 }
-                Key::Enter => self.step = Step::Folder,
+                Key::Enter => {
+                    self.step = Step::Folder;
+                    self.folder_error = None;
+                }
                 Key::Esc | Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
@@ -189,256 +214,173 @@ impl Menu {
                     self.folder_error = None;
                 }
                 Key::Enter => {
-                    let p = Path::new(self.folder.trim());
-                    if self.folder.trim().is_empty() {
-                        self.folder_error = Some("type a folder".into());
-                    } else if !p.is_dir() {
-                        self.folder_error = Some("not a folder".into());
+                    let f = self.folder_given();
+                    if !Path::new(&f).is_dir() {
+                        self.folder_error = Some(format!("not a folder  {f}"));
                     } else {
-                        self.folder = self.folder.trim().to_string();
-                        self.step = if self.needs_scope() {
-                            Step::Scope
-                        } else {
-                            Step::Confirm
-                        };
+                        return Outcome::Run(self.args());
                     }
                 }
-                Key::Esc => self.step = Step::Workflow,
-                _ => {}
-            },
-            Step::Scope => match key {
-                Key::Up | Key::Down => self.scope = 1 - self.scope,
-                Key::Enter => self.step = Step::Kind,
-                Key::Esc => self.step = Step::Folder,
-                Key::Char('q') => return Outcome::Quit,
-                _ => {}
-            },
-            Step::Kind => match key {
-                Key::Up => self.kind = (self.kind + KINDS.len() - 1) % KINDS.len(),
-                Key::Down => self.kind = (self.kind + 1) % KINDS.len(),
-                Key::Enter => self.step = Step::Confirm,
-                Key::Esc => self.step = Step::Scope,
-                Key::Char('q') => return Outcome::Quit,
-                _ => {}
-            },
-            Step::Confirm => match key {
-                Key::Enter => return Outcome::Run(self.args()),
                 Key::Esc => {
-                    self.step = if self.needs_scope() {
-                        Step::Kind
-                    } else {
-                        Step::Folder
-                    }
+                    self.step = Step::Pick;
+                    self.folder.clear();
+                    self.folder_error = None;
                 }
-                Key::Char('q') => return Outcome::Quit,
                 _ => {}
             },
         }
         Outcome::Continue
     }
 
-    /// The frame as lines. `inner` cells between the two verticals.
+    /// The screen as lines, every one inside `t.width`.
     pub fn view(&self, t: &Theme) -> Vec<String> {
         let g = t.glyphs;
-        let total = t.width.clamp(44, 64);
-        let inner = total - 2;
+        let w = t.width.saturating_sub(1).min(100);
+        let amber = Rgb(0xFF, 0xB0, 0x00);
         let mut out: Vec<String> = Vec::new();
-
-        let title = format!("{} dedupe ", g.h);
-        let top = format!(
-            "{}{}{}{}",
-            g.tl,
-            title,
-            g.h.repeat(inner.saturating_sub(width(&title))),
-            g.tr
-        );
-        out.push(format!(" {}", t.paint(Role::Rule, &top)));
-
-        let mut body: Vec<Vec<(String, Role, bool)>> = Vec::new(); // (text, role, bold)
-        let push = |body: &mut Vec<Vec<(String, Role, bool)>>, segs: Vec<(String, Role, bool)>| {
-            body.push(segs)
+        let plate = if t.color {
+            "\x1b[1;38;2;24;22;18;48;2;255;176;0m dedupe \x1b[0m".to_string()
+        } else {
+            "dedupe".to_string()
         };
-        let plain = |s: &str| (s.to_string(), Role::Plate, false);
-        let dim = |s: &str| (s.to_string(), Role::Dupe, false);
-        let lit = |s: &str| (s.to_string(), Role::Keep, true);
-
-        let heading = match self.step {
-            Step::Workflow => "WORKFLOW",
-            Step::Folder => "FOLDER",
-            Step::Scope => "SCOPE",
-            Step::Kind => "KIND",
-            Step::Confirm => "CONFIRM",
+        // the first line: the name on its plate, the step, the build
+        let what = match (self.step, self.selected()) {
+            (Step::Pick, _) => t.paint_rgb(DIM, "the deduplifier"),
+            (Step::Folder, Some(p)) => t.paint_rgb_bold(
+                amber,
+                PIPELINES.iter().find(|x| x.0 == p).map_or("", |x| x.1),
+            ),
+            (Step::Folder, None) => String::new(),
         };
-        push(&mut body, vec![(format!("  {heading}"), Role::Plate, true)]);
-
+        let left = format!(" {plate}  {what}");
+        let id = crate::build_id();
+        let gap = w.saturating_sub(visible_width(&left) + width(&id)).max(2);
+        out.push(if visible_width(&left) + gap + width(&id) <= w {
+            format!("{left}{}{}", " ".repeat(gap), t.paint_rgb(DIM, &id))
+        } else {
+            left
+        });
+        out.push(String::new());
+        let room = w.saturating_sub(16);
         match self.step {
-            Step::Workflow => {
-                let offset = usize::from(self.again.is_some());
-                if let Some(a) = &self.again {
-                    let sel = self.workflow == 0;
-                    let ptr = if sel { g.pointer } else { " " };
-                    let avail = inner.saturating_sub(4 + 8 + 1);
-                    let label = shorten_middle(&a.label(), avail, g.ellipsis);
-                    push(
-                        &mut body,
-                        vec![
-                            (format!("  {ptr} "), Role::Keep, true),
-                            if sel {
-                                lit(&fit("again", 8))
-                            } else {
-                                plain(&fit("again", 8))
-                            },
-                            dim(&label),
-                        ],
-                    );
-                }
-                for (i, (_, name, desc)) in WORKFLOWS.iter().enumerate() {
-                    let sel = i + offset == self.workflow;
-                    let ptr = if sel { g.pointer } else { " " };
-                    let mut segs = vec![(format!("  {ptr} "), Role::Keep, true)];
-                    segs.push(if sel {
-                        lit(&fit(name, 8))
+            Step::Pick => {
+                let rows = self.rows();
+                for (i, r) in rows.iter().enumerate() {
+                    let sel = i == self.row.min(rows.len() - 1);
+                    let ptr = if sel {
+                        t.paint_rgb_bold(amber, g.pointer)
                     } else {
-                        plain(&fit(name, 8))
-                    });
-                    segs.push(dim(desc));
-                    push(&mut body, segs);
+                        " ".into()
+                    };
+                    let (name, line1, line2) = match r {
+                        Row::Pipe(k) => (
+                            PIPELINES[*k].1,
+                            PIPELINES[*k].2.to_string(),
+                            PIPELINES[*k].3,
+                        ),
+                        Row::Again => (
+                            "again",
+                            self.again.as_ref().map(|a| a.label()).unwrap_or_default(),
+                            "",
+                        ),
+                    };
+                    let big = matches!(r, Row::Pipe(0) | Row::Pipe(1));
+                    let label = if big {
+                        name.to_uppercase()
+                    } else {
+                        name.to_string()
+                    };
+                    let label = fit(&label, 8);
+                    let label = if sel {
+                        t.paint_rgb_bold(amber, &label)
+                    } else if big {
+                        t.paint_rgb_bold(PLATE, &label)
+                    } else {
+                        t.paint_rgb(PLATE, &label)
+                    };
+                    let line1 = shorten_middle(&line1, room, g.ellipsis);
+                    out.push(format!(
+                        "  {ptr} {label}  {}",
+                        if sel || big {
+                            t.paint_rgb(PLATE, &line1)
+                        } else {
+                            t.paint_rgb(DIM, &line1)
+                        }
+                    ));
+                    if !line2.is_empty() {
+                        out.push(format!(
+                            "              {}",
+                            t.paint_rgb(DIM, &fit(line2, room.min(width(line2))))
+                        ));
+                    }
+                    if big {
+                        out.push(String::new());
+                    }
                 }
-                push(&mut body, vec![plain("")]);
-                push(
-                    &mut body,
-                    vec![dim(&format!(
-                        "  {}{} move   enter select   q quit",
-                        g.up, g.down
-                    ))],
-                );
+                out.push(String::new());
+                let keys: Vec<(String, String)> = vec![
+                    (format!("{} {}", g.up, g.down), "choose".into()),
+                    ("enter".into(), "next".into()),
+                    ("q".into(), "quit".into()),
+                ];
+                out.push(format!(
+                    " {}",
+                    crate::workspace::fit_keys(t, &keys, w.saturating_sub(1))
+                ));
             }
             Step::Folder => {
-                let avail = inner.saturating_sub(6);
-                let shown = shorten_middle(&self.folder, avail, g.ellipsis);
-                push(
-                    &mut body,
-                    vec![
-                        (format!("  {} ", g.pointer), Role::Keep, true),
-                        lit(&shown),
-                        plain("_"),
-                    ],
-                );
-                match &self.folder_error {
-                    Some(e) => push(&mut body, vec![(format!("    {e}"), Role::Danger, false)]),
-                    None => push(&mut body, vec![plain("")]),
-                }
-                push(
-                    &mut body,
-                    vec![dim("  type a path   enter accept   esc back")],
-                );
-            }
-            Step::Scope => {
-                for (i, (name, _)) in SCOPES.iter().enumerate() {
-                    let sel = i == self.scope;
-                    let ptr = if sel { g.pointer } else { " " };
-                    push(
-                        &mut body,
-                        vec![
-                            (format!("  {ptr} "), Role::Keep, true),
-                            if sel { lit(name) } else { plain(name) },
-                        ],
-                    );
-                }
-                push(&mut body, vec![plain("")]);
-                push(
-                    &mut body,
-                    vec![dim(&format!(
-                        "  {}{} move   enter select   esc back   q quit",
-                        g.up, g.down
-                    ))],
-                );
-            }
-            Step::Kind => {
-                for (i, (name, _)) in KINDS.iter().enumerate() {
-                    let sel = i == self.kind;
-                    let ptr = if sel { g.pointer } else { " " };
-                    push(
-                        &mut body,
-                        vec![
-                            (format!("  {ptr} "), Role::Keep, true),
-                            if sel { lit(name) } else { plain(name) },
-                        ],
-                    );
-                }
-                push(&mut body, vec![plain("")]);
-                push(
-                    &mut body,
-                    vec![dim(&format!(
-                        "  {}{} move   enter select   esc back   q quit",
-                        g.up, g.down
-                    ))],
-                );
-            }
-            Step::Confirm => {
-                let avail = inner.saturating_sub(6);
-                let cmd = shorten_middle(&self.command_line(), avail, g.ellipsis);
-                push(
-                    &mut body,
-                    vec![(format!("  {} ", g.pointer), Role::Keep, true), lit(&cmd)],
-                );
-                let what = match self.selected() {
-                    Workflow::Find => "lists groups, then m milk  p purge  q",
-                    Workflow::Milk => "moves duplicates; dedupe --undo reverses it",
-                    Workflow::Purge => {
-                        "verifies bytes, then Recycle Bin; dedupe --undo reverses it"
-                    }
-                    Workflow::Undo => "reverses the newest journal for this folder",
-                    Workflow::Doctor => "runs the checks; writes and removes one probe file",
+                out.push(format!("  {}", t.paint_rgb_bold(PLATE, "FOLDER")));
+                let typed = self.folder.is_empty();
+                let shown_text = if typed {
+                    self.cwd.clone()
+                } else {
+                    self.folder.clone()
                 };
-                push(&mut body, vec![dim(&format!("    {what}"))]);
-                push(&mut body, vec![plain("")]);
-                push(&mut body, vec![dim("  enter run   esc back   q quit")]);
+                let shown_text = shorten_middle(&shown_text, room, g.ellipsis);
+                out.push(format!(
+                    "  {} {}{}",
+                    t.paint_rgb_bold(amber, g.pointer),
+                    if typed {
+                        t.paint_rgb(DIM, &shown_text)
+                    } else {
+                        t.paint_rgb_bold(PLATE, &shown_text)
+                    },
+                    t.paint_rgb(amber, "_")
+                ));
+                out.push(format!(
+                    "    {}",
+                    t.paint_rgb(
+                        DIM,
+                        &fit(
+                            if typed {
+                                "this folder, or type, paste or drop another"
+                            } else {
+                                "type, paste or drop a folder"
+                            },
+                            room
+                        )
+                    )
+                ));
+                if let Some(e) = &self.folder_error {
+                    out.push(format!("    {}", t.paint(Role::Danger, &fit(e, room))));
+                } else {
+                    out.push(String::new());
+                }
+                out.push(String::new());
+                let go = match self.selected() {
+                    Some(Pipeline::Batch) | Some(Pipeline::Review) => "run",
+                    Some(Pipeline::Undo) => "undo",
+                    Some(Pipeline::Doctor) => "check",
+                    None => "run",
+                };
+                let keys: Vec<(String, String)> =
+                    vec![("enter".into(), go.into()), ("esc".into(), "back".into())];
+                out.push(format!(
+                    " {}",
+                    crate::workspace::fit_keys(t, &keys, w.saturating_sub(1))
+                ));
             }
         }
-
-        for segs in body {
-            let plain_text: String = segs.iter().map(|(s, _, _)| s.as_str()).collect();
-            let w = width(&plain_text);
-            let mut line = String::new();
-            if w > inner {
-                // cut the last segment to fit
-                let mut used = 0;
-                for (s, role, bold) in &segs {
-                    let room = inner.saturating_sub(used);
-                    let piece = fit(s, room.min(width(s)));
-                    used += width(&piece);
-                    line.push_str(&if *bold {
-                        t.paint_bold(*role, &piece)
-                    } else {
-                        t.paint(*role, &piece)
-                    });
-                    if used >= inner {
-                        break;
-                    }
-                }
-                let pad = inner.saturating_sub(used);
-                line.push_str(&" ".repeat(pad));
-            } else {
-                for (s, role, bold) in &segs {
-                    line.push_str(&if *bold {
-                        t.paint_bold(*role, s)
-                    } else {
-                        t.paint(*role, s)
-                    });
-                }
-                line.push_str(&" ".repeat(inner - w));
-            }
-            out.push(format!(
-                " {}{}{}",
-                t.paint(Role::Rule, g.v),
-                line,
-                t.paint(Role::Rule, g.v)
-            ));
-        }
-
-        let bottom = format!("{}{}{}", g.bl, g.h.repeat(inner), g.br);
-        out.push(format!(" {}", t.paint(Role::Rule, &bottom)));
         out
     }
 }
@@ -508,133 +450,113 @@ mod tests {
         last
     }
 
+    fn typed(s: &str) -> Vec<Key> {
+        s.chars().map(Key::Char).collect()
+    }
+
     #[test]
-    fn again_runs_the_last_folder_and_shifts_the_workflows() {
+    fn batch_is_first_and_two_enters_run_it_here() {
+        let d = tempfile::tempdir().unwrap();
+        let cwd = d.path().to_str().unwrap();
+        let mut m = Menu::new(cwd);
+        assert_eq!(m.selected(), Some(Pipeline::Batch));
+        assert_eq!(m.handle(Key::Enter), Outcome::Continue);
+        assert_eq!(m.step, Step::Folder);
+        assert_eq!(m.handle(Key::Enter), Outcome::Run(vec!["batch".into()]));
+    }
+
+    #[test]
+    fn a_folder_typed_pasted_or_dropped_is_the_one_run_on() {
+        let d = tempfile::tempdir().unwrap();
+        let photos = tempfile::tempdir().unwrap();
+        let p = photos.path().to_str().unwrap().to_string();
+        let mut m = Menu::new(d.path().to_str().unwrap());
+        m.handle(Key::Enter);
+        // a dropped folder arrives quoted
+        let mut keys = typed(&format!("\"{p}\""));
+        keys.push(Key::Enter);
+        assert_eq!(
+            press(&mut m, &keys),
+            Outcome::Run(vec!["batch".into(), p.clone()])
+        );
+        // review: the same folder, the whole tree, the workspace after
+        let mut m = Menu::new(d.path().to_str().unwrap());
+        let mut keys = vec![Key::Down, Key::Enter];
+        keys.extend(typed(&p));
+        keys.push(Key::Enter);
+        assert_eq!(
+            press(&mut m, &keys),
+            Outcome::Run(vec!["find".into(), p, ".".into()])
+        );
+    }
+
+    #[test]
+    fn a_folder_that_is_not_one_stays_and_says_so() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = Menu::new(d.path().to_str().unwrap());
+        m.handle(Key::Enter);
+        let mut keys = typed("/no/such/folder/here");
+        keys.push(Key::Enter);
+        assert_eq!(press(&mut m, &keys), Outcome::Continue);
+        assert_eq!(m.step, Step::Folder);
+        assert!(m
+            .folder_error
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("not a folder"));
+        // esc goes back to the pipelines with nothing typed
+        m.handle(Key::Esc);
+        assert_eq!(m.step, Step::Pick);
+        assert!(m.folder.is_empty());
+        assert_eq!(m.handle(Key::Esc), Outcome::Quit);
+    }
+
+    #[test]
+    fn again_sits_under_the_pipelines_and_runs_at_once() {
         let d = tempfile::tempdir().unwrap();
         let cwd = d.path().to_str().unwrap();
         let photos = tempfile::tempdir().unwrap();
         let again = crate::recent::Recent {
             root: photos.path().to_path_buf(),
             recurse: true,
-            kind: "img".into(),
+            kind: String::new(),
             min: None,
+            batch: true,
         };
         let mut m = Menu::with_recent(cwd, Some(again.clone()));
-        assert_eq!(press(&mut m, &[Key::Enter]), Outcome::Run(again.args()));
-        // down once: the first workflow (find), as without `again`
-        let mut m = Menu::with_recent(cwd, Some(again));
-        press(&mut m, &[Key::Down, Key::Enter]);
-        assert_eq!(m.step, Step::Folder);
-        assert_eq!(m.selected(), Workflow::Find);
-        // up from the top wraps to the last workflow (doctor)
-        let mut m = Menu::with_recent(cwd, None);
-        press(&mut m, &[Key::Up]);
-        assert_eq!(m.selected(), Workflow::Doctor);
-    }
-
-    #[test]
-    fn find_recursive_images_composes_native_command() {
-        let d = tempfile::tempdir().unwrap();
-        let cwd = d.path().to_str().unwrap();
+        assert_eq!(m.selected(), Some(Pipeline::Batch));
+        let out = press(&mut m, &[Key::Down, Key::Down, Key::Enter]);
+        assert_eq!(out, Outcome::Run(again.args()));
+        assert_eq!(again.args()[0], "batch");
+        // without one, the third row is undo
         let mut m = Menu::new(cwd);
-        // find → folder (accept cwd) → scope: subfolders → kind: images → confirm
-        let out = press(
-            &mut m,
-            &[
-                Key::Enter,
-                Key::Enter,
-                Key::Down,
-                Key::Enter,
-                Key::Down,
-                Key::Enter,
-                Key::Enter,
-            ],
-        );
-        assert_eq!(
-            out,
-            Outcome::Run(vec!["find".into(), ".".into(), "img".into()])
-        );
-        assert_eq!(m.command_line(), "dedupe find . img");
-
-        // a typed folder other than the cwd is passed through
-        let other = tempfile::tempdir().unwrap();
-        let mut m = Menu::new(cwd);
-        m.folder = other.path().to_str().unwrap().to_string();
-        press(
-            &mut m,
-            &[Key::Enter, Key::Enter, Key::Enter, Key::Enter, Key::Enter],
-        );
-        assert_eq!(
-            m.args(),
-            vec![
-                "find".to_string(),
-                other.path().to_str().unwrap().to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn undo_skips_scope_and_kind() {
-        let d = tempfile::tempdir().unwrap();
-        let cwd = d.path().to_str().unwrap();
-        let mut m = Menu::new(cwd);
-        let out = press(
-            &mut m,
-            &[
-                Key::Down,
-                Key::Down,
-                Key::Down,
-                Key::Enter,
-                Key::Enter,
-                Key::Enter,
-            ],
-        );
+        press(&mut m, &[Key::Down, Key::Down]);
+        assert_eq!(m.selected(), Some(Pipeline::Undo));
+        let out = press(&mut m, &[Key::Enter, Key::Enter]);
         assert_eq!(out, Outcome::Run(vec!["--undo".into()]));
-        let mut m = Menu::new(cwd);
-        assert_eq!(m.handle(Key::Char('q')), Outcome::Quit);
     }
 
     #[test]
-    fn bad_folder_stays_on_folder_step() {
-        let mut m = Menu::new("/definitely/not/a/folder/xyz");
-        press(&mut m, &[Key::Enter, Key::Enter]);
-        assert_eq!(m.step, Step::Folder);
-        assert!(m.folder_error.is_some());
-    }
-
-    #[test]
-    fn esc_walks_back_and_quits_at_top() {
+    fn every_line_fits_and_the_steps_say_what_they_are() {
         let d = tempfile::tempdir().unwrap();
         let cwd = d.path().to_str().unwrap();
-        let mut m = Menu::new(cwd);
-        press(&mut m, &[Key::Enter, Key::Enter, Key::Enter, Key::Enter]);
-        assert_eq!(m.step, Step::Confirm);
-        press(&mut m, &[Key::Esc, Key::Esc, Key::Esc, Key::Esc]);
-        assert_eq!(m.step, Step::Workflow);
-        assert_eq!(m.handle(Key::Esc), Outcome::Quit);
-    }
-
-    #[test]
-    fn frame_lines_are_exactly_frame_width() {
-        let d = tempfile::tempdir().unwrap();
-        let cwd = d.path().to_str().unwrap();
-        let mut m = Menu::new(cwd);
-        let t = Theme::custom(false, true, 80, false);
-        for step in [
-            Step::Workflow,
-            Step::Folder,
-            Step::Scope,
-            Step::Kind,
-            Step::Confirm,
-        ] {
-            m.step = step;
-            let lines = m.view(&t);
-            let w0 = width(&lines[0]);
-            for l in &lines {
-                assert_eq!(width(l), w0, "{step:?}: {l:?}");
+        for w in [40usize, 60, 80, 120, 200] {
+            let t = Theme::custom(true, true, w, true);
+            let mut m = Menu::new(cwd);
+            for l in m.view(&t) {
+                assert!(visible_width(&l) < w, "{w}: {l:?}");
             }
-            assert!(lines[0].ends_with('┓'));
-            assert!(lines.last().unwrap().ends_with('┛'));
+            let pick = crate::util::strip_sgr(&m.view(&t).join("\n"));
+            assert!(pick.contains("BATCH") && pick.contains("REVIEW"), "{pick}");
+            m.handle(Key::Enter);
+            let folder = crate::util::strip_sgr(&m.view(&t).join("\n"));
+            assert!(
+                folder.contains("FOLDER") && folder.contains("batch"),
+                "{folder}"
+            );
+            for l in m.view(&t) {
+                assert!(visible_width(&l) < w, "{w}: {l:?}");
+            }
         }
     }
 }

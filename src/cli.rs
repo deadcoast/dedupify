@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! dedupe                                   menu
+//! dedupe batch [PATH] [img|vid] [-n]       the whole tree, done for you
 //! dedupe <find|milk|purge> [PATH] [.] [img|vid] [-n] [-q]
 //!        [--skip NAME]… [--unskip NAME|all]… [--min SIZE]
 //! dedupe --undo | -u [PATH] [-n]
@@ -20,6 +21,10 @@ use crate::kind::Kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
+    /// The batch pipeline: the whole tree below PATH, its copies and
+    /// confirmed lookalikes moved into `_milked`, said by folder
+    /// (docs/CLI.md §2b). [CLAUDE, the owner's direction of 2026-11-14]
+    Batch,
     Find,
     Milk,
     Purge,
@@ -32,6 +37,7 @@ pub enum Command {
 impl Command {
     pub fn word(self) -> &'static str {
         match self {
+            Command::Batch => "batch",
             Command::Find => "find",
             Command::Milk => "milk",
             Command::Purge => "purge",
@@ -88,8 +94,12 @@ impl Invocation {
         if let Some(r) = &self.root_display {
             parts.push(quote_if_needed(r));
         }
-        if matches!(command, Command::Find | Command::Milk | Command::Purge) {
-            if self.recurse {
+        if matches!(
+            command,
+            Command::Batch | Command::Find | Command::Milk | Command::Purge
+        ) {
+            // batch always takes the whole tree: its `.` goes unsaid
+            if self.recurse && command != Command::Batch {
                 parts.push(".".into());
             }
             let k = self.kind.token();
@@ -106,7 +116,12 @@ impl Invocation {
                 parts.push(m.clone());
             }
         }
-        if self.dry_run && matches!(command, Command::Milk | Command::Purge | Command::Undo) {
+        if self.dry_run
+            && matches!(
+                command,
+                Command::Batch | Command::Milk | Command::Purge | Command::Undo
+            )
+        {
             parts.push("--dry-run".into());
         }
         parts.join(" ")
@@ -148,7 +163,10 @@ impl fmt::Display for CliError {
             CliError::UnknownFlag(s) => write!(f, "unknown flag  {s}"),
             CliError::UnknownToken(s) => write!(f, "unknown token  {s}"),
             CliError::MissingCommand(s) => {
-                write!(f, "no command before  {s}   (find, milk, purge, doctor)")
+                write!(
+                    f,
+                    "no command before  {s}   (batch, find, milk, purge, doctor)"
+                )
             }
             CliError::SecondPath { first, second } => {
                 write!(f, "two paths given  {first}  and  {second}")
@@ -246,6 +264,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         }
         if command.is_none() && path.is_none() {
             let c = match t {
+                "batch" => Some(Command::Batch),
                 "find" => Some(Command::Find),
                 "milk" => Some(Command::Milk),
                 "purge" => Some(Command::Purge),
@@ -259,6 +278,7 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         } else if command.is_none() {
             // a path came first and then a command word — accept it too
             let c = match t {
+                "batch" => Some(Command::Batch),
                 "find" => Some(Command::Find),
                 "milk" => Some(Command::Milk),
                 "purge" => Some(Command::Purge),
@@ -343,7 +363,8 @@ pub fn parse(args: &[String], cwd: &Path) -> Result<Invocation, CliError> {
         command,
         root,
         root_display: path,
-        recurse,
+        // batch is the whole tree below its folder, always
+        recurse: recurse || command == Command::Batch,
         kind,
         dry_run,
         quick,

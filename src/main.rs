@@ -47,7 +47,7 @@ fn run(args: &[String], cwd: &std::path::Path, r: &Renderer, theme: Theme) -> i3
     // the skip list in force: remembered, plus --skip, minus --unskip
     if matches!(
         inv.command,
-        Command::Find | Command::Milk | Command::Purge | Command::Doctor
+        Command::Batch | Command::Find | Command::Milk | Command::Purge | Command::Doctor
     ) {
         inv.skip = dedupe::skip::resolve(&inv.skip_add, &inv.skip_remove);
     }

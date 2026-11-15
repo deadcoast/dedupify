@@ -791,8 +791,11 @@ fn spans(y: &Yield, cells: usize) -> Vec<Span<'_>> {
             }
             let upto = upto.min(cells).max(end);
             if upto > end {
+                // a group of one cell is a sliver of its kind, not a group
+                // to tell apart: the kind's colour, and the next group of
+                // two cells or more takes the turn
                 let base = hue.rgb();
-                let tone = if k % 2 == 0 {
+                let tone = if upto - end < 2 || k % 2 == 0 {
                     base
                 } else {
                     base.lerp(GROOVE, 0.45)
@@ -805,7 +808,9 @@ fn spans(y: &Yield, cells: usize) -> Vec<Span<'_>> {
                     name: &g.2,
                     bytes: g.1,
                 });
-                k += 1;
+                if upto - end >= 2 {
+                    k += 1;
+                }
                 end = upto;
             }
         }

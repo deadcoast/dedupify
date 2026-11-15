@@ -62,6 +62,23 @@ The owner's direction of 2026-11-13, not an IDENTIFIED item; IDs here:
    sheen while coming, risen from the ground on arrival), their
    captions, the file's words, its evidence as meters against the limits
 
+## Phase 18 — the batch pipeline   `[done]`
+
+The owner's direction of 2026-11-14, not an IDENTIFIED item; IDs here:
+
+1. **OUT-07** the workspace's keys where they act: one line under the
+   gauge, keycaps; `s` and `/` on the groups' frame, the file's keys on
+   the comparison's; every key on the card `?` opens
+2. **BATCH-01** `dedupe batch PATH`: the whole tree, copies and
+   confirmed lookalikes into `_milked` under one journal
+3. **BATCH-02** keepers hold to one side of a pair of folders
+4. **BATCH-03** the account by folder, `FROM`: what left each folder,
+   how much of it, what it was, where the keepers are; mirrors raised
+5. **BATCH-04** the end bar: open `_milked`, undo it all, done
+6. **BATCH-05** the menu: two pipelines and a folder
+7. **OUT-08** the yield's gauge: a group of one cell in its kind's hue,
+   not a stripe
+
 ## Not yet placed
 
 Items IDENTIFIED raised that no planned milestone holds; they wait for a

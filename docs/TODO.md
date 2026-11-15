@@ -1,29 +1,30 @@
-# TODO — Phase 17: the fold, the output redesigned
+# TODO — Phase 18: the batch pipeline
 
 ```txt
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 
-Milestone: `PLAN.md` § Phase 17 · items: `SHELVED.md` § Phase 17 ·
-source: the owner's direction of 2026-11-13 (the Phase 16 Windows run's
-output and log). Build order top to bottom. Previous milestone: Phase 16,
-delivered 2026-11-13 (`SHELVED.md` § Phase 16 `[done]`).
+Milestone: `PLAN.md` § Phase 18 · items: `SHELVED.md` § Phase 18 ·
+source: the owner's direction of 2026-11-14. Build order top to bottom.
+Previous milestone: Phase 17, delivered 2026-11-13 (`SHELVED.md` §
+Phase 17 `[done]`).
 
-- [x] **OUT-03** a filter or a sort shows its own groups
-- [x] **QOL-13** Windows Terminal known by its window; sixel cell 10 × 20
-- [x] **OUT-01** the fold, the default output; `-v` / `--verbose` the full one
-- [x] **OUT-02** `RUN_VERIFY`, one live line per workflow
-- [x] **OUT-05** the workspace in the fold
-- [x] **OUT-06** the workspace in two panels: the groups and the comparison
+- [x] **OUT-07** the workspace's keys where they act; the `?` card
+- [x] **BATCH-01** `dedupe batch PATH`, the whole tree in one pass
+- [x] **BATCH-02** keepers to one side of a pair of folders
+- [x] **BATCH-03** the account by folder
+- [x] **BATCH-04** the end bar
+- [x] **BATCH-05** the menu: two pipelines and a folder
+- [x] **OUT-08** one-cell groups not striped on the yield's gauge
 
 Done when: every box ticked, the suite green on Linux and in the CI
-matrix on Windows, `VERIFICATION` § Phase 17 written, and `PLAN.md` marks
-Phase 17 delivered.
+matrix on Windows, `VERIFICATION` § Phase 18 written, and `PLAN.md` marks
+Phase 18 delivered.
 
 ---
 
 ## Next
 
-This list is complete and `SHELVED.md` § Phase 17 is `[done]`. No
+This list is complete and `SHELVED.md` § Phase 18 is `[done]`. No
 `[shelved]` section remains: the next milestone comes from a new
 IDENTIFIED pass.

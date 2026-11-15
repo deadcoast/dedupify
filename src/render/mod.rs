@@ -144,7 +144,10 @@ impl Renderer {
             )
         };
         let mut tail: Vec<String> = Vec::new();
-        if matches!(inv.command, Command::Find | Command::Milk | Command::Purge) {
+        if matches!(
+            inv.command,
+            Command::Batch | Command::Find | Command::Milk | Command::Purge
+        ) {
             tail.push(t.paint(
                 Role::Dupe,
                 if inv.recurse {
@@ -164,7 +167,12 @@ impl Renderer {
                 tail.push(t.paint(Role::Dupe, &format!("skip {}", inv.skip.join(", "))));
             }
         }
-        if inv.dry_run && matches!(inv.command, Command::Milk | Command::Purge | Command::Undo) {
+        if inv.dry_run
+            && matches!(
+                inv.command,
+                Command::Batch | Command::Milk | Command::Purge | Command::Undo
+            )
+        {
             tail.push(t.paint_bold(Role::Warn, "dry run"));
         }
         // on a narrow line the root keeps at least 16 cells: the parts
