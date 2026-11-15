@@ -1,6 +1,6 @@
 # TODO — Phase 17: the fold, the output redesigned
 
-```
+```txt
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 

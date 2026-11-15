@@ -112,7 +112,7 @@ almost every byte.
 ### 2.1 Candidates and evidence
 
 | Hash | Bits | Construction | Source |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | aHash (average) | 64 | 8×8 grayscale, bit = pixel > mean | Krawetz 2011 |
 | dHash (difference) | 64 | 9×8 grayscale, bit = p[x] > p[x+1] (row gradient sign) | Krawetz 2013 |
 | pHash (DCT) | 64 | 32×32 grayscale → 2-D DCT-II → 8×8 low-frequency block → bit = coeff > median | Zauner 2010 |
@@ -713,6 +713,7 @@ upright too. The OM-1's `DateTimeOriginal` is `0000:00:00 00:00:00` (the
 clock was never set) and reads as no moment.
 
 **What a RAW is allowed.** A RAW is the original exposure, so:
+
 - it is the keeper of its near group (after the shared-moment rule, so a
   RAW from another exposure cannot capture a family);
 - as a member — another RAW of the same shot, or after a person made a
@@ -1092,20 +1093,20 @@ reorders, every member being the same bytes.
 
 ## 6. Sources
 
-- BLAKE3 paper — https://cgi.cse.unsw.edu.au/~cs4601/refs/papers/blake3.pdf
-- Needle In A Haystack, Fast (perceptual hash benchmark) — https://arxiv.org/pdf/2206.00282
-- Zauner, Implementation and Benchmarking of Perceptual Image Hash Functions — https://phash.org/docs/pubs/thesis_zauner.pdf
-- PDQ & TMK+PDQF test drive — https://ar5iv.labs.arxiv.org/html/1912.07745
-- Norouzi, Punjani, Fleet, Fast Exact Search in Hamming Space with Multi-Index Hashing — https://ar5iv.arxiv.org/html/1307.2982 (PAMI version: https://www.cs.toronto.edu/~fleet/research/Papers/MIH-pami2014.pdf)
-- Pizzi et al., A Self-Supervised Descriptor for Image Copy Detection — https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html
-- TMK reference implementation — https://github.com/facebook/ThreatExchange/tree/main/tmk (cpp/algo/tmkfv.cpp, cpp/bin/tmk-hash-video.cpp, README.md); kernel paper — Poullot et al., ACM MM 2015, https://dblp.org/rec/conf/mm/PoullotTNJS15
-- PDQ reference implementation — https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md
-- SSCD ONNX export used — https://huggingface.co/nutszebra/sscd_onnx (sscd_disc_mixup.onnx, sha256 e65e2a5b…); Meta's checkpoint — https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt (sha256 9f26bd4c…); SSCD repository — https://github.com/facebookresearch/sscd-copy-detection
-- `tract` — https://github.com/sonos/tract
-- Normalised cross-correlation for template matching — J. P. Lewis, "Fast Normalized Cross-Correlation", Vision Interface 1995, http://scribblethink.org/Work/nvisionInterface/nip.html
-- EXIF 2.32 (CIPA DC-008-2019), tags 0x9003 DateTimeOriginal and 0x9291 SubSecTimeOriginal — https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf; reader: `kamadak-exif` — https://github.com/kamadak/exif-rs
-- `trash` crate — https://docs.rs/trash
-- HEIF: ISO/IEC 23008-12 (Image File Format), MIAF ISO/IEC 23000-22; FFmpeg Changelog (7.0 HEIF/AVIF stills and tiled stills; 8.1 CLI tiled HEIF) — https://github.com/FFmpeg/FFmpeg/blob/master/Changelog; AVIF specification — https://aomediacodec.github.io/av1-avif/; AVIF transform test files (Link-U) — https://github.com/AOMediaCodec/av1-avif/tree/master/testFiles/Link-U; HEIF conformance files — https://github.com/nokiatech/heif_conformance; libheif examples — https://github.com/strukturag/libheif/tree/master/examples
+- BLAKE3 paper — <https://cgi.cse.unsw.edu.au/~cs4601/refs/papers/blake3.pdf>
+- Needle In A Haystack, Fast (perceptual hash benchmark) — <https://arxiv.org/pdf/2206.00282>
+- Zauner, Implementation and Benchmarking of Perceptual Image Hash Functions — <https://phash.org/docs/pubs/thesis_zauner.pdf>
+- PDQ & TMK+PDQF test drive — <https://ar5iv.labs.arxiv.org/html/1912.07745>
+- Norouzi, Punjani, Fleet, Fast Exact Search in Hamming Space with Multi-Index Hashing — <https://ar5iv.arxiv.org/html/1307.2982> (PAMI version: <https://www.cs.toronto.edu/~fleet/research/Papers/MIH-pami2014.pdf>)
+- Pizzi et al., A Self-Supervised Descriptor for Image Copy Detection — <https://openaccess.thecvf.com/content/CVPR2022/html/Pizzi_A_Self-Supervised_Descriptor_for_Image_Copy_Detection_CVPR_2022_paper.html>
+- TMK reference implementation — <https://github.com/facebook/ThreatExchange/tree/main/tmk> (cpp/algo/tmkfv.cpp, cpp/bin/tmk-hash-video.cpp, README.md); kernel paper — Poullot et al., ACM MM 2015, <https://dblp.org/rec/conf/mm/PoullotTNJS15>
+- PDQ reference implementation — <https://github.com/facebook/ThreatExchange/tree/main/pdq/cpp> (hashing/pdqhashing.cpp, downscaling/downscaling.cpp) and README — <https://github.com/facebook/ThreatExchange/blob/main/pdq/README.md>
+- SSCD ONNX export used — <https://huggingface.co/nutszebra/sscd_onnx> (sscd_disc_mixup.onnx, sha256 e65e2a5b…); Meta's checkpoint — <https://dl.fbaipublicfiles.com/sscd-copy-detection/sscd_disc_mixup.torchscript.pt> (sha256 9f26bd4c…); SSCD repository — <https://github.com/facebookresearch/sscd-copy-detection>
+- `tract` — <https://github.com/sonos/tract>
+- Normalised cross-correlation for template matching — J. P. Lewis, "Fast Normalized Cross-Correlation", Vision Interface 1995, <http://scribblethink.org/Work/nvisionInterface/nip.html>
+- EXIF 2.32 (CIPA DC-008-2019), tags 0x9003 DateTimeOriginal and 0x9291 SubSecTimeOriginal — <https://www.cipa.jp/std/documents/e/DC-X008-Translation-2019-E.pdf>; reader: `kamadak-exif` — <https://github.com/kamadak/exif-rs>
+- `trash` crate — <https://docs.rs/trash>
+- HEIF: ISO/IEC 23008-12 (Image File Format), MIAF ISO/IEC 23000-22; FFmpeg Changelog (7.0 HEIF/AVIF stills and tiled stills; 8.1 CLI tiled HEIF) — <https://github.com/FFmpeg/FFmpeg/blob/master/Changelog>; AVIF specification — <https://aomediacodec.github.io/av1-avif/>; AVIF transform test files (Link-U) — <https://github.com/AOMediaCodec/av1-avif/tree/master/testFiles/Link-U>; HEIF conformance files — <https://github.com/nokiatech/heif_conformance>; libheif examples — <https://github.com/strukturag/libheif/tree/master/examples>
 - Clean aperture: ISO/IEC 14496-12 §12.1.4 (`clap`)
-- Real camera and phone files with independent metadata dumps — https://github.com/drewnoakes/metadata-extractor-images (heic, heif, avif, cr2, cr3, nef, arw, dng, raf, orf, rw2, pef)
-- `image_hasher` crate (evaluated, not adopted) — https://lib.rs/crates/image_hasher
+- Real camera and phone files with independent metadata dumps — <https://github.com/drewnoakes/metadata-extractor-images> (heic, heif, avif, cr2, cr3, nef, arw, dng, raf, orf, rw2, pef)
+- `image_hasher` crate (evaluated, not adopted) — <https://lib.rs/crates/image_hasher>

@@ -29,7 +29,7 @@ closes a debt a VERIFICATION section left open, that section is named.
 ## 1. Current state vs intended design
 
 | Design requirement (brief, `docs/CLI.md` [SPEC]) | State | Evidence / gap |
-|---|---|---|
+| --- | --- | --- |
 | `find` — in-depth search ending in an actionable next step | met | the result opens as the workspace (CLI §2a); 32 end-to-end tests, one driving it by keys on Linux and Windows |
 | `milk` — duplicates into `_milked` | met | rename within a volume, verified copy across volumes (`fsops.rs`); undo crosses back |
 | `purge` — the largest, strongest, most accurate suite | partial | byte verify, two-family rule, Recycle Bin, undo; the bin **refusing** a file (`m milk the N the bin refused`) was never driven (VERIFICATION Phase 10, Not verified) — TECH-11 |

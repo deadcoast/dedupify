@@ -27,11 +27,11 @@ it, then deletes the original.
 `docs/COMPARISON.md` says what here is the standard pipeline and what is
 not.
 
-```
+```txt
 cargo install --path .
 ```
 
-```
+```txt
 dedupe                      workflow menu
 dedupe find [PATH] [.]      list every duplicate group, then decide in the workspace
 dedupe milk [PATH] [.]      move duplicates into PATH\_milked

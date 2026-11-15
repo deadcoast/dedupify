@@ -454,7 +454,7 @@ pictures, their evidence as meters (OUT-06).
 
 ## Docs chain
 
-```
+```txt
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 

@@ -1,6 +1,6 @@
 # SHELVED — actionable items, ordered by milestone
 
-```
+```txt
 [IDENTIFIED + PLAN] -> [SHELVED] -> [TODO]
 ```
 

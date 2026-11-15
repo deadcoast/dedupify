@@ -42,7 +42,7 @@ too, as `dedupe` does for all eight dihedral variants.
 **What is different is how a decision is made.**
 
 | | czkawka Similar Images (as its docs and source show) | `dedupe` |
-|---|---|---|
+| --- | --- | --- |
 | evidence to group | one perceptual hash at a chosen size, Hamming distance under a preset (`SIMILAR_VALUES`, e.g. ≤ 15 of 256 bits at 16×16 "Medium") | two 64-bit hashes of different construction (gradient and DCT) must both be within threshold on the same orientation |
 | evidence to delete or move | the same single distance | a second family must agree: PDQ ≤ 31 (frequency domain, 256 bits) **or** the geometric fit ≥ 0.92 (spatial correlation); the learned descriptor admits but never acts alone |
 | crops, letterboxes, small rotations | not matched by block hashes (nor by `dedupe`'s) | found by the fit when the hashes or the descriptor bring the pair in; the fit also tells which is the crop and by how much |

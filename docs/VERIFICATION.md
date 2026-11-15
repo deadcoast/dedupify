@@ -18,7 +18,7 @@ a same-size, same-sample, different-content decoy never reported; `-q`
 reporting it as LIKELY; `milk -n` touching nothing and writing no journal;
 `milk .` then `find .` reporting no duplicates; `--undo` restoring the
 exact file list and pruning `_milked`; name collision inside `_milked`
-getting ` (2)`; `purge -n` verifying bytes and changing nothing; `img`
+getting `(2)`; `purge -n` verifying bytes and changing nothing; `img`
 filter excluding videos; every error path exiting 1 with the help hint;
 help and doctor pages.
 
@@ -30,7 +30,7 @@ byte 5 (sample-different), two empty files, and a path 150 characters
 deep.
 
 | run | observed |
-|---|---|
+| --- | --- |
 | `find .` | 15 candidates (2 empty skipped) → 13 share a size → 12 share a sample → 10 confirmed; 4 groups, 6 duplicates, 2.99 MB reclaimable; bytes hashed 5.76 MB (the four 300 KB copies, the two 2 MB videos, and the sample-equal pair) |
 | `find` (no `.`) | 1 group: the two notes files in the root |
 | `find . -q` | 5 LIKELY groups; the sample-equal decoy pair included and labelled |
@@ -62,7 +62,7 @@ command.
 same-size decoys differing in one middle byte.
 
 | run | wall | result |
-|---|---|---|
+| --- | --- | --- |
 | `find .` | 0.38 s (first), 0.14 s (repeat) | 435 groups, 518 duplicates, 130 MB reclaimable; 353 MB hashed |
 | `find . -q` | ~0.1 s | 613 groups, 800 "duplicates" — the 300 decoys counted, as the LIKELY label warns |
 
@@ -80,13 +80,13 @@ Peak resident memory 13 MB.
 
 ---
 
-# VERIFICATION — Phase 2, run on 2026-11-05
+## VERIFICATION — Phase 2, run on 2026-11-05
 
 Same environment (Linux, 2 vCPUs, Rust 1.97, release). Windows
 type-checked again (`cargo check --target x86_64-pc-windows-msvc`), not
 executed.
 
-## Automated
+## Phase 2 Automated
 
 `cargo test --release` — 48 unit tests + 12 end-to-end tests, all passing.
 New unit coverage: DCT-II against the naive double sum; dihedral group
@@ -109,7 +109,7 @@ tint; 640×480 to 900×1200) × 21 perturbations = 3,300 signatures. 22.5 ms
 per perturbed image including the transform itself.
 
 | perturbation | d max | d p95 | p max | p p95 | recall |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | scale 50 % | 1 | 0 | 2 | 0 | 100 % |
 | scale 25 % | 2 | 1 | 2 | 0 | 100 % |
 | upscale 150 % | 1 | 0 | 2 | 0 | 100 % |
@@ -140,7 +140,7 @@ Threshold sweep — recall over the perturbations a block hash can be
 expected to survive (all but rotate 2°/5° and crop 60 %) | false positives:
 
 | d \ p | ≤10 | ≤12 | ≤14 | ≤16 | ≤18 | ≤20 |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | ≤6 | 81.7 % \| 0 | 83.4 % \| 0 | 85.7 % \| 0 | 87.2 % \| 0 | 87.7 % \| 0 | 88.1 % \| 0 |
 | ≤8 | 83.2 % \| 0 | 85.5 % \| 0 | 88.3 % \| 0 | 90.0 % \| 0 | 90.8 % \| 0 | 91.3 % \| 0 |
 | **≤10** | 83.7 % \| 0 | 86.5 % \| 0 | **89.5 % \| 0** | 91.4 % \| 1 | 92.4 % \| 1 | 93.0 % \| 1 |
@@ -156,7 +156,7 @@ identical 25,299 pairs.
 Random codes with planted copies, 2 vCPUs:
 
 | signatures | linear | MIH |
-|---|---|---|
+| --- | --- | --- |
 | 2,200 | 0.024 s | 0.032 s |
 | 5,500 | 0.154 s | 0.120 s |
 | 11,000 | 0.599 s | 0.364 s |
@@ -177,7 +177,7 @@ exactly the planted structure**; 0 false merges; one member displayed over
 threshold relative to its keeper (linked through the mirror), shown in the
 warning colour as designed.
 
-## Not verified here
+## Phase 2 Not verified here
 
 - Execution on Windows (type-checked only).
 - Real photographs: the corpus is procedural. Rates above are the
@@ -189,7 +189,7 @@ warning colour as designed.
 
 ---
 
-# VERIFICATION — Phase 2b (PDQ), run on 2026-11-07
+## VERIFICATION — Phase 2b (PDQ), run on 2026-11-07
 
 Same environment. Windows type-checked, not executed. `cargo test
 --release`: 56 unit + 12 end-to-end tests passing; `cargo clippy
@@ -216,7 +216,7 @@ Same 150 × 21 corpus. `q` is the PDQ distance on the orientation the
 64-bit pair chose; `q*` the best over all orientations.
 
 | perturbation | q max | q p95 | q* max | recall q≤31 | d∧p∧q | d∧p only |
-|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- |
 | scale 50 % | 8 | 8 | 8 | 100 % | 100 % | 100 % |
 | scale 25 % | 14 | 10 | 14 | 100 % | 100 % | 100 % |
 | upscale 150 % | 12 | 8 | 12 | 100 % | 100 % | 100 % |
@@ -239,7 +239,7 @@ Same 150 × 21 corpus. `q` is the PDQ distance on the orientation the
 | letterbox | 142 | 122 | 124 | 0 % | 0 % | 62.0 % |
 | squeeze 75 % | 10 | 4 | 10 | 100 % | 100 % | 100 % |
 
-Negatives, 480,525 pairs: min q* **74**, 0.1st percentile 94, 1st
+Negatives, 480,525 pairs: min q***74**, 0.1st percentile 94, 1st
 percentile 102, median 116, mean 115.5. False positives at q* ≤ T for
 T ∈ {24, 28, 31, 36, 40, 48, 56, 64}: **0 at every T**. PDQ-alone recall
 over the survivable perturbations: 77.6 % at T = 24, 77.7 % at 31, 80.4 %
@@ -253,7 +253,7 @@ negatives never came within 74 bits.
 ### Small-input upscale floor (`MIN_SIDE`)
 
 | MIN_SIDE | scale 25 % q max / p95 | scale 50 % q max | bright −20 % q max | gamma recall |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | none | 32 / 26 (99.3 %) | 12 | 4 | 98.7 % |
 | 256 | 16 / 10 | 12 | 4 | 98.7 % |
 | **384** | **14 / 10** | **8** | **4** | **98.7 %** |
@@ -264,7 +264,7 @@ Negatives identical for all four. Shipped: 384.
 ## Manual, photo fixture (8 files)
 
 | run | observed |
-|---|---|
+| --- | --- |
 | `find . img` | GROUP 001 (export + byte copy); NEAR 002: keeper `beach.png`, mirror q 8, export q 2, 5 % crop d 10 p 6 **q 32** lit in warning colour, small q 4 |
 | `purge . -n` | 1 `would` + 3 `would~` (q 8, 2, 4); `kept~ beach_crop.jpg  PDQ q 32 over 31`; footer names `dedupe milk .` |
 | `purge .` | 4 binned through the OS trash; crop stays |
@@ -282,7 +282,7 @@ groups as before; **all 123 near members PDQ-confirmed, max q 6**; `purge
 Per-image profile (1600×1200 JPEG, single thread): decode 5.8 ms,
 prefilter 3.9 ms, Lanczos grid 7.0 ms, PDQ 3.2 ms, dHash+pHash×8 1.2 ms.
 
-## Not verified here
+## Phase 2b (PDQ) Not verified here
 
 - Bit-identity with the reference PDQ tool (its Python wrapper could not
   be installed in this environment; the departures are documented in
@@ -294,14 +294,14 @@ prefilter 3.9 ms, Lanczos grid 7.0 ms, PDQ 3.2 ms, dHash+pHash×8 1.2 ms.
 
 ---
 
-# VERIFICATION — Phase 3 (video), run on 2026-11-07
+## VERIFICATION — Phase 3 (video), run on 2026-11-07
 
 Same environment; ffmpeg 6.1.1 with libx264. Windows type-checked, not
 executed. `cargo test --release`: 63 unit + 15 end-to-end tests passing
 (the three video end-to-end tests generate their clips with ffmpeg and
 skip when it is absent); `cargo clippy --all-targets` clean.
 
-## Unit coverage added
+## Phase 3 (video) Unit coverage added
 
 Position indices inside the frame range and increasing; frame-rate
 fraction parsing; identical TMK descriptors score level 1 = level 2 = 1 at
@@ -327,7 +327,7 @@ frames at 15 fps; generation 294 s, hashing 132 s (2.18 ms per frame
 including ffmpeg).
 
 | edit | d med | p med | q med | l1 min | l2 min | positional | TMK | grouped | binnable |
-|---|---|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | re-encode crf30 | 2 | 2 | 6 | 0.957 | 0.948 | 94 % | 100 % | 100 % | 100 % |
 | scale 50 % | 1 | 2 | 6 | 0.950 | 0.973 | 100 % | 100 % | 100 % | 100 % |
 | crop 90 % | 9 | 14 | 88 | 0.501 | 0.493 | 50 % | 50 % | 56 % | 31 % |
@@ -353,7 +353,7 @@ TMK sweep — false groups | recall over the TMK-carried edits (all but
 crop, mirror, letterbox):
 
 | l1 \ l2 | ≥0.70 | ≥0.75 | ≥0.80 | ≥0.85 | ≥0.90 |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | ≥0.5 | 19 \| 100 % | 4 \| 100 % | **0 \| 99.3 %** | 0 \| 98.6 % | **0 \| 96.5 %** |
 | ≥0.6 | 19 \| 100 % | 4 \| 100 % | 0 \| 99.3 % | 0 \| 98.6 % | 0 \| 96.5 % |
 | ≥0.7 | 19 \| 98.6 % | 4 \| 98.6 % | 0 \| 97.9 % | 0 \| 97.9 % | 0 \| 96.5 % |
@@ -382,7 +382,7 @@ for 21,528 pairs, **16 video groups = the 16 source families, none
 mixed**, 11–13 members each (crop and letterbox edits are the ones
 missing), 192 of 208 clips grouped.
 
-## Not verified here
+## Phase 3 (video) Not verified here
 
 - More than one ffmpeg process at a time (this box runs one); the cap of
   four with `-threads 2` each is the shipped guess for a desktop.
@@ -396,7 +396,7 @@ missing), 192 of 208 clips grouped.
 
 ---
 
-# VERIFICATION — Phase 4 (deep tier), run on 2026-11-07
+## VERIFICATION — Phase 4 (deep tier), run on 2026-11-07
 
 Same environment. The model ran through `tract` 0.23 on two cores.
 
@@ -430,7 +430,7 @@ AR_x86_64_pc_windows_msvc=llvm-lib`). Not linked, not run.
   matches the `sourceSha256` the export declares. Output agreement between
   the two was not checked (no PyTorch here).
 
-## Unit coverage added
+## Phase 4 (deep tier) Unit coverage added
 
 `skew_320` preprocessing shape and normalisation values; with the model
 installed: self-cosine 1.0, a 4× downscale at 0.97, a 30 % crop at 0.79,
@@ -445,7 +445,7 @@ to three decimals; the first took 326 s (370 ms per embedding), the second
 343 s with an e2e test running beside it.
 
 | perturbation | min | p5 | median | recall at 0.70 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | scale 50% | 0.907 | 0.939 | 0.987 | 100.0 % |
 | scale 25% | 0.764 | 0.886 | 0.955 | 100.0 % |
 | upscale 150% | 0.967 | 0.993 | 0.998 | 100.0 % |
@@ -504,7 +504,7 @@ Binary: 25.6 MB with the tier (default), 2.9 MB with
 single-threaded per image, parallel across images). DECODE for the
 10-image fixture: 2.2 s with the model, 0.1 s without.
 
-## Not verified here
+## Phase 4 (deep tier) Not verified here
 
 - Output agreement of the ONNX export with Meta's TorchScript model.
 - Behaviour on real photographs: the negative distribution above is for
@@ -517,7 +517,7 @@ single-threaded per image, parallel across images). DECODE for the
 
 ---
 
-# VERIFICATION — Phase 5 (polish), run on 2026-11-08
+## VERIFICATION — Phase 5 (polish), run on 2026-11-08
 
 Same environment (two cores, Linux, `ffmpeg` present, the model file
 available through `DEDUPE_MODEL` for the deep cases). Windows: type-checked
@@ -545,7 +545,7 @@ columns has seven lines over, and its claim was changed from 60 to 80.
 ## What the reading found, and what was done
 
 | seen | fix |
-|---|---|
+| --- | --- |
 | `next` lines and action footers carried the full absolute root again (`move duplicates into /tmp/…/audit_root/_milked`), 130+ cells | the typed form: `.\_milked` or `<PATH>\_milked` |
 | DECODE / FRAMES stage lines wrapped at 80 columns; the in-place redraw then left debris | a stage line drops its rightmost segments to fit |
 | NEAR member lines overflowed at 80 (tail widths were estimated); VIDEO lines overflowed below ~95 | path column sized from the widest real tail; VIDEO drops codec, then dimensions, before the path falls under 18 cells |
@@ -563,7 +563,7 @@ columns has seven lines over, and its claim was changed from 60 to 80.
 | doctor: `1 files`; paths wrapped at 80; fix line for the model path wrapped | plural; details and fix lines shortened in the middle |
 | the model was found through `DEDUPE_JOURNAL_DIR`'s sibling `models` folder (how the audit's own layout turned the deep tier on by accident) | the model path derives from the app data folder only; `DEDUPE_MODEL` overrides |
 | `NO_COLOR=1` also switched to ASCII glyphs | it only removes colour |
-| `tmk   -  ` (9 cells) beside `tmk 0.98` (8) | `tmk    -` |
+| `tmk   -` (9 cells) beside `tmk 0.98` (8) | `tmk    -` |
 
 Read from the code rather than the screens: Ctrl-C mid-change lost the
 journal (written only at the end); Windows `canonicalize` would have shown
@@ -594,7 +594,7 @@ The build machine runs in PST. Fixture files stamped at UTC midnight
 (`2019-06-12 00:00Z`) now print `2019-06-11`, the local calendar date, as
 Explorer would show them on that machine. The journal id stays UTC.
 
-## Suite
+## Phase 5 (polish) Suite
 
 `cargo test --release`: 68 unit tests (3 new: ANSI-aware width, segment
 fitting and counting, the verbatim-prefix strip; the journal round trip
@@ -613,7 +613,7 @@ compile for that target. Not linked, not run.
 Binary: 25,697,216 bytes with the deep tier (was 25,618,368; `ctrlc` and
 `time` add 79 KB), 3,018,152 bytes without.
 
-## Not verified here
+## Phase 5 (polish) Not verified here
 
 - Windows execution: the `\\?\` strip, the case-insensitive `_milked`
   match, the console Ctrl-C handler and the local-date offset are all
@@ -624,7 +624,7 @@ Binary: 25,697,216 bytes with the deep tier (was 25,618,368; `ctrlc` and
 
 ---
 
-# VERIFICATION — Phase 6 (real photographs, the fit, the moment), run on 2026-11-08
+## VERIFICATION — Phase 6 (real photographs, the fit, the moment), run on 2026-11-08
 
 Same environment. Real pictures: the 98 JPEG/PNG files and 4 AVI clips
 in OpenCV's `samples/data` (sparse checkout of `opencv/opencv` at
@@ -645,7 +645,7 @@ variant, `tree.avi`, plus three re-encodes made here with ffmpeg.
 All 4,753 pairs of distinct files, the closest by d+p:
 
 | d | p | q | pair | shipped rule |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | 1 | 0 | 24 | Blender_Suzanne1 ~ Blender_Suzanne2 | group, PDQ confirms |
 | 1 | 0 | 8 | rubberwhale1 ~ rubberwhale2 | group, PDQ confirms |
 | 4 | 2 | 22 | basketball1 ~ basketball2 | group, PDQ confirms |
@@ -669,7 +669,7 @@ the shipped rule, and negatives (each variant against every other
 source, 122,220 pairs):
 
 | perturbation | d max | p max | q max | d∧p | d∧p∧q |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | scale 50 % | 2 | 18 | 92 | 98.3 % | 98.3 % |
 | scale 25 % | 5 | 14 | 108 | 100 % | 98.3 % |
 | upscale 150 % | 2 | 14 | 80 | 100 % | 98.3 % |
@@ -705,7 +705,7 @@ search in RESEARCH §2.7.
 Positives (fit minimum / 5th percentile / median, recall at 0.92):
 
 | perturbation | procedural min / p5 / median | recall | real min / p5 / median | recall |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | rescale 50 %, 25 %, 150 % | 1.000 / 1.000 / 1.000 | 100 % | 0.575 / 0.999 / 1.000 | 98.3 % |
 | JPEG q90 / q60 / q30 | 0.998 / 0.999 / 1.000 and below | 100 % | 0.445 / 1.000 / 1.000; 0.119 / 0.999 / 1.000; 0.170 / 0.999 / 1.000 | 98.3 % |
 | crop 90 % | 0.956 / 0.986 / 0.993 | 100 % | 0.207 / 0.963 / 0.988 | 96.7 % |
@@ -734,7 +734,7 @@ max 0.929, p99.9 0.881, p99 0.800, median 0.552; real 4,753 pairs: max
 recall over all perturbations | over crops, rotations and letterbox):
 
 | T | procedural | real |
-|---|---|---|
+| --- | --- | --- |
 | 0.85 | 18 \| 88.7 % \| 100 % | 14 \| 88.7 % \| 96.7 % |
 | 0.88 | 6 \| 88.3 % \| 100 % | 9 \| 88.4 % \| 96.1 % |
 | 0.90 | 3 \| 87.7 % \| 100 % | 7 \| 88.3 % \| 96.1 % |
@@ -764,7 +764,7 @@ is a hash or deep candidate, so the fit is never asked about them.
 
 `find img`, 98 files, DECODE 1.0 s, MATCH 0.1 s with 4 fits:
 
-```
+```txt
  --------------------------------------------------------------------------------------------------------------------------------
  SCAN   ==============================  98 files   9.94 MB   0.0 s
  SIZE   ==============================  0 share a size
@@ -800,7 +800,7 @@ is a hash or deep candidate, so the fit is never asked about them.
 
 `milk img -n`:
 
-```
+```txt
  would~    rubberwhale2.png                                                                                     d  1  p  0  q   8
  would~    basketball2.png                                                                                      d  4  p  2  q  22
  would~    Blender_Suzanne2.jpg                                                                         d  1  p  0  q  24  mirror
@@ -827,7 +827,7 @@ recorded.
 
 Real video, `find vid` on the seven clips (FRAMES 4.7 s):
 
-```
+```txt
  VIDEO 001   2 similar   2.72 MB reclaimable
    keep  vtest.avi                                           768x576      1:20    msmpe  7.75 MB  2026-11-07
    near  vtest_small.mp4                                     384x288      1:20    h264   621 KB   d  0 p  2  q   2  tmk 1.00
@@ -857,7 +857,7 @@ the next frame stamped `05:06:08` — the frame prints as
 stripped copy is an ordinary `near`, `milk` moves the re-export and the
 stripped copy and leaves the frame.
 
-## Suite
+## Phase 6 Suite
 
 `cargo test --release`: 78 unit tests (10 new: six for the fit —
 identity, crop located at its scale, letterbox found the other way
@@ -879,7 +879,7 @@ column at 80 when a `fit` tail is present).
 Binary: 25,903,792 bytes with the deep tier, 3,225,576 without
 (`kamadak-exif` and the fit add about 200 KB).
 
-## Not verified here
+## Phase 6 Not verified here
 
 - The capture-moment rule on a camera roll: the real set carries no
   EXIF; verified on synthesised EXIF only.
@@ -889,7 +889,7 @@ Binary: 25,903,792 bytes with the deep tier, 3,225,576 without
 
 ---
 
-# VERIFICATION — Phase 7 (conformance, and the second real set), run on 2026-11-08
+## VERIFICATION — Phase 7 (conformance, and the second real set), run on 2026-11-08
 
 Same environment. Reference material: a sparse checkout of
 `facebook/ThreatExchange` at main — `pdq/cpp` (source, read; the
@@ -919,7 +919,7 @@ Two readings of the reference had to be settled before a bit compared:
   rotations), so every one of them goes through it.
 
 | file | ref quality | ours | prefiltered input | full-resolution input | the tool's 512 input |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | bridge-1-original | 100 | 100 | 6 | 6 | **0** |
 | bridge-2-rotate-90 | 100 | 100 | 8 | 8 | **0** |
 | bridge-3-rotate-180 | 100 | 100 | 6 | 6 | **0** |
@@ -954,7 +954,7 @@ orientation: worst distance, 95th percentile, share at or under 31.
 Procedural corpus, 150 sources, positives from the first 60:
 
 | perturbation | Prefiltered max / p95 / ≤31 | Tool max / p95 / ≤31 |
-|---|---|---|
+| --- | --- | --- |
 | scale 50 % | 8 / 8 / 100 % | 16 / 14 / 100 % |
 | scale 25 % | 14 / 10 / 100 % | 22 / 20 / 100 % |
 | upscale 150 % | 12 / 8 / 100 % | 6 / 6 / 100 % |
@@ -969,7 +969,7 @@ Procedural corpus, 150 sources, positives from the first 60:
 Real photographs, 98 sources, positives from the first 60:
 
 | perturbation | Prefiltered max / p95 / ≤31 | Tool max / p95 / ≤31 |
-|---|---|---|
+| --- | --- | --- |
 | scale 50 % | 92 / 16 / **98.3 %** | 98 / 40 / **91.7 %** |
 | scale 25 % | 108 / 24 / **98.3 %** | 102 / 50 / **88.3 %** |
 | upscale 150 % | 80 / 12 / 98.3 % | 68 / 24 / 98.3 % |
@@ -1000,13 +1000,13 @@ the reference tool still matches one made here.
 The `.tmk` layout (`io/tmkiotypes.h`, `algo/tmkfv.cpp`): `TMK1`,
 `FVEC`, `PDQF`; `int` frames-per-second 15, P = 4, m = 32, d = 256,
 frame count; the four periods; the 32 coefficients (equal to ours to
-10⁻⁹); the pure average; cos[period][coefficient] then
-sin[period][coefficient], 256 `float`s each — 263,344 bytes, which the
+10⁻⁹); the pure average; `cos[period][coefficient]` then
+`sin[period][coefficient]`, 256 `float`s each — 263,344 bytes, which the
 files are. Our descriptor of each sample video was computed two ways and
 scored against the file:
 
 | video | ref frames | ours (shipped / tool path) | level 1, level 2 — shipped frames | level 1, level 2 — tool's frames | max element Δ, tool's frames |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | chair-19-sd-bar | 284 | 282 / 284 | 0.9998, 0.9998 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
 | chair-20-sd-bar | 309 | 307 / 309 | 0.9998, 0.9997 | 1.0000, 1.0000 | 3.1·10⁻⁵ |
 | chair-22-sd-grey-bar | 338 | 337 / 338 | 0.9998, 0.9998 | 1.0000, 1.0000 | 6.1·10⁻⁵ |
@@ -1037,7 +1037,7 @@ Pair scores, the reference files against each other and ours (shipped
 frames) against each other, before this phase's bar handling:
 
 | pair | ref l1 | ref l2 | ours l1 | ours l2 |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | chair-orig-22-sd-bar ~ chair-22-sd-grey-bar | 1.000 | 1.000 | 1.000 | 1.000 |
 | chair-orig-22-sd-bar ~ chair-22-sd-sepia-bar | 1.000 | 1.000 | 1.000 | 1.000 |
 | chair-orig-22-sd-bar ~ chair-22-with-large-logo-bar | 0.463 | 0.654 | 0.460 | 0.651 |
@@ -1066,7 +1066,7 @@ listing below had the chair in two groups.
 `dedupe find <sample-videos> vid`, 16 files (the fifteen plus a 1080×1080
 padded test pattern), before this phase:
 
-```
+```txt
  VIDEO 001   6 similar   14.1 MB reclaimable
    keep  chair-orig-22-sd-bar.mp4                  480x720      0:22    h264   2.47 MB  2026-11-08
    near  chair-22-sd-sepia-bar.mp4                 480x720      0:22    h264   2.67 MB  d  0 p  0  q   4  tmk 1.00
@@ -1093,7 +1093,7 @@ exports of the chair on their own; the pillarbox pair scores 0.741
 `crop=416:720:32:0`, the no-bar clips the full frame, the padded test
 pattern `crop=608:1080:236:0`):
 
-```
+```txt
  VIDEO 001   8 similar   21.7 MB reclaimable
    keep  chair-orig-22-fhd-no-bar.mp4        720x1280     0:23    h264   5.36 MB  2026-11-08
    near  chair-orig-22-sd-bar.mp4            480x720      0:22    h264   2.47 MB  d  8 p  8  q  74  tmk 1.00  bars
@@ -1139,7 +1139,7 @@ and so are the negatives (3,000 pairs: max level 1 0.817, max level 2
 0.769, 0 false groups, 0 false confirms):
 
 | edit | d / p / q med | l1 min | l2 min | positional | TMK | grouped | binnable |
-|---|---|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- | --- | --- |
 | letterbox, before | 9 / 18 / 106 | −0.196 | 0.046 | 0 % | 25 % | 25 % | 0 % |
 | letterbox, after | 1 / 2 / 4 | 0.930 | 0.930 | **100 %** | **100 %** | **100 %** | **100 %** |
 | crop 90 %, before → after | 9 / 14 / 88 | 0.501 | 0.493 | 50 % → 56 % | 50 % | 56 % | 31 % |
@@ -1172,7 +1172,7 @@ with the unpadded zoom kept; `milk . vid` moves six (the two byte
 copies, the phone copy, the mirror, the cut, the pillars) and `--undo`
 restores the tree.
 
-## Suite
+## Phase 7 Suite
 
 `cargo test --release`: 79 unit tests (1 new: `cropdetect` lines
 become `Bars` or nothing — the last line wins, the whole frame is
@@ -1189,7 +1189,7 @@ both needing the ThreatExchange checkout as their argument.
 
 Binary: 25,911,008 bytes with the deep tier, 3,232,728 without.
 
-## Not verified here
+## Phase 7 Not verified here
 
 - Bars that are not black (white, blurred-copy "ambient" bars, bars
   with a logo in them): `cropdetect` sees luma under 24 only.
@@ -1200,7 +1200,7 @@ Binary: 25,911,008 bytes with the deep tier, 3,232,728 without.
 
 ---
 
-# VERIFICATION — Phase 7, Windows execution, run on 2026-11-09
+## VERIFICATION — Phase 7, Windows execution, run on 2026-11-09
 
 The first run on Windows. Machine `homeone`: Windows 11 Home
 (10.0.26300), AMD Ryzen 7 9800X3D (16 threads), 61.6 GB, `rustc 1.99.0`,
@@ -1316,7 +1316,7 @@ Not verified here:
 
 ---
 
-# VERIFICATION — Phase 8 (the result is the workspace), run on 2026-11-09
+## VERIFICATION — Phase 8 (the result is the workspace), run on 2026-11-09
 
 Same environment. The sample tree of the Windows run (39 files: real
 OpenCV pictures with derived copies, three EXIF-stamped shots and the
@@ -1339,7 +1339,7 @@ DECODE line at all (before: `DECODE 0 images`).
 
 Every member line on the sample, 120 columns:
 
-```
+```txt
  GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
    keep  clips/vtest.avi                                                                                     2026-11-09
    dupe  clips/vtest - Copy.avi
@@ -1414,7 +1414,8 @@ end-to-end test) on a copy of the sample, 120 columns, keys
 `k 3 ⏎ 2 ⏎ p ⏎ u q`:
 
 (the terminal clears the bar line before each answer; the capture below keeps the redraws)
-```
+
+```txt
 10 near groups   13 similar   2.55 MB reclaimable
    keep: shared moment, most matched, then most pixels   dHash ≤10  pHash ≤14  PDQ ≤31 or fit ≥0.92 to act
 
@@ -1503,7 +1504,7 @@ command cannot be copied; and the action totals line, which carried the
 full `_milked` path, now falls back to `into _milked` when the full path
 would not fit.
 
-## Suite
+## Phase 8 Suite
 
 `cargo test --release`: 82 unit tests (3 new: the words) and 25
 end-to-end tests pass (2 rewritten for the depth rule, 1 new: the
@@ -1512,7 +1513,7 @@ pseudo-terminal session); with `DEDUPE_MODEL` set the 25 pass; with
 and `cargo fmt` clean. Windows type-checks pass with and without the deep
 feature. Binary 25,943,800 bytes.
 
-## Not verified here
+## Phase 8 Not verified here
 
 - The workspace on Windows: the key loop is crossterm's, the same crate
   the bare `dedupe` menu uses, and neither has been pressed on Windows
@@ -1526,7 +1527,7 @@ feature. Binary 25,943,800 bytes.
 
 ---
 
-# VERIFICATION — Phase 9 (the workspace, deep), run on 2026-11-09
+## VERIFICATION — Phase 9 (the workspace, deep), run on 2026-11-09
 
 Same environment (Linux 6.18, rustc 1.97.0, ffmpeg 6.1.1). The sample
 tree of the Windows run (39 files; see Phase 8), copied fresh before each
@@ -1581,7 +1582,7 @@ unit tests:
 
 `dedupe find <sample> .` at 110 × 30, as it opens:
 
-```
+```txt
  dedupe find  /tmp/claude-0/-home-claude/0e…5a47-929e-c4f931c0b548/scratchpad/p9/sample  recursive  all kinds
  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
  ■ GROUP 001   2 copies   7.75 MB each   7.75 MB reclaimable
@@ -1623,7 +1624,7 @@ this width (Phase 8 §2); the words stay.
 moves the cursor to `NEAR 012`, the window as far down as the rows allow
 (`group 12/14`):
 
-```
+```txt
 ▸□ NEAR 012   1 similar   0 B reclaimable
    keep  photos/lena.jpg                                        512×512      89.7 KB  2026-11-09
  □ near  photos/lena_tmpl.jpg                                   512×512      77.6 KB  similar, unconfirmed
@@ -1640,7 +1641,7 @@ moves the cursor to `NEAR 012`, the window as far down as the rows allow
 
 Space on `lena_tmpl.jpg` (unconfirmed: PDQ q 44, fit 0.80):
 
-```
+```txt
 ▸■ near  photos/lena_tmpl.jpg                                   512×512      77.6 KB  similar, unconfirmed
  ...
  16 selected  19.3 MB  1 by hand                             by hand: nothing but your look confirms this one
@@ -1652,7 +1653,7 @@ moved` and changes nothing; `k` on a keeper says `already the keeper`.
 `p` shows `▸  purge 16 → Recycle Bin, 19.3 MB, 1 by hand  enter go  esc
 back`; enter leaves the groups screen and acts on the main screen:
 
-```
+```txt
  dedupe purge /tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample .
 
  VERIFY ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━  3 verified byte for byte
@@ -1684,7 +1685,7 @@ equals the one before (39 files).
 **Two changes in one sitting**, at 100 × 24 on a fresh copy. `g 5`, down
 twice, `k` on `shot_a_export.jpg`:
 
-```
+```txt
  ■ NEAR 005   3 similar  +1 kin   1.20 MB reclaimable
 ▸  keep  photos/exports/shot_a_export.jpg             961×832      223 KB   2026-11-09
  ■ near  photos/shot_a.jpg                            1282×1110    531 KB   resized 133%
@@ -1744,7 +1745,7 @@ visible here (no display).
 After the sittings, the app directory (`DEDUPE_JOURNAL_DIR` here) holds
 `recent.json`:
 
-```
+```json
 {
   "root": "/tmp/claude-0/-home-claude/0e0fc6f6-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample",
   "recurse": true,
@@ -1754,7 +1755,7 @@ After the sittings, the app directory (`DEDUPE_JOURNAL_DIR` here) holds
 
 and the bare `dedupe` menu opens on it:
 
-```
+```txt
  ┏━ dedupe ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
  ┃  WORKFLOW                                                    ┃
  ┃  ▸ again   /tmp/claude-0/-home-…b548/scratchpad/p9/sample  . ┃
@@ -1775,7 +1776,7 @@ The end-to-end test `find_reports_groups_and_stages` now also reads
 Two pending changes under one root (`milk <sample> . vid`, then `milk
 <sample> . img`, piped), then `dedupe --undo <sample>` at 100 × 24:
 
-```
+```txt
  dedupe --undo  /tmp/claude-0/-home-claude/0e0fc6…-b774-5a47-929e-c4f931c0b548/scratchpad/p9/sample
  ──────────────────────────────────────────────────────────────────────────────────────────────────
  2 changes to reverse under /tmp/claude-0/-home-cla…c4f931c0b548/scratchpad/p9/sample, newest first
@@ -1813,7 +1814,7 @@ lost it to the pseudo-terminal closing as the program exited.
 - The viewer and reveal notes said `opened` / `shown in`; they say
   `opening` now (above).
 
-## Suite
+## Phase 9 Suite
 
 `cargo test --release`: 97 unit tests (15 new: 8 for the state machine,
 4 for the preview — protocol from the environment, base64 against RFC
@@ -1829,7 +1830,7 @@ the deep feature and `cargo clippy --all-targets` pass, so the
 `cfg(windows)` paths (`explorer.exe` with a raw `/select,"…"` argument)
 compile. Binary 26,510,992 bytes.
 
-## Not verified here
+## Phase 9 Not verified here
 
 - Any of it on Windows: the key loop (crossterm, as the menu), sixel in
   Windows Terminal, `explorer.exe /select,"…"` for `o`, `explorer.exe`
@@ -1846,7 +1847,7 @@ compile. Binary 26,510,992 bytes.
 
 ---
 
-# VERIFICATION — Phase 10 (formats and filesystems), run on 2026-11-09
+## VERIFICATION — Phase 10 (formats and filesystems), run on 2026-11-09
 
 Linux 6.18, rustc 1.97.0, ffmpeg 6.1.1 (which reads no HEIF itself: its
 demuxer gained HEIF stills in 7.0, its command line tiled ones in 8.1).
@@ -1862,7 +1863,7 @@ rotation, crops), `strukturag/libheif` `examples`,
 
 Every real file through `decode::load`, ffmpeg 6.1.1:
 
-```
+```txt
 IMG_1034.heic        HEIC  4032x3024  2018-02-05 15:11:44.277   538 ms   48 tiles
 IMG_2927.HEIC        HEIC  3024x4032  2020-05-04 18:39:11.644   313 ms   48 tiles
 Issue 263 dotnet     HEIC  3024x4032  2019-08-21 11:21:36.245   432 ms   48 tiles, irot 3
@@ -1914,7 +1915,7 @@ runs of sensor data that start like a JPEG and claim 38581×40422 and
 64328×14895. Through `decode::load` (marker-chain check, mid-size choice,
 the RAW's own orientation and moment):
 
-```
+```txt
 Canon EOS 70D.cr2     RAW  5472x3648  2014-04-29 17:07:52.98   126 ms
 Canon EOS R3.cr3      RAW  1620x1080  2023-02-09 10:10:27.79    19 ms
 Nikon D810.nef        RAW  1080x1620  2015-05-13 19:49:55.66    62 ms   portrait (Rotate 270 CW)
@@ -1946,7 +1947,7 @@ upright quarter-size export; `kimono.avif`, its `irot` file and the
 test set's own JPEG; a second, unrelated iPhone HEIC. `find`, 120
 columns:
 
-```
+```txt
  DECODE ==============================  11 images hashed   2 HEIC   2 AVIF   2 RAW   2.0 s
  NEAR 001   2 similar   336 KB reclaimable
    keep  avif/kimono.avif                       722x1024     83.5 KB  2026-11-09
@@ -1995,7 +1996,7 @@ one `rotated 270°`). The second skips without an x265 encoder.
 `/dev/shm` here is a tmpfs (another device; a rename into it fails with
 errno 18). The sample with `_milked` made a link into it:
 
-```
+```txt
  moved     photos/exports/starry_night (1).jpg                                          copied across volumes
  moved~    photos/exports/graf1_mirror.png                 mirrored  d  0  p  0  q   0  copied across volumes
  12 copied across volumes: each copy read back and compared before its original was deleted
@@ -2016,7 +2017,7 @@ leaves source and destination as they were; a missing source is
 `chattr +i` makes a rename fail even for root (EPERM). The sample with
 one duplicate made immutable, in the workspace, 110 × 30, `m` enter:
 
-```
+```txt
  failed    photos/exports/home-copy.jpg                                                     permission denied
  14 moved   19.2 MB into s/_milked   journal 20261109-214522
  ▸  enter back to the groups (5 left)  r retry 1 (close what holds them first)  u undo it  q quit
@@ -2031,7 +2032,7 @@ failed).
 
 ## 6. Skip, size floor, doctor (QOL-06, QOL-08, QOL-09)
 
-```
+```txt
  dedupe find  …/sk/s  recursive  all kinds  min 100 KB  skip exports
  SCAN   ==============================  19 files   31.9 MB   1 skipped   10 under 100 KB   0.0 s
 ```
@@ -2043,7 +2044,7 @@ covers the same plus the `next` lines carrying `--min 100k` and the two
 usage errors. Doctor with the model installed and `_milked` linked to
 the tmpfs:
 
-```
+```txt
  PASS  _milked   0 files   0 B   on another volume: milk copies, reads back, then deletes
  PASS  volumes   one volume under this folder
  PASS  skip      *.tmp   remembered; --unskip NAME or --unskip all forgets
@@ -2150,7 +2151,7 @@ one row cursor per frame at the top, scrolled to the bottom and back. The
 paste joined two screens. The `▸` before `m milk` marks the action row
 (CLI §2a).
 
-## Suite
+## Phase 10 Suite
 
 `cargo test --release`: 114 unit tests (17 new: `heif` 4, `raw` 3,
 `decode` 3, `skip` 3, `fsops` 3, `walk` 1) and 30 end-to-end tests pass
@@ -2162,7 +2163,7 @@ the Windows one); with `DEDUPE_MODEL` the 30 pass; with
 `x86_64-pc-windows-msvc` with `blake3/pure`, and with the deep feature
 through clang) and `cargo fmt --check` clean. Binary 26,518,856 bytes.
 
-## Not verified here
+## Phase 10 Not verified here
 
 - §7 on Windows, until the next run (§9 says why the first did not
   reach it): the Ctrl-C test with a console proven, colour in the legacy
@@ -2186,7 +2187,7 @@ through clang) and `cargo fmt --check` clean. Binary 26,518,856 bytes.
 
 ---
 
-# VERIFICATION — Phase 11 (matching depth), run on 2026-11-10
+## VERIFICATION — Phase 11 (matching depth), run on 2026-11-10
 
 Linux 6.18, 2 vCPUs, rustc 1.97.0, ffmpeg 6.1.1. Real data, none
 committed, each in its own folder outside the repository:
@@ -2220,7 +2221,7 @@ its record; the commands are in each file's header.
 `tests/real_copies.rs`, the SSCD model of `docs/DEEP.md`, 3,310
 embeddings (28 min):
 
-```
+```txt
 copy           n    min     p5 median   ≥.60   ≥.65   ≥.70   ≥.75    fit≥    acts
 jpeg q75     157  0.988  0.996  0.999 100.0% 100.0% 100.0% 100.0%  100.0%  100.0%
 jpeg q30     157  0.806  0.951  0.993 100.0% 100.0% 100.0% 100.0%  100.0%  100.0%
@@ -2251,7 +2252,7 @@ On the real set (`measure_deep_real_pairs`, `measure_fit_on_named_pairs`
 in `tests/fit_measure.rs`), the pairs by descriptor cosine, and their fit
 under the Phase 11 search (§2):
 
-```
+```txt
 cosine ≥ 0.70: 39 pairs   fit ≥ 0.92: 3 (rubberwhale frames 0.996, Suzanne mirrored 0.988, basketball frames 0.965)
 [0.60, 0.70):  81 pairs   fit ≥ 0.92: 2 (lena ~ lena_tmpl 1.000, opencv-logo ~ -white 0.946); next right01 ~ right04 0.787
 [0.45, 0.60): 150 pairs   fit max 0.708
@@ -2281,7 +2282,7 @@ keeper or a partner only after every pair at 0.70 is made.
 cells (the 4 × 4 grid, worst quarter set aside), mirror, both — at the
 same placements:
 
-```
+```txt
 real set: 60 pictures × 21 perturbations, 1,260 pairs, at 0.92
   plain 88.1 %   cells 88.3 %   mirror 92.8 %   both 93.0 %
   (mirror: 1.7 % → 100 % on mirrored copies; watermark 95.0 → 98.3 %)
@@ -2327,7 +2328,7 @@ burst's fraction, named as the dataset names them (`payload_N000`…);
 frame 0. `milk -n`, before (`dedupe_before_p11`, the Phase 10 binary)
 and after:
 
-```
+```txt
 sub/, before:   NEAR 001   3 similar   1.71 MB reclaimable
                 would~  payload_N001.jpg  re-encoded  d 0 p 0 q 4   (N002, N003 alike)
 sub/, after:    NEAR 001   0 similar  +3 kin   0 B reclaimable
@@ -2353,7 +2354,7 @@ chose as its reference — it picks the sharpest of the first frames
 ("lucky imaging") — over frames 0–3 of 42 bursts
 (`tests/burst_focus.rs`):
 
-```
+```txt
 the hashing-scale focus picks the reference frame in 17 (40 %), full resolution in 23 (55 %);
 always frame 0 would be right in 26 (62 %), a random pick in 25 %
 the reference frame's rank by hashing-scale focus (0 = sharpest): [17, 12, 6, 7]
@@ -2369,7 +2370,7 @@ What shipped instead is the person's own cull: `c` chooses a group's
 other shots, by hand. Driven in a pseudo-terminal (24 × 130) on a copy
 of `nosub/`:
 
-```
+```txt
 open:    · kin IMG_0013–0015  another shot, same second;  ■ near IMG_0012 (1).jpg  same picture
          bar: ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  g go to
 c:       ■ kin IMG_0013–0015;  4 selected  2.05 MB  3 by hand
@@ -2397,7 +2398,7 @@ the confirm bar counts them.
 Two sparse 1.5 GiB files, equal but for one byte at their middle
 (`cmp`: differ at byte 805,306,369):
 
-```
+```txt
 before: SAMPLE  2 share a sample   256 KB    LIKELY 001  2 files  1.50 GB each  size + sample match
         (find: HASH 0 confirmed   3.00 GB read)
 after:  SAMPLE  0 share a sample   384 KB    no duplicates   2 files   3.00 GB checked
@@ -2412,7 +2413,7 @@ full hash; `sample_bytes` 128 KiB at 1 GiB, 192 KiB above).
 
 The owner's sample tree, `find .`, before and after:
 
-```
+```txt
 his machine's times   before: NEAR 004 keep photos/exports/graf1_mirror.png (newer original)
                       after:  NEAR 004 keep photos/graf1.png; every other keeper unchanged
 copies made older     before: 6 groups keep a copy — clips/vtest - Copy.avi (and its video group),
@@ -2436,7 +2437,7 @@ the clip is wider than 4:3, letterboxed in white at 960 × 720. Found:
 each edge within 2 % of the side. TMK level 2 of the framed copy against
 its portrait, uncropped and cropped to what was found:
 
-```
+```txt
              copies  found   confirmed after the crop (before: none)
 white          25      25      23   (MVI_4823, xmp480qt 0.88–0.89, grouped)
 grey           25      25      24
@@ -2460,7 +2461,7 @@ The thresholds, from a sweep over every framed copy and the 79 clips,
 re-encodes and portraits without bars (the same rule in Python on the
 same frames):
 
-```
+```txt
 ratio (start 0.5)   0.15  0.20  0.25  0.28  0.30  0.33  0.35  0.40  0.50
 ambient found          2     3     7    10    11    12    13    16    17   of 25
 solid colours      22–23 22–23 22–23 22–23 22–23 22–23 22–23 23–24 24    of 25 each
@@ -2482,7 +2483,7 @@ each file in the page cache, each route timed twice in turn, the faster
 kept; "full" is the shipped route (the `image` crate's decoder, then the
 integer box prefilter):
 
-```
+```txt
                                 files  through it   full / reduced a file   pixels held        same file, PDQ max / p95 / median
 Copydays, real set (≤ 9 MP)      451     203          52 / 54 ms            3.8 / 1.0 MP       14 / 8 / 2
 HDR+ results (8–13 MP, phones)    39      39         123 / 97 ms           11.9 / 0.7 MP       22 / 14 / 4
@@ -2499,7 +2500,7 @@ HDR+ results, the regression inputs) against copies of each, PDQ max /
 95th percentile, every file decoded in full against every file decoded
 as the route would:
 
-```
+```txt
 copy            every file in full     through the route
 re-save q85         4 / 2                 2 / 2
 70 % q85           22 / 10               22 / 10
@@ -2532,7 +2533,7 @@ smaller pictures, showed 8–14 for the same copies.
 A pseudo-terminal (24 × 100) on Copydays' 386 originals and hand-made
 copies, `find . img`, the screen at 9 s and at 15 s:
 
-```
+```txt
  DECODE ━━━━━━━━━━━━━━━━╌╌╌╌╌╌╌╌╌╌╌╌╌╌  207 / 386   about 10 s left
  DECODE ━━━━━━━━━━━━━━━━━━━━━━━━━━━━╌╌  354 / 386
 ```
@@ -2558,7 +2559,7 @@ feature sets; for `x86_64-pc-windows-msvc` with `blake3/pure`, and with
 the deep feature through clang) and `cargo fmt --check` are clean.
 Binary 26,575,144 bytes (`jpeg-decoder` is a test-only dependency).
 
-## Not verified here
+## Phase 11 Not verified here
 
 - Windows: nothing in this phase is Windows-only, and nothing of it ran
   there. The flat-bar pass's `-fps_mode passthrough` is the option the
@@ -2591,7 +2592,7 @@ Binary 26,575,144 bytes (`jpeg-decoder` is a test-only dependency).
 
 ---
 
-# VERIFICATION — Phase 11 on Windows, run on 2026-11-11
+## VERIFICATION — Phase 11 on Windows, run on 2026-11-11
 
 The owner's machine (`homeone`): Windows 11 Home 10.0.26300, Ryzen 7
 9800X3D (16 threads), 61.6 GB, `rustc`/`cargo` 1.99.0, Windows
@@ -2656,7 +2657,7 @@ desktop app's folder link (the owner pasted only the last screen).
   `tests/image_bars.rs` on 523 real pictures and three boxed copies of
   each:
 
-  ```
+  ```txt
   letterbox 4:5 black    found  514 of 523 (98.3 %), wrong place 1
   pillarbox 16:9 white   found  514 of 523 (98.3 %), wrong place 7
   border grey            found  521 of 523 (99.6 %), wrong place 1
@@ -2686,7 +2687,7 @@ desktop app's folder link (the owner pasted only the last screen).
 
 ---
 
-# VERIFICATION — Phase 12 (structure and CI), run on 2026-11-11
+## VERIFICATION — Phase 12 (structure and CI), run on 2026-11-11
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
 release profile unless named. The Windows code was type-checked here with
@@ -2696,7 +2697,7 @@ clippy for `x86_64-pc-windows-msvc`; it runs on Windows in the CI matrix
 ## 1. Three files split (SC-02, SC-03, TECH-06)
 
 | was (at `66fd76f`) | lines | is now | lines |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `actions.rs` | 1,540 | `actions/mod.rs` the commands, `scan.rs` the scan and `Found`, `plan.rs` what an action would do, `act.rs` milk and purge, `undo.rs`, `view.rs` (§2) | 99 + 306 + 226 + 548 + 402 + 227 |
 | `render.rs` | 1,583 | `render/mod.rs` the renderer and its common lines, `stages.rs` while a scan runs, `groups.rs` the listing, `totals.rs`, `hints.rs` | 170 + 509 + 563 + 314 + 106 |
 | `video.rs` | 1,575 | `video/mod.rs` hashing one file and the pass, `probe.rs`, `tmk.rs`, `bars.rs`, `group.rs` | 471 + 152 + 235 + 412 + 387 |
@@ -2714,7 +2715,7 @@ wrappers (tests moved beside the code they test) and the removed
 `// ----` banners, the only lines that differ are the `unwrap()`s of §3
 and, in `actions`, `Found::set_keeper` (§2):
 
-```
+```txt
 render  only old 26, only new 89   (12 unwrap lines → self.lock() / expect;
                                     rustfmt re-wrapping those chains)
 video   only old  9, only new 65   (2 unwrap/expect lines, re-wrapped)
@@ -2763,7 +2764,7 @@ half-size copy each and 40 re-encoded at quality 60, and six 10-second
 test videos with a low-bitrate re-encode each. Warm page cache, 2
 threads, three runs on one corpus:
 
-```
+```txt
 stage     run 1    run 2    run 3    what it did
 SCAN      0.002    0.005    0.003 s  1,492 files, 269 MB
 SIZE      0.003    0.006    0.004 s  1,204 share a size
@@ -2863,7 +2864,7 @@ from Chocolatey), Rust 1.99.1 on both.
   is Unix-only), again 126 and 30 without the deep tier, then with their
   words:
 
-  ```
+  ```txt
   CTRL_BREAK sent to the milk's process group 2156
   the workspace driven through a pseudo-terminal: 7 moved, 7 restored
   test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 31 filtered out
@@ -2878,7 +2879,7 @@ from Chocolatey), Rust 1.99.1 on both.
   end-to-end, Windows 31 (3 ignored each), both ways of the deep tier;
   on Windows, with their words:
 
-  ```
+  ```txt
   colour on a terminal: 24-bit ANSI colour, colour escapes back
   CTRL_BREAK sent to the milk's process group 6072
   the workspace driven through a pseudo-terminal: 7 moved, 7 restored
@@ -2900,7 +2901,7 @@ Ryzen 7 9800X3D, Rust 1.99.0, ffmpeg 9.0.2 from WinGet (not on PATH;
 found by `dedupe` where WinGet put it). Read from its logs through the
 connected folder:
 
-```
+```txt
 PASS  build        125 s   27.5 MB
 PASS  tests        160 passed, 0 failed   431 s     (128 unit, band, 31 end-to-end)
 PASS  Ctrl-C       CTRL_BREAK sent to the milk's process group 16792
@@ -2941,7 +2942,7 @@ of it has run yet.
 `RUN_VERIFY.cmd` at `6afd49d`, same machine, every line of the summary
 `PASS` (build 2 s and tests 17 s: nothing to rebuild), the colour line:
 
-```
+```txt
 captured 1235 x 718   drawn by the window   the terminal window that owns this console (CASCADIA_HOSTING_WINDOW_CLASS)   host=ConsoleHost  WT_SESSION=
 ```
 
@@ -2952,7 +2953,7 @@ each role's 24-bit value is found exactly, at the centre of its glyphs,
 where the font's edge blending leaves the colour itself.
 
 | where | role | theme | in the picture |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `PASS`, `everything in place` | Ok | `#7CD992` | `#7CD992`, 2,289 px |
 | `doctor` | Keep | `#FFB000` | `#FFB000`, 154 px |
 | the folder | Info | `#5FB3FF` | `#5FB3FF`, 252 px |
@@ -2975,20 +2976,20 @@ the cursor (`ESC[17C`) between the colour and the note, so "the escape
 before it" was the move. The test now reads the last colour set before
 the note; green on Windows from Phase 13 (VERIFICATION § Phase 13 § 7).
 
-## Not verified here
+## Phase 12 Not verified here
 
 - The bench on more threads or on Windows: run here only, on 2 vCPUs.
 
 ---
 
-# VERIFICATION — Phase 13 (the real disk), run on 2026-11-12
+## VERIFICATION — Phase 13 (the real disk), run on 2026-11-12
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
 release profile; CI on Ubuntu 26.04 and Windows Server 2025 (§ 7).
 Source: IDENTIFIED 2026-11-12 (`f9227ee`), items SC-11, CORE-09,
 CORE-10, CORE-11, TECH-09, TECH-11.
 
-## 1. The bin and the system folders (CORE-09)
+## The bin and the system folders (CORE-09)
 
 `walk::system_folder`: `$RECYCLE.BIN`, `RECYCLER`, `RECYCLED`, `System
 Volume Information` (any letter case, on every system: a drive formatted
@@ -3000,7 +3001,7 @@ counted on the SCAN line.
 IDENTIFIED's M1 fixture again — a photo, an older byte copy of it in
 `$RECYCLE.BIN/S-1-5-21-1000/`, another in `.Trash-1000/files/`:
 
-```
+```txt
 before   GROUP 001   3 copies   293 KB each   586 KB reclaimable
            keep  $RECYCLE.BIN/S-1-5-21-1000/$RX4K2P1.jpg      2020-01-01
            dupe  .Trash-1000/files/IMG_0041.jpg
@@ -3014,7 +3015,7 @@ scanned as ordinary folders); `e2e::the_bin_is_never_scanned` (`find`
 and `milk --dry-run`; the freedesktop trash through `XDG_DATA_HOME` on
 Linux; the live photo has no duplicate and stays).
 
-## 2. Files kept online (CORE-10)
+## Files kept online (CORE-10)
 
 `walk::online_only`: on Windows the attributes of the directory listing
 (`OFFLINE` 0x1000, `RECALL_ON_OPEN` 0x40000, `RECALL_ON_DATA_ACCESS`
@@ -3032,7 +3033,7 @@ hidden, pinned, sparse, compressed are not); on Windows,
 reads `1 online only, not read` on the SCAN line, its twins grouped
 without it, `1 file kept online only` from the doctor (§ 7).
 
-## 3. A clock on every child (CORE-11)
+## A clock on every child (CORE-11)
 
 `tools::run` (to the end, stdout and stderr read as they come, input
 written from a thread) and `tools::Watch` (a streaming child): a child
@@ -3052,7 +3053,7 @@ keeps the pipes open stopped as fast); `e2e::a_stalled_ffmpeg_is_stopped_and_nam
 (stand-in `ffmpeg` and `ffprobe` on PATH that answer `-version` and then
 sleep; `DEDUPE_STALL=1`):
 
-```
+```txt
  DECODE   0 images hashed   2 timed out   2 undecodable   1.0 s
  FRAMES   0 videos hashed   0 frames at 15 fps   3 timed out   3.0 s
  timed out: art/one.jxl, art/two.jxl, clips/a.mp4, and 2 more   ffmpeg sent nothing for 1 s and was stopped; left out of this run
@@ -3066,7 +3067,7 @@ DECODE line read `0 images   nothing to compare` and dropped why the
 others did not decode (a lone HEIC on a machine without ffmpeg said
 nothing of ffmpeg). The short form now carries the reasons.
 
-## 4. The journal and a power cut (TECH-09)
+## The journal and a power cut (TECH-09)
 
 `journal::rewrite` writes the `.tmp`, `sync_all`s it, renames it into
 place, then (Unix) syncs the folder. `strace -f -e trace=fsync,rename`
@@ -3083,7 +3084,7 @@ installers' folders, beside `dedupe`); RESEARCH §3's concurrency is
 ⌊cores/2⌋ clamped to 1–4, as `video::concurrency` computes it. CLI §3 and
 §5, and the README, say what Phase 13 leaves out and why.
 
-## 6. Suite (here)
+## Suite (here)
 
 `cargo test --release`: 131 unit tests (1 ignored), the band test, 34
 end-to-end tests (3 ignored), and the 34 again with the model installed.
@@ -3124,7 +3125,7 @@ failed is the reason for the commit after it.
   (`a_bin_too_small_measured_by_flags`, a 5 MB file, the bin capped at
   1 MB), the same under both flag sets tried:
 
-  ```
+  ```txt
   NO_UI | ALLOWUNDO | RECYCLEONDELETE: PreDeleteItem flags 0x282, PostDeleteItem hr 0x00270008, item in the bin false; on disk false, in the bin false
   NO_UI | ALLOWUNDO:                   PreDeleteItem flags 0x282, PostDeleteItem hr 0x00270008, item in the bin false; on disk false, in the bin false
   ```
@@ -3140,7 +3141,7 @@ failed is the reason for the commit after it.
   file whose link count is back to one afterwards was let go, and is
   renamed back. Through `purge`:
 
-  ```
+  ```txt
   MaxCapacity = 1   failed  copy\keep.bin  the Recycle Bin refused it: the file is larger than this drive's bin (1 MB): left in place
   NukeOnDelete = 1  failed  copy\keep.bin  the Recycle Bin refused it: this drive's is set to delete at once: left in place
   ```
@@ -3161,7 +3162,7 @@ network drive was never driven (Phase 10, Not verified): on Windows the
 shell would have asked in a dialog instead; with this phase a drive with
 no bin is refused before the shell, and the workspace offers `_milked`.
 
-## Not verified here
+## Phase 13 Not verified here
 
 - Real OneDrive, Dropbox or iCloud placeholders: the recall attributes
   are set by a sync engine; the rule is tested on their values and, on
@@ -3178,7 +3179,7 @@ no bin is refused before the shell, and the workspace offers `_milked`.
 
 ---
 
-# VERIFICATION — Phase 14 (cost at scale), run on 2026-11-12
+## VERIFICATION — Phase 14 (cost at scale), run on 2026-11-12
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0, ffmpeg 6.1.1),
 built with `--profile ci` (the release profile without link-time
@@ -3198,7 +3199,7 @@ files and checks the groups it finds against the ones it planted.
 
 The fixed corpus, with the model, after this phase:
 
-```
+```txt
  SCAN        0.003 s      14 MB   1492 files, 269 MB
  SIZE        0.004 s      14 MB   1204 share a size
  SAMPLE      0.036 s      14 MB   400 share a sample, 135.2 MB read
@@ -3217,7 +3218,7 @@ The model is the cost of a scan that has it: 18 times DECODE's time, and
 
 The 100,000-file run (`DEDUPE_SCALE_FILES`, written in 13.4 s):
 
-```
+```txt
  SCAN        0.181 s      41 MB   100000 files, 427 MB
  SIZE        0.437 s      65 MB   99970 share a size
  SAMPLE      0.429 s      84 MB   18400 share a sample, 426.7 MB read
@@ -3262,7 +3263,7 @@ and 20 at 2240–4200 px, each against a half-size copy, a 70 % crop, a
 re-encode, and each against the next as a stranger (638 pairs):
 
 | build | 638 pairs | the 159 camera-size | copies' largest change | strangers' largest | decisions changed |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | before | 55.3 s | 30.4 s | — | — | — |
 | summed-area search only (479 smaller pairs) | 20.1 s against 25.3 s | — | 0.0000 | 0.0000 | 0 |
 | + decode to 256 px | 30.2 s | 13.0 s | 0.022 (a camera-size letterbox) | 0.047 | 0 |
@@ -3302,7 +3303,7 @@ The export writes its batch into the graph (a reshape to
 that constant and runs 16 pictures on one thread:
 
 | batch | pictures a second | largest difference from batch 1 |
-|---|---|---|
+| --- | --- | --- |
 | 1 | 2.56 | 0 |
 | 2 | 2.20 | 0 |
 | 4 | 1.92 | 0 |
@@ -3312,7 +3313,7 @@ Batching is bit-identical and slower here, so `deep` keeps one picture
 per inference, one inference per thread: 4.7 pictures a second on 2
 threads (§ 1), 2.4 per thread.
 
-## 6. Suite (here)
+## Phase 14 Suite (here)
 
 `cargo test --profile ci`: 132 unit tests (1 ignored), the band test, 34
 end-to-end tests (3 ignored), and the 34 again with the model installed.
@@ -3334,7 +3335,7 @@ Started by the `[ci]` marker on the delivery commit.
   band test, 33 end-to-end (5 ignored), the Recycle Bin capped at 1 MB
   taking and refusing (3 tests), the doctor.
 
-## Not verified here
+## Phase 14 Not verified here
 
 - The bench on the owner's machine (16 threads): `runs\win\RUN_BENCH.cmd`
   runs it, with the model when it is in `runs\win\models`, and real
@@ -3346,14 +3347,14 @@ Started by the `[ci]` marker on the delivery commit.
 
 ---
 
-# VERIFICATION — Phase 15 (matching debts), run on 2026-11-12
+## VERIFICATION — Phase 15 (matching debts), run on 2026-11-12
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0), `--profile
 ci`; CI on Ubuntu and Windows (§ 6). Source: IDENTIFIED 2026-11-12
 (`f9227ee`), items CORE-12, CORE-13, CORE-14, TECH-14, and CORE-17,
 found by Phase 14's 100,000-file run.
 
-## 1. A copy chained into a stranger's group (CORE-17)
+## Phase 15 A copy chained into a stranger's group (CORE-17)
 
 Found by Phase 14's 100,000-file run (§ Phase 14, 1). `near::group` now
 ends with `split_chained`: the members the keeper did not confirm (not
@@ -3365,7 +3366,7 @@ member. The rest stay listed where they were.
 
 The same run, after (`scale_run`, 100,000 files, the corpus rebuilt):
 
-```
+```txt
  MATCH       5.056 s     132 MB   1009 near groups, 335 fits, 2 split from another
    check                          998 planted pairs grouped, 11 other groups
 ```
@@ -3394,7 +3395,7 @@ decoded upright as the program decodes them. PDQ to the original, max /
 95th percentile / median (a turned or mirrored copy by the best of the
 eight orientations):
 
-```
+```txt
 copy               shipped until now   512, tent       576, tent (shipped)   576, Lanczos
 re-save q85          12  2  0           12  2  0          12  2  0           12  2  0
 70 % q85             56 14  4           22  4  0          18  4  0           20  4  0
@@ -3437,7 +3438,7 @@ second against 163.
 The 100,000-file run's check after CORE-12 and CORE-13: all 1,000
 planted copies acted on, the 22 strangers listed only, 407 fits (335).
 
-## 3. The near keeper's degree (CORE-13)
+## Phase 15 The near keeper's degree (CORE-13)
 
 The degree that seats a keeper counted every match on the two 64-bit
 hashes; it now counts only those PDQ confirms as well, and among the
@@ -3475,7 +3476,7 @@ the picture's: black bars 0.000–0.023 (25 copies), the darkened edges of
 blurred backgrounds the black pass took for bars 0.057–0.650 (5) —
 `BLACK_DETAIL_MAX` 0.04. Confirmed after the crop:
 
-```
+```txt
 framing          copies   Phase 11   now
 ambient            25        6        7    100_0306: black pass wrong, now the flat pass's crop, 0.00 → 1.00
 black              25        —       22    ftyp3gp5 0.56 → 0.99 (the flat picture holds cropdetect's);
@@ -3513,7 +3514,7 @@ tensors to TorchScript and to ONNX Runtime.
 Run **43343615860** at `f3f0e80` (both SHA-256 checks `OK`; PyTorch
 2.15.0+cpu, ONNX Runtime 1.31.1):
 
-```
+```txt
 engines                                      cosine min   p1         median     pair-cosine difference max / median
 ONNX export vs TorchScript (ONNX Runtime)    1.000000     1.000000   1.000000   0.000001 / 0.000000
 ours (tract) vs ONNX Runtime, same export    1.000000     1.000000   1.000000   0.000001 / 0.000000
@@ -3539,7 +3540,7 @@ band test, 35 end-to-end (3 ignored), the doctor. Windows: 133, the band
 test, 34 end-to-end (5 ignored), the Recycle Bin capped at 1 MB taking
 and refusing (3 tests), the doctor.
 
-## Not verified here
+## Phase 15 Not verified here
 
 - The four ambient copies whose blurred background carries the picture's
   detail (§ 4): an edge detector of their own, open.
@@ -3550,7 +3551,7 @@ and refusing (3 tests), the doctor.
 
 ---
 
-# VERIFICATION — Phase 16 (the workspace at size), begun 2026-11-13
+## VERIFICATION — Phase 16 (the workspace at size), begun 2026-11-13
 
 Environment: this container (Linux, 2 vCPUs, Rust 1.97.0 and 1.100.0),
 `--profile ci`; CI on Ubuntu and Windows (§ 7). Source: IDENTIFIED
@@ -3579,13 +3580,13 @@ wraps its policy at spaces (the near policy ran 30 cells past a
 40-column edge); a stage's bar gives way below 64 columns so its text
 keeps 24 cells (at 40 the bar took every cell).
 
-## 2. The workspace in two files (SC-12)
+## Phase 16 The workspace in two files (SC-12)
 
 `workspace/state.rs` (the state and its keys) and `workspace/screen.rs`
 (the screen composed from it, `fit_parts`); the 9 tests unchanged, the
 screen's in `screen.rs`, sharing the state's fixtures.
 
-## 3. Sort and filter (QOL-12)
+## Phase 16 Sort and filter (QOL-12)
 
 The state shows a view: the groups' indices in the order shown, built
 from `s`'s order (as listed, most reclaimable first, by the keeper's
@@ -3604,7 +3605,7 @@ terminal: `a_filter_then_milk_moves_only_what_it_shows` — `/backup`,
 enter, `m`, enter: `1 of 3 groups` on the bar, `2 moved`, the hidden
 groups' files in place.
 
-## 4. A preferred folder (NF-10)
+## A preferred folder (NF-10)
 
 `f` on a file: every group with a member in its folder or below takes
 the first such member for keeper (`GroupView::set_keeper`, re-related as
@@ -3617,7 +3618,7 @@ the cursor on `backup/old/IMG_0041 (1).jpg`, `f`, `m`, enter: `keeping
 in backup` on the bar, `2 moved`, the preferred copy kept, nothing in
 `_milked` from `backup/old`.
 
-## 5. A resize during a sitting (TECH-12)
+## A resize during a sitting (TECH-12)
 
 `a_resize_redraws_at_the_new_width_and_keeps_cursor_and_selection`: a
 step runner on each system — on Unix a pseudo-terminal the test owns
@@ -3629,7 +3630,7 @@ rules are 158 cells, after it 78 and none wider than 80; the status
 line's selection count and the cursor's group are the same on both
 sides. Linux here; Windows in CI (§ 7).
 
-## 6. The launcher photographs the workspace and `v` (TECH-13); QOL-13
+## The launcher photographs the workspace and `v` (TECH-13); QOL-13
 
 `runs\win\win_verify.ps1`: the C# helper queues keys into its own
 console's input (`WriteConsoleInput`, key down and up) from a thread,
@@ -3644,7 +3645,7 @@ owner's machine only.
 QOL-13 — the cell size Windows Terminal draws `v` at — is decided from
 that picture: open until the launcher has run.
 
-## 7. The model fetched by the doctor (NF-09)
+## The model fetched by the doctor (NF-09)
 
 `fetch::fetch_verified`: curl into a `.part` beside the destination, its
 growth the progress and the stall clock, then its size and SHA-256
@@ -3657,7 +3658,7 @@ the `.part` gone, the progress heard to the last byte. The doctor ends
 on the offer only on a terminal with no model and the deep tier built
 in; piped, nothing changes.
 
-## 8. Suite and CI
+## Suite and CI
 
 Here, `--profile ci`: 138 unit tests (1 ignored), the band test, 38
 end-to-end tests (3 ignored); the band test and the 38 again with the
@@ -3671,7 +3672,7 @@ test, 37 end-to-end (5 ignored) — the resize through
 `ResizePseudoConsole`, the filter and the preferred folder through the
 pseudo console among them — the Recycle Bin step, the doctor.
 
-## Not verified here
+## Phase 16 Not verified here
 
 - QOL-13 and the pictures of TECH-13: Windows Terminal on the owner's
   machine (`runs\win\RUN_VERIFY.cmd`).
@@ -3681,7 +3682,7 @@ pseudo console among them — the Recycle Bin step, the doctor.
 
 ---
 
-# VERIFICATION — Phase 17 (the fold: the output redesigned), 2026-11-13
+## VERIFICATION — Phase 17 (the fold: the output redesigned), 2026-11-13
 
 Environment: this container (Linux, Rust 1.97.0), the release build and
 `--profile ci`; the fold watched live in tmux (truecolour) at 120
@@ -3690,7 +3691,7 @@ and Windows (§ 6). Source: the owner's direction of 2026-11-13 after the
 Phase 16 run on Windows; items OUT-01, OUT-02, OUT-03, QOL-13
 (SHELVED § Phase 17).
 
-## 1. What the Phase 16 run on Windows showed
+## What the Phase 16 run on Windows showed
 
 `RUN_VERIFY.cmd` at `7a56971`, 2026-11-13, Windows 11 Home (build
 26300), Ryzen 7 9800X3D, Windows Terminal reached through Windows'
@@ -3715,7 +3716,7 @@ Its own pictures disagreed with two of those lines:
 - The summary's `v picture  PASS` meant a picture was taken, not that it
   showed `v`. The launcher now checks what the console shows (§ 5).
 
-## 2. A filter or a sort shows its own groups (OUT-03)
+## A filter or a sort shows its own groups (OUT-03)
 
 `workspace::Listing`: the listing rendered once per layout and width,
 keyed by row (group, member); the rows shown pick their lines at every
@@ -3724,7 +3725,7 @@ the body is NEAR 009, `castle.jpg` and `exports/castle_q60.jpg`, the bar
 `1 selected  52.7 KB … 1 of 12 groups`. On Windows: the launcher's
 `pictures` line (§ 5).
 
-## 3. Windows Terminal known by its window; the sixel cell (QOL-13)
+## Windows Terminal known by its window; the sixel cell (QOL-13)
 
 `preview::windows_terminal`: the console's window, or its root owner
 (`GetAncestor(GA_ROOTOWNER)`), of class `CASCADIA_HOSTING_WINDOW_CLASS`
@@ -3738,7 +3739,7 @@ tenth short. Type-checked here for `x86_64-pc-windows-msvc`; drawn on
 the owner's next run, the `pictures` line saying `v drew the pair
 inline` or why not.
 
-## 4. The fold (OUT-01)
+## The fold (OUT-01)
 
 The design is CLI.md §3a. `render::fold`: the live line (orbit, sheen,
 track or comet, rolling count, time) drawn by its own thread at 25
@@ -3777,7 +3778,7 @@ folds its four moves into one line and prints the undo line; `--undo`
 folds its four restores. Every other end-to-end test reads the full
 output (`DEDUPE_VERBOSE=1` in their environment).
 
-## 5. RUN_VERIFY, one line per workflow (OUT-02)
+## RUN_VERIFY, one line per workflow (OUT-02)
 
 `runs\win\win_verify.ps1`, rewritten; `RUN_VERIFY.cmd` unchanged. The
 screen: the `RUN_VERIFY` plate, the commit and the machine; then one line
@@ -3789,7 +3790,7 @@ of the launcher's C# helper) and folded to `✔`, `▲` or `✖` with its
 result, then one line for the run. What it reads out of each step:
 
 | line | live | folded |
-|---|---|---|
+| --- | --- | --- |
 | environment | — | Windows edition and build · rustc · Windows Terminal or the console host (by the window's class) · columns |
 | update | the command in hand | `old → new · N files changed`, or `already at …`; `win_verify.ps1 updated` (or `restored from the repo`) when the pull or checkout changed this script, whose fresh copy then runs on under these lines |
 | build | `compiling CRATE · N crates` | release · size · crates compiled |
@@ -3814,7 +3815,7 @@ the fold's lines drawn under Mono in tmux at 133 columns and looked at;
 the script ASCII with CRLF endings, so PowerShell 5.1 reads it without a
 byte-order mark. Not run here: PowerShell is not in this container.
 
-## 6. Suite and CI
+## Phase 17 Suite and CI
 
 Here, `--profile ci`: 141 unit tests (1 ignored), the band test, 39
 end-to-end tests (3 ignored); `cargo fmt --check`; clippy at `-D
@@ -3966,7 +3967,7 @@ cancels the one in progress, and skipped its jobs. The commit carrying
 this section, fa81ad4, ran it: run 43626771488, green on ubuntu-latest
 and windows-latest (fmt, clippy, the suite, the Windows bin tests).
 
-## Not verified here
+## Phase 17 Not verified here
 
 - The workspace in the fold in Windows Terminal: drawn here in tmux; on
   Windows at the launcher's next run, whose `pictures` line reads the

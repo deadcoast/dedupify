@@ -7,7 +7,7 @@ design is silent or in conflict; each one is reversible.
 
 ## 1. Grammar
 
-```
+```txt
 dedupe                                   interactive workflow menu
 dedupe <command> [PATH] [.] [img|vid]    native command
        [--skip NAME]… [--unskip NAME|all]… [--min SIZE] [-v]
@@ -21,7 +21,7 @@ Commands **[SPEC]**: `find`, `milk`, `purge`.
 Positional tokens are order-independent after the command **[CLAUDE]**:
 
 | token | meaning |
-|---|---|
+| --- | --- |
 | `PATH` | root directory; default is the current directory |
 | `.` | **all** — recurse into subdirectories **[SPEC]**. Absent ⇒ the root's own files only |
 | `img` / `image` | images only **[SPEC]** |
@@ -37,7 +37,7 @@ is needed — omitting PATH already means the current directory.
 Flags:
 
 | long | short | effect |
-|---|---|---|
+| --- | --- | --- |
 | `--help` | `-h` | **[SPEC]** proprietary help page |
 | `--doctor` | `-dr` | **[SPEC]** troubleshooting suite. `-dr` is two characters; POSIX would read it as `-d -r`. `dedupe` has no `-d` or `-r`, and the token is rewritten to `doctor` before parsing, so the spec's alias works literally **[CLAUDE]** |
 | `--dry-run` | `-n` | **[SPEC]** flag; short form **[CLAUDE]**, the convention of `make -n`, `rsync -n`, `git clean -n` |
@@ -74,6 +74,7 @@ complete).
 ## 2. Commands
 
 ### find **[SPEC]**
+
 Runs the full suite — the exact pipeline (size → sample → full hash), the
 near-duplicate image pass (DECODE → MATCH, NEAR groups) and the video
 pass (FRAMES → MATCH, VIDEO groups; needs `ffmpeg` and `ffprobe`, on
@@ -90,6 +91,7 @@ so `find . img` could list fifteen near duplicates and `milk .` answer
 **Formats** (Phase 10, RESEARCH §2.9–2.10) **[CLAUDE]**. Every image
 extension the scan accepts has a decoder (`decode.rs`), chosen by the
 file's bytes:
+
 - JPEG, PNG, GIF, WebP, BMP, TIFF, ICO: the `image` crate, EXIF
   orientation applied;
 - HEIC, HEIF, AVIF (`.heic .heif .hif .avif`): the container is read
@@ -118,7 +120,7 @@ same folder, same name — is `pair  RAW + JPEG`: `milk` and `purge` leave
 it with its RAW (`kept~`, counted on its own footer line), the workspace
 offers it by hand. A byte copy of a RAW is an exact duplicate as always.
 
-```
+```txt
  NEAR 002   1 similar  +1 pair   14.7 KB reclaimable
    keep  dcim/IMG_0041.CR2      RAW          1.12 MB  2020-09-13
    pair  dcim/IMG_0041.JPG      1200×800     84.2 KB  RAW + JPEG
@@ -134,28 +136,28 @@ one-line bar under the listing; Phase 9 made it a screen; Phase 17 drew
 it in the fold **[CLAUDE; the owner's direction of 2026-11-13: the whole
 output redesigned, long lists of one kind folded to a line]**:
 
-```
+```txt
  [dedupe] find  C:\Photos   recursive · images
 
-╭─ GROUPS  as listed ───────────────────────────╮ ╭─ shot_a.jpg ──────────────────────────────────────╮
-│ COPIES    2 groups · 339 KB · 2 chosen  ──────│ │                                                   │
-│ ■ starry_night.jpg  +1    301 KB ████   in ex…│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │
-│ SIMILAR   10 groups · 2.69 MB · 11 chosen  ───│ │ (the keeper, in half      ≈ (the file under the    │
-│ ■ graf1.png         +1    961 KB ███████ mirr…│ │  blocks, 24-bit colour)     cursor, the same)      │
-│ ■ shot_a.jpg        +4    935 KB ███████ same…│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀ │
-│▸ ├ keep  shot_a.jpg                     536 KB│ │                                                   │
-│■ ├ near  exports/shot_a_export.jpg      229 KB│ │ keep                      near                    │
-│■ ├ near  aloeL.jpg                      313 KB│ │ shot_a.jpg                shot_a_export.jpg       │
-│· ├ kin   shot_b.jpg                     647 KB│ │ the top folder            exports                 │
-│■ └ near  exports/shot_a_stripped.jpg    392 KB│ │ 1282×1110  536 KB         961×832  229 KB         │
-│■ rubberwhale1.png   +1    358 KB ███    re-e…│ │ 2026-11-09                2026-11-09              │
-│□ right01.jpg        +2       0 B        unco…│ │                                                   │
-│                                               │ │ resized 75%                                       │
-│                                               │ │                                                   │
-│                                               │ │ dHash   ──────────────┊─────────   0  at most 10  within │
-│                                               │ │ pHash   ──────────────┊─────────   0  at most 14  within │
-│                                               │ │ PDQ     ━─────────────┊─────────   2  at most 31  within │
-╰───────────────────────────────────────────────╯ ╰───────────────────────────────────────────────────╯
+╭─ GROUPS  as listed ────────────────────────────╮ ╭─ shot_a.jpg ──────────────────────────────────────╮
+│ COPIES    2 groups · 339 KB · 2 chosen  ───────│ │                                                   │
+│ ■ starry_night.jpg  +1    301 KB ████   in ex……│ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   │
+│ SIMILAR   10 groups · 2.69 MB · 11 chosen  ────│ │ (the keeper, in half      ≈ (the file under the   │
+│ ■ graf1.png         +1    961 KB ███████ mirr… │ │  blocks, 24-bit colour)     cursor, the same)     │
+│ ■ shot_a.jpg        +4    935 KB ███████ same… │ │ ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀   │
+│ ▸ ├ keep  shot_a.jpg                     536 KB│ │                                                   │
+│ ■ ├ near  exports/shot_a_export.jpg      229 KB│ │ keep                      near                    │
+│ ■ ├ near  aloeL.jpg                      313 KB│ │ shot_a.jpg                shot_a_export.jpg       │
+│ · ├ kin   shot_b.jpg                     647 KB│ │ the top folder            exports                 │
+│ ■ └ near  exports/shot_a_stripped.jpg    392 KB│ │ 1282×1110  536 KB         961×832  229 KB         │
+│ ■ rubberwhale1.png   +1    358 KB ███    re-e……│ │ 2026-11-09                2026-11-09              │
+│ □ right01.jpg        +2       0 B        unco……│ │                                                   │
+│                                                │ │ resized 75%                                       │
+│                                                │ │                                                   │
+│                                                │ │ dHash   ──────────────┊─────────   0  at most 10  │
+│                                                │ │ pHash   ──────────────┊─────────   0  at most 14  │
+│                                                │ │ PDQ     ━─────────────┊─────────   2  at most 31  │
+╰────────────────────────────────────────────────╯ ╰───────────────────────────────────────────────────╯
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  13 selected  3.03 MB of 3.03 MB                                                       group 4/12
    ↑↓ move  space select  a all  k keeper  c other shots  v view  o reveal  g go to  / filter …
@@ -236,7 +238,7 @@ gauge rolls to it over the same frames. A key pressed during the frames
 ends them at once and is taken.
 
 | mark | meaning |
-|---|---|
+| --- | --- |
 | `■` | will be acted on |
 | `□` | could be, is not: deselected, or grouped and not confirmed (off until chosen) |
 | `◧` | a group with some of its members chosen |
@@ -269,7 +271,7 @@ choice of frame and did no better than taking the first (VERIFICATION
 § Phase 11).
 
 | key | what happens |
-|---|---|
+| --- | --- |
 | `↑` `↓`, PgUp PgDn, Home End | move the cursor; the window scrolls, and a group's header comes into view with its first member |
 | `space` | on a file: choose it or not; on a header: anything chosen → nothing, nothing chosen → the group's confirmed members (or, when it has none, the rest, by hand) |
 | `a` | anything chosen → nothing; nothing chosen → the program's own choice |
@@ -299,6 +301,7 @@ Piped, or with stdin not a terminal, none of this runs: `find` prints
 the `next` lines, as it always has.
 
 ### milk **[SPEC]**
+
 `find`, then moves every confirmed duplicate into `<root>/_milked/`, created
 if absent — the exact duplicates and the near duplicates `find` just
 listed, by the same full suite. Confirmed means what it means for
@@ -310,7 +313,7 @@ moved. A `kin` member (another capture moment) is never moved.
 The relative path under the root is preserved inside `_milked`
 (`a/b/x.jpg` → `_milked/a/b/x.jpg`) so a milked tree can be inspected or
 restored by hand **[CLAUDE]**. A name collision inside `_milked` appends
-` (2)`, ` (3)`, … before the extension **[CLAUDE]**. `_milked` is never
+`(2)`, `(3)`, … before the extension **[CLAUDE]**. `_milked` is never
 scanned, so running `milk` twice is idempotent.
 
 Across volumes (Phase 10) **[CLAUDE]**: when a file is on another volume
@@ -333,6 +336,7 @@ Recycle Bin would not take (a network drive, a volume without a bin);
 each is a change of its own, undone by its own `u` (SC-07).
 
 ### purge **[SPEC]**
+
 The full suite with byte-for-byte verification of each exact duplicate
 against its keeper before the bin call, and the near-duplicate image and
 video passes as `find` and `milk` run them. Near duplicates
@@ -350,6 +354,7 @@ token, only that kind is scanned (`img` → images and their pass, `vid` →
 videos and theirs; no token → both).
 
 ### doctor **[SPEC]**
+
 Checks and prints PASS / WARN / FAIL with a one-line fix for each:
 terminal colour and Unicode support, terminal width, journal directory
 writable, root readable and writable, `_milked` present and its size
@@ -452,7 +457,7 @@ second, so it moves while a stage is silent (a large file hashing):
 What each section says when it folds:
 
 | section | segments, in order |
-|---|---|
+| --- | --- |
 | files | count · bytes · not listed (warn) · skipped · under the size floor · online only · bin and system folders · empty |
 | copies | copies beyond the keepers `in` groups · bytes they free · the quick tier (warn) · unreadable (warn) · hard links collapsed; or `no exact copies` |
 | similar | the members milk and purge take (confirmed) `in` groups · bytes they free · timed out, need ffmpeg, ffmpeg could not decode (warn) · the tally · `with the deep model` · not decoded; or `none among N images` / `nothing to compare in N images` |
@@ -511,7 +516,7 @@ with a third: the same `find` with `-v`, every group and file.
 **Hues.**
 
 | section | hue |
-|---|---|
+| --- | --- |
 | files | plate `#E8E4D8` |
 | copies | amber `#FFB000` |
 | similar | blue `#5FB3FF` |
@@ -578,7 +583,7 @@ Rules the renderer enforces:
 Palette:
 
 | role | colour | used for |
-|---|---|---|
+| --- | --- | --- |
 | plate | `#E8E4D8` | primary text |
 | keep | `#FFB000` | keeper lines, selected menu item |
 | dupe | `#8A8A8A` | duplicate lines, secondary text |
