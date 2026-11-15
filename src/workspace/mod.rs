@@ -326,8 +326,18 @@ impl Gallery {
                 pics.iter().filter(|p| !self.shown.contains(p)).collect(),
             )
         };
+        // what the screen held below its last line goes (the first time, or
+        // when the screen got shorter): cleared from the end of the last
+        // line, which is written for it — a cursor moved below the last
+        // row would land on it and clear it
+        let clear_below = lines.len() < self.prev.len() || self.prev.is_empty();
+        if lines.is_empty() && clear_below {
+            queue!(out, cursor::MoveTo(0, 0))?;
+            queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+        }
         for (i, l) in lines.iter().enumerate() {
-            let changed = self.prev.get(i) != Some(l);
+            let last = clear_below && i + 1 == lines.len();
+            let changed = self.prev.get(i) != Some(l) || last;
             let under_gone = !kitty && gone.iter().any(|p| (p.row..p.row + p.ch).contains(&i));
             if !changed && !under_gone {
                 continue;
@@ -348,10 +358,9 @@ impl Gallery {
             queue!(out, cursor::MoveTo(at as u16, i as u16))?;
             out.write_all(crate::util::slice_sgr(l, at, usize::MAX).as_bytes())?;
             queue!(out, terminal::Clear(terminal::ClearType::UntilNewLine))?;
-        }
-        if lines.len() < self.prev.len() || self.prev.is_empty() {
-            queue!(out, cursor::MoveTo(0, lines.len() as u16))?;
-            queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+            if last {
+                queue!(out, terminal::Clear(terminal::ClearType::FromCursorDown))?;
+            }
         }
         for p in fresh {
             queue!(out, cursor::MoveTo(p.col as u16, p.row as u16))?;
@@ -1057,6 +1066,23 @@ mod gallery_tests {
         let q = pic(1, 0, 4, 2, "<B>");
         let back = run(&mut g, &["t", "", "", "e"], std::slice::from_ref(&q));
         assert!(back.contains("<B>") && !back.contains("<A>"), "{back:?}");
+    }
+
+    #[test]
+    fn the_last_line_stays_when_what_is_below_it_is_cleared() {
+        // the screen is the terminal's full height: nothing may move the
+        // cursor below the last row (it would land on it) and clear there
+        let mut g = Gallery::new(preview::Protocol::None);
+        let first = run(&mut g, &["title", "body", "keys"], &[]);
+        let at_keys = first.rfind("keys").unwrap();
+        assert!(
+            first[at_keys..].starts_with("keys\x1b[K\x1b[J"),
+            "{first:?}"
+        );
+        assert!(!first.contains("\x1b[4;1H"), "{first:?}");
+        // shorter: its new last line is written again, then the rest cleared
+        let shorter = run(&mut g, &["title", "body"], &[]);
+        assert!(shorter.ends_with("body\x1b[K\x1b[J"), "{shorter:?}");
     }
 
     #[test]

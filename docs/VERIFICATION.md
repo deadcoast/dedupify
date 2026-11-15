@@ -4261,9 +4261,23 @@ the picture; a sharp picture fills its cells at its proportions, up or
 down. `b` acts only where pictures are drawn, and only there is it on
 the key card.
 
+CI on 90f5816 (run 43689310949) failed three workspace tests on
+windows-latest: the screen's bottom line — the selection and the keys —
+was gone. The first drawing cleared what lay below the screen by moving
+the cursor to the row after the last; the screen is the terminal's full
+height, so the move stopped on the last row and the clear took the
+bottom line with it. Windows' pseudo console renders its own buffer, so
+the tests there saw the erased line; the Linux tests read the stream, in
+which the line had been written before it was cleared. The emulator's
+renders above showed it too (no bottom line), and the review of them
+missed it. Now the clear runs from the end of the last line, which is
+written for it (`the_last_line_stays_when_what_is_below_it_is_cleared`);
+rendered again: the bottom line there, `13 selected  3.03 MB of 3.03 MB`
+and its keycaps, and the keeper's message after `space`.
+
 ## Tests
 
-Suite here: 161 unit, 42 end to end; `cargo fmt --check` and clippy
+Suite here: 162 unit, 42 end to end; `cargo fmt --check` and clippy
 `-D warnings` clean, clippy for the Windows target
 (`--no-default-features --features blake3/pure`) clean.
 
